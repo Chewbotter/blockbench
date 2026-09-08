@@ -9,6 +9,7 @@ import './mesh/merge_split'
 import './mesh/import_obj'
 import { autoFixMeshEdit } from './mesh/auto_fix'
 import { sameMeshEdge } from './mesh/util';
+import { fillSelectedRim } from './mesh/fill_rim';
 import { PointerTarget } from '../interface/pointer_target';
 
 export function uncorruptMesh() {
@@ -383,6 +384,7 @@ BARS.defineActions(function() {
 				let selected_vertices = mesh.getSelectedVertices();
 				let selected_faces = mesh.getSelectedFaces(true);
 				selected_faces.empty();
+				let rim_faces;
 				if (selected_vertices.length >= 2 && selected_vertices.length <= 4) {
 					let reference_face;
 					let reference_face_strength = 0;
@@ -477,6 +479,11 @@ BARS.defineActions(function() {
 							}
 						}
 					}
+				} else if (selected_vertices.length > 4 && (rim_faces = fillSelectedRim(mesh, selected_vertices))) {
+					// The selection is a single closed rim: tiled with flat faces
+					selected_faces.push(...rim_faces);
+					faces_to_autouv.push(...rim_faces);
+
 				} else if (selected_vertices.length > 4) {
 					let reference_face;
 					for (let key in mesh.faces) {
