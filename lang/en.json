@@ -2157,6 +2157,8 @@
 	"action.auto_set_cullfaces": "Set Cullfaces Automatically",
 	"action.auto_set_cullfaces.desc": "Automatically generate cullfaces to hide faces when they are covered by the neighboring block.",
 	"action.move_texture_with_uv": "Move Texture with UV",
+	"action.uv_snap": "Snap UV",
+	"action.uv_snap.desc": "Snap UV vertices to the pixel grid while dragging. Turn off for free movement",
 	"action.move_texture_with_uv.desc": "Move the texture of the face along when dragging UV faces",
 
 	"action.add_animation": "Add Animation",

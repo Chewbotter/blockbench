@@ -2671,6 +2671,12 @@ BARS.defineActions(function() {
 		category: 'uv',
 		condition: {modes: ['edit']}
 	})
+	new Toggle('uv_snap', {
+		icon: 'grid_on',
+		category: 'uv',
+		default: true,
+		condition: {modes: ['edit']}
+	})
 })
 
 
@@ -2702,6 +2708,7 @@ Interface.definePanels(function() {
 					'uv_mirror_x',
 					'uv_mirror_y',
 					'auto_unwrap',
+					'uv_snap',
 					'uv_rotation',
 					//Box
 					'toggle_mirror_uv',
@@ -3481,6 +3488,12 @@ Interface.definePanels(function() {
 						if (uv_grid == false) {
 							step_x = (scope.inner_width / scope.texture.width / snap);
 							step_y = (scope.inner_height / scope.texture.height / snap);
+
+						} else if (snap == undefined && BarItems.uv_snap && !BarItems.uv_snap.value) {
+							// Snapping off: effectively free movement
+							snap = 4096;
+							step_x = (scope.inner_width / UVEditor.getResolution(0) / snap);
+							step_y = (scope.inner_height / UVEditor.getResolution(1) / snap);
 
 						} else if (snap == undefined) {
 							snap = UVEditor.grid / canvasGridSize(e1.shiftKey || Pressing.overrides.shift, e1.ctrlOrCmd || Pressing.overrides.ctrl);
