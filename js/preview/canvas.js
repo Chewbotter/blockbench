@@ -770,12 +770,31 @@ export const Canvas = {
 			var copy = mesh.outline.clone();
 			copy.geometry = mesh.outline.geometry.clone();
 
-			// Ghost outlines get their own material so their opacity can differ from the live outline
+			// Ghost outlines get their own material so they can be dashed and fainter than the live outline
 			let opacity = Math.clamp((settings.ghost_outline_opacity?.value ?? 100) / 100, 0, 1);
-			if (opacity < 1) {
-				copy.material = mesh.outline.material.clone();
-				copy.material.transparent = true;
-				copy.material.opacity = opacity;
+			let dashed = settings.ghost_outline_dashed?.value ?? false;
+			if (opacity < 1 || dashed) {
+				let source = mesh.outline.material;
+				if (dashed) {
+					// Dash length follows the gizmo scale so it looks the same at any zoom level
+					let scale = Preview.selected ? Preview.selected.calculateControlScale(copy.position) : 1;
+					// Light, dashed and faint: clearly not a live edge
+					copy.material = new THREE.LineDashedMaterial({
+						color: 0xffffff,
+						vertexColors: false,
+						linewidth: source.linewidth,
+						depthTest: source.depthTest,
+						transparent: true,
+						opacity,
+						dashSize: scale * 4,
+						gapSize: scale * 3,
+					});
+					copy.computeLineDistances();
+				} else {
+					copy.material = source.clone();
+					copy.material.transparent = true;
+					copy.material.opacity = opacity;
+				}
 			}
 
 			THREE.fastWorldPosition(mesh, copy.position);
