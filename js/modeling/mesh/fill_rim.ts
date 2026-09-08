@@ -1,24 +1,25 @@
 /**
- * Closing an open rim with faces.
+ * Closing open rims with faces.
  *
- * Given the selected vertices of a mesh, finds the single closed loop of open edges
- * (edges used by exactly one face) that runs through all of them, then tiles that loop
- * with quads (and a triangle when the count is odd). The loop is split recursively at the
+ * A rim is a closed loop of open edges (edges used by exactly one face). A loop is tiled
+ * with quads (and a triangle when the count is odd) by splitting it recursively at the
  * diagonal that keeps both halves as flat as possible, so a bent rim gets its crease and a
  * flat rim gets an orderly cap. New faces are oriented to match their neighbours.
  */
 
 type Vec3 = ArrayVector3;
+type RimLoop = {loop: string[], reference_face: MeshFace};
 
 function edgeKey(a: string, b: string) {
 	return a < b ? a + '|' + b : b + '|' + a;
 }
 
 /**
- * Returns the rim loop in order, or null if the selected vertices do not form exactly one closed loop of open edges.
+ * Finds every closed loop of open edges whose vertices are all in `candidates`.
+ * Vertices that are not on exactly two such open edges are ignored.
  */
-export function findSelectedRimLoop(mesh: Mesh, selected: string[]): {loop: string[], reference_face: MeshFace} | null {
-	if (selected.length < 3) return null;
+export function findRimLoops(mesh: Mesh, candidates: string[]): RimLoop[] {
+	if (candidates.length < 3) return [];
 
 	let edge_usage = new Map<string, {edge: [string, string], count: number, face: MeshFace}>();
 	for (let fkey in mesh.faces) {
@@ -38,33 +39,44 @@ export function findSelectedRimLoop(mesh: Mesh, selected: string[]): {loop: stri
 	}
 
 	let adjacency = new Map<string, string[]>();
-	let reference_face: MeshFace;
+	let edge_faces = new Map<string, MeshFace>();
 	for (let {edge, count, face} of edge_usage.values()) {
 		if (count != 1) continue;
-		if (!selected.includes(edge[0]) || !selected.includes(edge[1])) continue;
-		if (!reference_face) reference_face = face;
+		if (!candidates.includes(edge[0]) || !candidates.includes(edge[1])) continue;
 		if (!adjacency.has(edge[0])) adjacency.set(edge[0], []);
 		if (!adjacency.has(edge[1])) adjacency.set(edge[1], []);
 		adjacency.get(edge[0]).push(edge[1]);
 		adjacency.get(edge[1]).push(edge[0]);
-	}
-	for (let vkey of selected) {
-		if ((adjacency.get(vkey)?.length ?? 0) != 2) return null;
+		edge_faces.set(edgeKey(edge[0], edge[1]), face);
 	}
 
-	let loop = [selected[0]];
-	let previous: string = null;
-	let current = selected[0];
-	while (true) {
-		let next = adjacency.get(current).find(vkey => vkey != previous);
-		if (next == loop[0]) break;
-		if (!next || loop.includes(next) || loop.length > selected.length) return null;
-		loop.push(next);
-		previous = current;
-		current = next;
+	let loops: RimLoop[] = [];
+	let visited = new Set<string>();
+	for (let start of candidates) {
+		if (visited.has(start) || adjacency.get(start)?.length != 2) continue;
+		let loop = [start];
+		let previous: string = null;
+		let current = start;
+		let closed = false;
+		while (true) {
+			let neighbours = adjacency.get(current);
+			if (!neighbours || neighbours.length != 2) break;
+			let next = neighbours.find(vkey => vkey != previous);
+			if (next == start) {
+				closed = true;
+				break;
+			}
+			if (!next || loop.includes(next)) break;
+			loop.push(next);
+			previous = current;
+			current = next;
+		}
+		loop.forEach(vkey => visited.add(vkey));
+		if (closed && loop.length >= 3) {
+			loops.push({loop, reference_face: edge_faces.get(edgeKey(loop[0], loop[1]))});
+		}
 	}
-	if (loop.length != selected.length) return null;
-	return {loop, reference_face};
+	return loops;
 }
 
 function distance(a: Vec3, b: Vec3) {
@@ -138,35 +150,8 @@ function edgeDirection(face: MeshFace, a: string, b: string): number {
 	return 0;
 }
 
-/**
- * Fills the rim formed by the selected vertices. Returns the keys of the new faces, or null if the selection is not a single closed rim.
- */
-export function fillSelectedRim(mesh: Mesh, selected: string[]): string[] | null {
-	let rim = findSelectedRimLoop(mesh, selected);
-	if (!rim) return null;
-	let {loop, reference_face} = rim;
-
-	let scale = 0;
-	for (let i = 0; i < loop.length; i++) {
-		for (let j = i + 1; j < loop.length; j++) {
-			scale = Math.max(scale, distance(mesh.vertices[loop[i]], mesh.vertices[loop[j]]));
-		}
-	}
-
-	let pieces: string[][] = [];
-	splitLoop(mesh, loop, scale, pieces);
-
-	let new_keys: string[] = [];
-	let new_faces: MeshFace[] = [];
-	for (let piece of pieces) {
-		if (piece.length < 3) continue;
-		let face = new MeshFace(mesh, {vertices: piece, texture: reference_face?.texture});
-		let [key] = mesh.addFaces(face);
-		new_keys.push(key);
-		new_faces.push(face);
-	}
-
-	// Orient: a face sharing an edge with an already oriented face must traverse that edge the opposite way
+/** Orients the given new faces so that each shares every edge with its neighbour in opposite directions */
+function orientNewFaces(mesh: Mesh, new_faces: MeshFace[]) {
 	let oriented = new Set<MeshFace>();
 	for (let fkey in mesh.faces) {
 		if (!new_faces.includes(mesh.faces[fkey])) oriented.add(mesh.faces[fkey]);
@@ -195,5 +180,48 @@ export function fillSelectedRim(mesh: Mesh, selected: string[]): string[] | null
 			}
 		}
 	}
+}
+
+/** Tiles one rim loop with faces. Returns the new face keys. */
+export function fillRimLoop(mesh: Mesh, {loop, reference_face}: RimLoop): string[] {
+	let scale = 0;
+	for (let i = 0; i < loop.length; i++) {
+		for (let j = i + 1; j < loop.length; j++) {
+			scale = Math.max(scale, distance(mesh.vertices[loop[i]], mesh.vertices[loop[j]]));
+		}
+	}
+	let pieces: string[][] = [];
+	splitLoop(mesh, loop, scale, pieces);
+
+	let new_keys: string[] = [];
+	let new_faces: MeshFace[] = [];
+	for (let piece of pieces) {
+		if (piece.length < 3) continue;
+		let face = new MeshFace(mesh, {vertices: piece, texture: reference_face?.texture});
+		let [key] = mesh.addFaces(face);
+		new_keys.push(key);
+		new_faces.push(face);
+	}
+	orientNewFaces(mesh, new_faces);
 	return new_keys;
+}
+
+/**
+ * Fills the rim formed by the selected vertices. Returns the keys of the new faces,
+ * or null if the selection is not exactly one closed rim covering all selected vertices.
+ */
+export function fillSelectedRim(mesh: Mesh, selected: string[]): string[] | null {
+	let loops = findRimLoops(mesh, selected);
+	if (loops.length != 1 || loops[0].loop.length != selected.length) return null;
+	return fillRimLoop(mesh, loops[0]);
+}
+
+/** Fills every closed rim found among the candidate vertices. */
+export function fillAllRims(mesh: Mesh, candidates: string[]): {faces: string[], loops: number} {
+	let loops = findRimLoops(mesh, candidates);
+	let faces: string[] = [];
+	for (let loop of loops) {
+		faces.push(...fillRimLoop(mesh, loop));
+	}
+	return {faces, loops: loops.length};
 }

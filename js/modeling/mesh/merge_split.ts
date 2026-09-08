@@ -1,4 +1,5 @@
 import { THREE } from './../../lib/libs';
+import { fillAllRims } from './fill_rim';
 
 export function cleanupOverlappingMeshFaces(mesh: Mesh) {
 	for (let fkey in mesh.faces) {
@@ -262,55 +263,115 @@ BARS.defineActions(() => {
 			Undo.initEdit({elements});
 
 			Mesh.selected.forEach(mesh => {
-
-				let selected_vertices = mesh.getSelectedVertices();
-				let mesh_selection = Project.mesh_selection[mesh.uuid];
-
-				let copy = new Mesh(mesh);
-				elements.push(copy);
-
-				for (let fkey in mesh.faces) {
-					let face = mesh.faces[fkey];
-					if (face.isSelected(fkey)) {
-						delete mesh.faces[fkey];
-					} else {
-						delete copy.faces[fkey];
-					}
-				}
-
-				selected_vertices.forEach(vkey => {
-					let used = false;
-					for (let key in mesh.faces) {
-						let face = mesh.faces[key];
-						if (face.vertices.includes(vkey)) used = true;
-					}
-					if (!used) {
-						delete mesh.vertices[vkey];
-					}
-				})
-				Object.keys(copy.vertices).filter(vkey => !selected_vertices.includes(vkey)).forEach(vkey => {
-					let used = false;
-					for (let key in copy.faces) {
-						let face = copy.faces[key];
-						if (face.vertices.includes(vkey)) used = true;
-					}
-					if (!used) {
-						delete copy.vertices[vkey];
-					}
-				})
-
-				copy.name += '_selection'
-				copy.sortInBefore(mesh, 1).init();
-				delete Project.mesh_selection[mesh.uuid];
-				Project.mesh_selection[copy.uuid] = mesh_selection;
-				mesh.preview_controller.updateGeometry(mesh);
-				selected[selected.indexOf(mesh)] = copy;
+				splitSelectedFaces(mesh, elements);
 			})
-			Undo.finishEdit('Merge meshes');
+			Undo.finishEdit('Split mesh');
 			updateSelection();
 			Canvas.updateView({elements, element_aspects: {geometry: true, uv: true, faces: true}, selection: true})
 		}
 	})
+	new Action('split_closed_mesh', {
+		icon: 'content_cut',
+		category: 'edit',
+		condition: {
+			modes: ['edit'],
+			features: ['meshes'],
+			method: () => !!(Mesh.selected[0] && Mesh.selected[0].getSelectedFaces().length)
+		},
+		click() {
+			let elements = Mesh.selected.slice();
+			Undo.initEdit({elements});
+
+			let open_rims_left = 0;
+			let caps_by_mesh: {mesh: Mesh, faces: string[]}[] = [];
+			Mesh.selected.forEach(mesh => {
+				// Vertices shared between selected and unselected faces are where the cut opens both meshes
+				let selected_faces = mesh.getSelectedFaces();
+				let inside = new Set<string>(), outside = new Set<string>();
+				for (let fkey in mesh.faces) {
+					let target = selected_faces.includes(fkey) ? inside : outside;
+					mesh.faces[fkey].vertices.forEach(vkey => target.add(vkey));
+				}
+				let cut_vertices = [...inside].filter(vkey => outside.has(vkey));
+
+				let copy = splitSelectedFaces(mesh, elements);
+
+				for (let part of [mesh, copy]) {
+					let present = cut_vertices.filter(vkey => part.vertices[vkey]);
+					let result = fillAllRims(part, present);
+					if (present.length && !result.loops) open_rims_left++;
+					caps_by_mesh.push({mesh: part, faces: result.faces});
+					part.preview_controller.updateGeometry(part);
+				}
+			})
+
+			// Auto-UV the caps; setAutoSize works on the selected elements, so select each mesh in turn
+			let selection_backup = Outliner.selected.slice();
+			for (let {mesh, faces} of caps_by_mesh) {
+				if (!faces.length) continue;
+				Outliner.selected.replace([mesh]);
+				UVEditor.setAutoSize(null, true, faces);
+			}
+			Outliner.selected.replace(selection_backup);
+
+			Undo.finishEdit('Split closed mesh');
+			updateSelection();
+			Canvas.updateView({elements, element_aspects: {geometry: true, uv: true, faces: true}, selection: true})
+			if (open_rims_left) {
+				Blockbench.showQuickMessage('message.split_closed_mesh.open_rim', 2500);
+			}
+		}
+	})
+
+	/**
+	 * Moves the selected faces of the mesh into a new mesh, which is added to `elements` and becomes the selected one.
+	 * Shared vertices are kept in both meshes.
+	 */
+	function splitSelectedFaces(mesh: Mesh, elements: OutlinerElement[]): Mesh {
+		let selected_vertices = mesh.getSelectedVertices();
+		let mesh_selection = Project.mesh_selection[mesh.uuid];
+
+		let copy = new Mesh(mesh);
+		elements.push(copy);
+
+		for (let fkey in mesh.faces) {
+			let face = mesh.faces[fkey];
+			if (face.isSelected(fkey)) {
+				delete mesh.faces[fkey];
+			} else {
+				delete copy.faces[fkey];
+			}
+		}
+
+		selected_vertices.forEach(vkey => {
+			let used = false;
+			for (let key in mesh.faces) {
+				let face = mesh.faces[key];
+				if (face.vertices.includes(vkey)) used = true;
+			}
+			if (!used) {
+				delete mesh.vertices[vkey];
+			}
+		})
+		Object.keys(copy.vertices).filter(vkey => !selected_vertices.includes(vkey)).forEach(vkey => {
+			let used = false;
+			for (let key in copy.faces) {
+				let face = copy.faces[key];
+				if (face.vertices.includes(vkey)) used = true;
+			}
+			if (!used) {
+				delete copy.vertices[vkey];
+			}
+		})
+
+		copy.name += '_selection'
+		copy.sortInBefore(mesh, 1).init();
+		delete Project.mesh_selection[mesh.uuid];
+		Project.mesh_selection[copy.uuid] = mesh_selection;
+		mesh.preview_controller.updateGeometry(mesh);
+		selected[selected.indexOf(mesh)] = copy;
+		return copy;
+	}
 })
 
 const global = {

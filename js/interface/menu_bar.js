@@ -322,6 +322,7 @@ export const MenuBar = {
 			new MenuSeparator('element'),
 			'apply_mesh_rotation',
 			'split_mesh',
+			'split_closed_mesh',
 			'merge_meshes',
 		], {icon: 'fa-gem', condition: {selected: {mesh: true}, modes: ['edit']}})
 

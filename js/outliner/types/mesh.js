@@ -998,6 +998,7 @@ export class Mesh extends OutlinerElement {
 		new MenuSeparator('mesh_combination'),
 		'apply_mesh_rotation',
 		'split_mesh',
+		'split_closed_mesh',
 		'merge_meshes',
 		...Outliner.control_menu_group,
 		new MenuSeparator('settings'),
