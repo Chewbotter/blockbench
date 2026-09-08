@@ -145,7 +145,7 @@ export const Vertexsnap = {
 			Vertexsnap.move_origin = data.vertex instanceof Array ? data.vertex.allEqual(0) : false;
 			Vertexsnap.elements = Outliner.selected.slice();
 			Vertexsnap.groups = Group.multi_selected.slice();
-			if (data.element instanceof Mesh && BarItems.selection_mode.value == 'vertex') {
+			if (data.element instanceof Mesh && Mesh.isVertexSelectionMode()) {
 				let vertices = data.element.getSelectedVertices(true);
 				vertices.safePush(data.vertex);
 			}

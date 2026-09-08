@@ -421,6 +421,11 @@ new Property(MeshFace, 'array', 'vertices');
 
 
 export class Mesh extends OutlinerElement {
+	/** True in vertex mode and in welding mode (vertex mode with weld-on-drop) */
+	static isVertexSelectionMode() {
+		let mode = BarItems.selection_mode?.value;
+		return mode == 'vertex' || mode == 'weld';
+	}
 	constructor(data, uuid) {
 		super(data, uuid)
 
@@ -1558,7 +1563,7 @@ new NodePreviewController(Mesh, {
 		let selected_edges = element.getSelectedEdges();
 		let selected_faces = element.getSelectedFaces();
 
-		if (BarItems.selection_mode.value == 'vertex') {
+		if (Mesh.isVertexSelectionMode()) {
 			let colors = [];
 			for (let key in element.vertices) {
 				let color;
@@ -1630,7 +1635,7 @@ new NodePreviewController(Mesh, {
 		mesh.outline.geometry.setAttribute('color', new THREE.Float32BufferAttribute(line_colors, 3));
 		mesh.outline.geometry.needsUpdate = true;
 		
-		mesh.vertex_points.visible = ((Mode.selected.id == 'edit' && BarItems.selection_mode.value == 'vertex') || Toolbox.selected.id == 'knife_tool') && element.selected;
+		mesh.vertex_points.visible = ((Mode.selected.id == 'edit' && Mesh.isVertexSelectionMode()) || Toolbox.selected.id == 'knife_tool') && element.selected;
 		if (Toolbox.selected.id == 'weight_brush') mesh.vertex_points.visible = true;
 
 		this.dispatchEvent('update_selection', {element});
@@ -1790,7 +1795,7 @@ new NodePreviewController(Mesh, {
 			// Object mode subtract is handled by the caller, only report overlap here
 			subtract_selection = false;
 		}
-		if (selection_mode == 'vertex') {
+		if (selection_mode == 'vertex' || selection_mode == 'weld') {
 			if (subtract_selection) {
 				let removed = [];
 				for (let vkey of mesh_selection.vertices.slice()) {

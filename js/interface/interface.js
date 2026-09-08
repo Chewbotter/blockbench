@@ -726,7 +726,7 @@ onVueSetup(function() {
 						})
 						this.selection_info = tl('status_bar.selection.edges', `${selected} / ${total}`);
 					}
-					if (selection_mode == 'vertex') {
+					if (selection_mode == 'vertex' || selection_mode == 'weld') {
 						let total = 0, selected = 0;
 						Mesh.selected.forEach(mesh => total += Object.keys(mesh.vertices).length);
 						Mesh.selected.forEach(mesh => selected += mesh.getSelectedVertices().length);

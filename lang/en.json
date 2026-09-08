@@ -435,6 +435,7 @@
 	"message.auto_fix_mesh_edit.overlapping_vertices": "Certain vertices have been moved into the same spot. How would you like to proceed?",
 	"message.auto_fix_mesh_edit.concave_quads": "One or more quad faces are now concave, which can cause issues in UV-mapping and rendering. Blockbench can automatically fix it for you:",
 	"message.auto_fix_mesh_edit.merge_vertices": "Merge Vertices",
+	"message.welded_vertex": "Welded vertex",
 	"message.auto_fix_mesh_edit.split_quads": "Split Quads",
 
 	"message.merged_vertices": "Found and merged %0 vertices in %1 locations",
@@ -1830,6 +1831,7 @@
 	"action.selection_mode.face": "Face",
 	"action.selection_mode.edge": "Edge",
 	"action.selection_mode.vertex": "Vertex",
+	"action.selection_mode.weld": "Welding Vertex",
 	"action.slider_weight_brush_size": "Weight Brush Size",
 	"action.slider_weight_brush_limit": "Weight Brush Limit",
 	"action.slider_weight_brush_limit.desc": "Set an upper limit for how much weight the weight brush can assign to a vertex",

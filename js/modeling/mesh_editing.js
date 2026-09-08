@@ -113,7 +113,7 @@ SharedActions.add('delete', {
 					})
 				})
 
-			} else if (BarItems.selection_mode.value == 'vertex' && selected_vertices.length < Object.keys(mesh.vertices).length) {
+			} else if (Mesh.isVertexSelectionMode() && selected_vertices.length < Object.keys(mesh.vertices).length) {
 				selected_vertices.forEach(vkey => {
 					for (let key in mesh.faces) {
 						let face = mesh.faces[key];
@@ -158,7 +158,7 @@ SharedActions.add('select_all', {
 	priority: 1,
 	run() {
 		let selection_mode = BarItems.selection_mode.value;
-		if (selection_mode == 'vertex') {
+		if (Mesh.isVertexSelectionMode()) {
 			let unselect = Mesh.selected[0].getSelectedVertices().length == Object.keys(Mesh.selected[0].vertices).length;
 			Mesh.selected.forEach(mesh => {
 				if (unselect) {
@@ -216,7 +216,7 @@ SharedActions.add('invert_selection', {
 	priority: 1,
 	run() {
 		let selection_mode = BarItems.selection_mode.value;
-		if (selection_mode == 'vertex') {
+		if (Mesh.isVertexSelectionMode()) {
 			Mesh.selected.forEach(mesh => {
 				let selected = mesh.getSelectedVertices();
 				let now_selected = Object.keys(mesh.vertices).filter(vkey => !selected.includes(vkey));
@@ -268,11 +268,17 @@ BARS.defineActions(function() {
 			face: {name: true, icon: 'far.fa-square'},
 			edge: {name: true, icon: 'pen_size_3'},
 			vertex: {name: true, icon: 'fiber_manual_record'},
+			weld: {name: true, icon: 'fiber_smart_record'},
+		},
+		sub_keybinds: {
+			weld: new Keybind({key: '6'}),
 		},
 		icon_mode: true,
 		condition: () => Modes.edit && Mesh.selected.length && Toolbox.selected.id != 'knife_tool',
 		onChange({value}) {
 			if (value == 'cluster') value = 'face';
+			// Welding mode is vertex mode with weld-on-drop, so it shares vertex mode's selection handling
+			if (value == 'weld') value = 'vertex';
 			if (value === previous_selection_mode) return;
 			if (value === 'object') {
 				Mesh.selected.forEach(mesh => {
@@ -709,7 +715,7 @@ BARS.defineActions(function() {
 					let selected_face_keys = mesh.getSelectedFaces();
 					let new_vertices;
 					let new_face_keys = [];
-					if (original_vertices.length && (BarItems.selection_mode.value == 'vertex' || BarItems.selection_mode.value == 'edge')) {
+					if (original_vertices.length && (Mesh.isVertexSelectionMode() || BarItems.selection_mode.value == 'edge')) {
 						selected_face_keys.empty();
 					}
 					let selected_faces = selected_face_keys.map(fkey => mesh.faces[fkey]);

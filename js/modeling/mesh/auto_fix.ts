@@ -80,6 +80,60 @@ export function mergeVerticesOverlaps(meshes: Mesh[], overlaps: Record<string, M
 	return [merge_counter, cluster_counter];
 }
 
+/**
+ * Welding mode: after a move drag, if the cursor was released over another vertex of the same mesh,
+ * snap the dragged selection so its nearest vertex lands on that vertex and merge the two.
+ * Returns true if a weld happened.
+ */
+export function weldDroppedVertex(event: MouseEvent | TouchEvent): boolean {
+	if (!event || !Modes.edit) return false;
+	if ((BarItems.selection_mode as BarSelect).value != 'weld') return false;
+	if (Toolbox.selected.id != 'move_tool') return false;
+	let preview = Preview.selected;
+	if (!preview) return false;
+
+	let data = preview.raycast(event, {vertices: true});
+	if (!data || !data.intersects) return false;
+
+	// Ignore vertex points hidden behind a surface that is clearly in front of them
+	let first_surface = data.intersects.find(intersect => intersect.object.type != 'Points');
+	let max_distance = first_surface ? first_surface.distance + 0.5 : Infinity;
+
+	for (let intersect of data.intersects) {
+		if (intersect.object.type != 'Points') continue;
+		if (intersect.distance > max_distance) break;
+		let mesh = OutlinerNode.uuids[(intersect.object as any).element_uuid];
+		if (!(mesh instanceof Mesh) || !mesh.selected) continue;
+		let target = Object.keys(mesh.vertices)[intersect.index];
+		let selected_vertices = mesh.getSelectedVertices();
+		if (!target || !mesh.vertices[target] || !selected_vertices.length || selected_vertices.includes(target)) continue;
+
+		let target_pos = mesh.vertices[target];
+		let distanceSq = (vkey: string) => {
+			let v = mesh.vertices[vkey];
+			return (v[0] - target_pos[0]) ** 2 + (v[1] - target_pos[1]) ** 2 + (v[2] - target_pos[2]) ** 2;
+		};
+		let source = selected_vertices.slice().sort((a, b) => distanceSq(a) - distanceSq(b))[0];
+		let offset: ArrayVector3 = [
+			target_pos[0] - mesh.vertices[source][0],
+			target_pos[1] - mesh.vertices[source][1],
+			target_pos[2] - mesh.vertices[source][2],
+		];
+
+		Undo.initEdit({elements: [mesh]});
+		selected_vertices.forEach(vkey => {
+			mesh.vertices[vkey].V3_add(offset);
+		});
+		mergeVerticesOverlaps([mesh], {[mesh.uuid]: {[target]: [source]}});
+		mesh.getSelectedVertices(true).safePush(target);
+		Undo.finishEdit('Weld vertex');
+		Canvas.updateView({elements: [mesh], element_aspects: {geometry: true, uv: true, faces: true}, selection: true});
+		Blockbench.showQuickMessage('message.welded_vertex', 1200);
+		return true;
+	}
+	return false;
+}
+
 export async function autoFixMeshEdit(affected_vertices?: string[]) {
 	let meshes = Mesh.selected;
 	if (!meshes.length || !Modes.edit || (BarItems.selection_mode as BarSelect).value == 'object') return;

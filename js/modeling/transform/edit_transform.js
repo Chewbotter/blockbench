@@ -1,4 +1,5 @@
 import { TransformerModule } from "./transform_modules";
+import { weldDroppedVertex } from "../mesh/auto_fix";
 import { getPivotObjects, getRotationObjects, getSelectedMovingElements, moveElementsInSpace } from "../transform";
 
 function displayDistance(number) {
@@ -418,6 +419,7 @@ new TransformerModule('edit', {
 				Undo.finishEdit('Rotate selection')
 			} else {
 				Undo.finishEdit('Move selection')
+				weldDroppedVertex(context.event);
 			}
 		}
 		autoFixMeshEdit()

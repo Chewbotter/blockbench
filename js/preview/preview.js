@@ -1138,7 +1138,7 @@ export class Preview {
 						}
 						selectFace(start_face, data.face);
 
-					} else if (data.element instanceof Mesh && ['edge', 'vertex'].includes(select_mode)) {
+					} else if (data.element instanceof Mesh && ['edge', 'vertex', 'weld'].includes(select_mode)) {
 						data.element.select()
 					} else if (Toolbox.selected.id == 'fill_tool' && BarItems.fill_mode.value == 'selected_elements') {
 						if (!data.element.selected) {
@@ -1383,7 +1383,7 @@ export class Preview {
 			} else {
 				if (Canvas.hover_helper_line.parent) Canvas.hover_helper_line.parent.remove(Canvas.hover_helper_line);
 			}
-			if (BarItems.selection_mode.value == 'vertex' && data.type == 'vertex') {
+			if (Mesh.isVertexSelectionMode() && data.type == 'vertex') {
 				let pos = Reusable.vec1.fromArray(data.element.vertices[data.vertex]);
 				data.element.mesh.localToWorld(pos);
 
