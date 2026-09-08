@@ -3271,3 +3271,43 @@ span.controller_state_section_info {
 		background-color: var(--color-light);
 	}
 }
+
+/* Smoothing groups (Element panel) */
+.smoothing_groups {
+	padding: 4px 10px 8px;
+}
+.smoothing_groups > label {
+	display: block;
+	margin-bottom: 4px;
+	color: var(--color-subtle_text);
+}
+.smoothing_group_buttons {
+	display: grid;
+	grid-template-columns: repeat(10, 1fr);
+	gap: 2px;
+	margin-bottom: 4px;
+}
+.smoothing_group_button {
+	text-align: center;
+	padding: 2px 0;
+	background-color: var(--color-button);
+	border-radius: 3px;
+	cursor: pointer;
+	font-size: 12px;
+	user-select: none;
+}
+.smoothing_group_button:hover {
+	color: var(--color-light);
+}
+.smoothing_group_button.active {
+	background-color: var(--color-accent);
+	color: var(--color-accent_text);
+}
+.smoothing_group_button.partial {
+	background-color: var(--color-accent);
+	color: var(--color-accent_text);
+	opacity: 0.55;
+}
+.smoothing_group_clear {
+	width: 100%;
+}

@@ -726,6 +726,48 @@ export class Mesh extends OutlinerElement {
 			return range[1] - range[0];
 		}
 	}
+	/**
+	 * Per face, per vertex normals following smoothing groups. A face's vertex normal averages the normals of
+	 * the faces around that vertex which share a smoothing group with it. Ungrouped faces are flat, unless the
+	 * mesh shading is 'smooth', in which case ungrouped faces smooth with each other.
+	 * Returns {face_key: {vertex_key: normal}} with entries only for faces that are not flat.
+	 */
+	calculateSmoothingGroupNormals() {
+		let result = {};
+		let {faces} = this;
+		let ungrouped_smooth = this.shading == 'smooth';
+		let face_normals = {};
+		let faces_by_vertex = {};
+		for (let fkey in faces) {
+			let face = faces[fkey];
+			if (face.vertices.length <= 2) continue;
+			face_normals[fkey] = face.getNormal(true);
+			for (let vkey of face.vertices) {
+				if (!faces_by_vertex[vkey]) faces_by_vertex[vkey] = [];
+				faces_by_vertex[vkey].push(fkey);
+			}
+		}
+		for (let fkey in face_normals) {
+			let face = faces[fkey];
+			let mask = face.smoothing_group || 0;
+			if (!mask && !ungrouped_smooth) continue;
+			let normals = {};
+			for (let vkey of face.vertices) {
+				let sum = [0, 0, 0];
+				for (let fkey2 of faces_by_vertex[vkey]) {
+					let mask2 = faces[fkey2].smoothing_group || 0;
+					let shared = fkey2 == fkey || (mask & mask2) || (!mask && !mask2 && ungrouped_smooth);
+					if (!shared) continue;
+					let n = face_normals[fkey2];
+					sum[0] += n[0]; sum[1] += n[1]; sum[2] += n[2];
+				}
+				let length = Math.sqrt(sum[0] * sum[0] + sum[1] * sum[1] + sum[2] * sum[2]) || 1;
+				normals[vkey] = [sum[0] / length, sum[1] / length, sum[2] / length];
+			}
+			result[fkey] = normals;
+		}
+		return result;
+	}
 	calculateNormals() {
 		let vertex_normals = {};
 		if (this.shading == 'smooth') {
@@ -1059,6 +1101,8 @@ new Property(Mesh, 'string', 'name', {default: 'mesh'})
 new Property(Mesh, 'number', 'color');
 new Property(Mesh, 'vector', 'origin');
 new Property(Mesh, 'vector', 'rotation');
+// Bitmask of smoothing groups (bit n = group n+1). Faces sharing a group get smooth normals across their shared edges.
+new Property(MeshFace, 'number', 'smoothing_group', {default: 0});
 new Property(Mesh, 'enum', 'shading', {
 	default: 'flat',
 	values: ['flat', 'smooth'],
@@ -1265,25 +1309,22 @@ new NodePreviewController(Mesh, {
 			}
 		}
 
-		// Mesh geometry
-		let vertex_normals = element.shading == 'smooth' && element.calculateNormals();
+		// Mesh geometry: per face, per vertex normals following smoothing groups
+		let group_normals = element.calculateSmoothingGroupNormals();
 
 		// Split Normals
 		for (let key in faces) {
 			let face = faces[key];
 			if (face.vertices.length <= 2) continue;
 
-			let normal;
-
-			if (element.shading == 'flat') {
-				normal = face.getNormal(true);
-			}
+			let normal = face.getNormal(true);
+			let smooth_normals = group_normals[key];
 
 			if (face.vertices.length == 3) {
 				// Tri
 				face.vertices.forEach((vkey, i) => {
 					indices.push(position_array.length / 3);
-					addVertexPosition(vkey, element.shading == 'smooth' ? vertex_normals[vkey] : normal);
+					addVertexPosition(vkey, smooth_normals ? smooth_normals[vkey] : normal);
 				})
 
 			} else if (face.vertices.length == 4) {
@@ -1296,7 +1337,7 @@ new NodePreviewController(Mesh, {
 					if (!vertices[vkey]) {
 						throw new Error(`Face "${key}" in mesh "${element.name}" contains an invalid vertex key "${vkey}"`, face)
 					}
-					addVertexPosition(vkey, element.shading == 'smooth' ? vertex_normals[vkey] : normal);
+					addVertexPosition(vkey, smooth_normals ? smooth_normals[vkey] : normal);
 					face_indices[vkey] = index_offset + i;
 				})
 
