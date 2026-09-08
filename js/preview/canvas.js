@@ -770,6 +770,23 @@ export const Canvas = {
 			var copy = mesh.outline.clone();
 			copy.geometry = mesh.outline.geometry.clone();
 
+			// In a mesh sub-selection mode, only ghost the edges that will actually move (at least one selected endpoint)
+			let selection_mode = Condition(BarItems.selection_mode.condition) ? BarItems.selection_mode.value : 'object';
+			if (obj instanceof Mesh && selection_mode != 'object' && mesh.outline.vertex_order) {
+				let selected = obj.getSelectedVertices();
+				let order = mesh.outline.vertex_order;
+				let source_colors = mesh.outline.geometry.attributes.color?.array;
+				let positions = [], colors = [];
+				for (let i = 0; i < order.length; i += 2) {
+					if (!selected.includes(order[i]) && !selected.includes(order[i+1])) continue;
+					positions.push(...obj.vertices[order[i]], ...obj.vertices[order[i+1]]);
+					if (source_colors) colors.push(...source_colors.slice(i*3, i*3+6));
+				}
+				copy.geometry = new THREE.BufferGeometry();
+				copy.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+				if (source_colors) copy.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+			}
+
 			// Ghost outlines get their own material so they can be dashed and fainter than the live outline
 			let opacity = Math.clamp((settings.ghost_outline_opacity?.value ?? 100) / 100, 0, 1);
 			let dashed = settings.ghost_outline_dashed?.value ?? false;
@@ -783,11 +800,11 @@ export const Canvas = {
 						color: 0xffffff,
 						vertexColors: false,
 						linewidth: source.linewidth,
-						depthTest: source.depthTest,
+						depthTest: false, // always visible, the moved geometry usually covers the original position
 						transparent: true,
 						opacity,
-						dashSize: scale * 4,
-						gapSize: scale * 3,
+						dashSize: scale * 1.5,
+						gapSize: scale * 1,
 					});
 					copy.computeLineDistances();
 				} else {
