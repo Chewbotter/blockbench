@@ -363,7 +363,13 @@ export class Preview {
 			this.mousemove(event)
 		}, false)
 		addEventListeners(this.canvas, 'mouseup touchend',		event => { this.mouseup(event)}, false)
-		addEventListeners(this.canvas, 'dblclick', 				event => { if (settings.double_click_switch_tools.value) Toolbox.toggleTransforms(event); }, false)
+		addEventListeners(this.canvas, 'dblclick', 				event => {
+			if (event.button !== 0 || Transformer.dragging) return;
+			switch (settings.double_click_action.value) {
+				case 'switch_tools': Toolbox.toggleTransforms(event); break;
+				case 'focus_selection': if (Outliner.selected.length && Condition(BarItems.focus_on_selection.condition)) BarItems.focus_on_selection.click(0); break;
+			}
+		}, false)
 		addEventListeners(this.canvas, 'mouseenter touchstart', event => { this.occupyTransformer(event)}, false)
 		addEventListeners(this.canvas, 'mouseenter',			event => { this.controls.hasMoved = true}, false)
 
