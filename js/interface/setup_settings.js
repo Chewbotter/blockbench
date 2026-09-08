@@ -139,6 +139,7 @@ function setupSettings() {
 	new Setting('volume', 							{category: 'preview', value: 80, min: 0, max: 200, type: 'number'});
 	new Setting('audio_scrubbing',					{category: 'preview', value: true});
 	new Setting('save_view_per_tab',				{category: 'preview', value: true});
+	new Setting('fit_view_on_open',				{category: 'preview', value: true});
 	new Setting('display_skin',						{category: 'preview', value: false, type: 'click', icon: 'icon-player', click: function() { changeDisplaySkin() }});
 
 	new Setting('viewport_rotate_speed',	{category: 'controls', value: 100, min: 10, max: 1000, type: 'number', onChange(value) {

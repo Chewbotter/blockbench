@@ -718,6 +718,13 @@ export function setupProject(format: ModelFormat | string, uuid?: string): boole
 	project.select();
 	Preview.selected.loadAnglePreset(DefaultCameraPresets[0]);
 
+	// Frame the loaded model once the codec has finished parsing it (parsing is synchronous, so next tick is enough)
+	setTimeout(() => {
+		if (Project == project && settings.fit_view_on_open.value) {
+			Preview.all.forEach(preview => preview.fitToModel());
+		}
+	}, 0);
+
 	if (format.edit_mode) {
 		if (Mode.selected != Modes.options.edit) Modes.options.edit.select();
 	} else if (format.paint_mode) {

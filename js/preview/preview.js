@@ -760,6 +760,90 @@ export class Preview {
 		this.setLockedAngle(preset.locked_angle)
 		return this;
 	}
+	/**
+	 * Moves the camera so that all visible elements of the current project fit into the viewport.
+	 * Keeps the current view direction. By default this only zooms out, so small models keep the default framing.
+	 * @param {{margin?: number, allow_zoom_in?: boolean}} options
+	 */
+	fitToModel(options = {}) {
+		if (!Project || this.offscreen) return this;
+
+		scene.updateMatrixWorld(true);
+		let bounds = new THREE.Box3();
+		Canvas.withoutGizmos(() => {
+			Outliner.elements.forEach(element => {
+				if (element.visibility !== false && element.mesh && element.mesh.geometry) {
+					bounds.expandByObject(element.mesh);
+				}
+			})
+		})
+		if (bounds.isEmpty()) return this;
+
+		let center = bounds.getCenter(new THREE.Vector3());
+		let margin = options.margin ?? 1.1;
+
+		let focal_length = this.camPers.getFocalLength();
+		let aspect = this.camPers.aspect || 1;
+		let v_fov = Math.degToRad(this.camPers.fov);
+		let h_fov = 2 * Math.atan(Math.tan(v_fov / 2) * aspect);
+		let tan_h = Math.tan(h_fov / 2);
+		let tan_v = Math.tan(v_fov / 2);
+		// Mirrors the perspective <-> orthographic conversion in setProjectionMode
+		let ortho_factor = 0.64 * devicePixelRatio * focal_length;
+
+		// Distance from the center along "direction" at which all 8 corners of the bounds are inside the view frustum
+		let fitDistance = (direction) => {
+			let dir = direction.clone().normalize();
+			let world_up = Math.abs(dir.y) > 0.999 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0);
+			let right = new THREE.Vector3().crossVectors(world_up, dir).normalize();
+			let up = new THREE.Vector3().crossVectors(dir, right).normalize();
+			let corner = new THREE.Vector3();
+			let max_distance = 0;
+			for (let i = 0; i < 8; i++) {
+				corner.set(
+					i & 1 ? bounds.max.x : bounds.min.x,
+					i & 2 ? bounds.max.y : bounds.min.y,
+					i & 4 ? bounds.max.z : bounds.min.z
+				).sub(center);
+				let depth = corner.dot(dir);
+				let x = Math.abs(corner.dot(right));
+				let y = Math.abs(corner.dot(up));
+				max_distance = Math.max(max_distance, depth + x / tan_h, depth + y / tan_v);
+			}
+			return Math.min(Math.max(max_distance * margin, 1), this.controls.maxDistance);
+		}
+
+		if (this.angle && this.isOrtho) {
+			// Locked side view: re-center and zoom to fit
+			let axis_direction = new THREE.Vector3();
+			axis_direction[this.camOrtho.axis] = 1;
+			let distance = fitDistance(axis_direction);
+			this.side_view_target.copy(center);
+			this.controls.target.copy(center);
+			this.camOrtho.zoom = ortho_factor / distance;
+			this.camOrtho.updateProjectionMatrix();
+			this.setLockedAngle(this.angle);
+
+		} else {
+			let direction = new THREE.Vector3().copy(this.camera.position).sub(this.controls.target);
+			if (direction.lengthSq() < 0.001) direction.set(-40, 32, -40);
+			let current_distance = direction.length();
+			let distance = fitDistance(direction);
+			if (!options.allow_zoom_in) distance = Math.max(distance, current_distance);
+			direction.normalize().multiplyScalar(distance);
+
+			this.controls.target.copy(center);
+			this.camPers.position.copy(center).add(direction);
+			this.camOrtho.position.copy(this.camPers.position);
+			if (this.isOrtho) {
+				this.camOrtho.zoom = ortho_factor / distance;
+				this.camOrtho.updateProjectionMatrix();
+			}
+		}
+		this.controls.update();
+		if (this == Preview.selected) Transformer.update();
+		return this;
+	}
 	newAnglePreset() {
 		let scope = this;
 		let position = scope.camera.position.toArray();
