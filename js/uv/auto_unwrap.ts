@@ -7,9 +7,9 @@ import { ToolConfig } from '../interface/dialog';
  * 1. Faces are grown into islands across shared edges (up to a bend angle, seams override),
  *    each face unfolded flat by hinging around the shared edge, rejecting any overlap.
  * 2. Each island is rotated to its dominant edge direction to keep its footprint small.
- * 3. Islands are packed from the top edge down (skyline, gaps first, 90 degree rotation allowed)
- *    inside a square at a uniform scale, so every face gets texture space proportional to its
- *    real size, then scaled to fill the UV square. Leftover space ends up at the bottom.
+ * 3. Islands are packed from the top edge down on an occupancy grid (shape-aware, gaps first,
+ *    90 degree rotation allowed) inside a square at a uniform scale, so every face gets texture
+ *    space proportional to its real size, then scaled to fill the UV square.
  *
  * The result is independent of the texture resolution: it fills the project UV square,
  * whatever size a texture created afterwards has.
@@ -240,97 +240,114 @@ function buildCubeIslands(cube: Cube): Island[] {
 	return islands;
 }
 
-// MARK: Packing (skyline: fill from the top edge down, gaps first, 90 degree rotation allowed)
+// MARK: Packing (occupancy grid: fill from the top edge down, gaps first, shape-aware, 90 degree rotation allowed)
 
-/**
- * Lays islands out inside a square and returns the square's side length in model units.
- * Keeps a skyline of the lowest occupied height at every x; each island goes to the lowest
- * spot it fits in (leftmost on ties), in whichever 90 degree orientation gives the lower spot.
- * Leftover space therefore collects at the bottom.
- */
-function packIslands(islands: Island[], padding_fraction: number): number {
-	let packedSize = (island: Island, rotated: boolean) => rotated ? [island.height, island.width] : [island.width, island.height];
-	// Big islands first
-	islands.sort((a, b) => (Math.max(b.width, b.height) - Math.max(a.width, a.height)) || (b.bbox_area - a.bbox_area));
+const GRID = 128;
 
-	let total = islands.reduce((sum, island) => sum + island.bbox_area, 0);
-	let bin_width = Math.sqrt(total);
-
-	let packOnce = (width: number): number => {
-		let pad = width * padding_fraction;
-		let skyline: {x: number, width: number, y: number}[] = [{x: 0, width, y: 0}];
-		let max_y = 0;
-
-		// Lowest y at which a box of the given width fits starting at skyline segment index i, or null
-		let fitAt = (i: number, w: number): number | null => {
-			let x = skyline[i].x;
-			if (x + w > width + 0.0001) return null;
-			let y = 0, remaining = w;
-			for (let j = i; j < skyline.length && remaining > 0.0001; j++) {
-				y = Math.max(y, skyline[j].y);
-				remaining -= skyline[j].width;
-			}
-			return remaining > 0.0001 ? null : y;
-		};
-		let place = (x: number, y: number, w: number, h: number) => {
-			let segment = {x, width: w, y: y + h};
-			let kept: typeof skyline = [];
-			for (let s of skyline) {
-				let s_end = s.x + s.width, end = x + w;
-				if (s_end <= x + 0.0001 || s.x >= end - 0.0001) { kept.push(s); continue; }
-				if (s.x < x) kept.push({x: s.x, width: x - s.x, y: s.y});
-				if (s_end > end) kept.push({x: end, width: s_end - end, y: s.y});
-			}
-			kept.push(segment);
-			kept.sort((p, q) => p.x - q.x);
-			// Merge equal-height neighbours
-			skyline = [];
-			for (let s of kept) {
-				let last = skyline[skyline.length - 1];
-				if (last && Math.abs(last.y - s.y) < 0.0001) last.width += s.width; else skyline.push({...s});
-			}
-			max_y = Math.max(max_y, y + h);
-		};
-
-		for (let island of islands) {
-			let best: {x: number, y: number, rotated: boolean} = null;
-			for (let rotated of island.allow_rotation ? [false, true] : [false]) {
-				let [w, h] = packedSize(island, rotated);
-				w += pad; h += pad;
-				for (let i = 0; i < skyline.length; i++) {
-					let y = fitAt(i, w);
-					if (y == null) continue;
-					if (!best || y < best.y - 0.0001 || (Math.abs(y - best.y) < 0.0001 && skyline[i].x < best.x - 0.0001)) {
-						best = {x: skyline[i].x, y, rotated};
+/** Cells covered by the island at the given cell size, dilated by pad cells. Returns a mask of width x height cells. */
+function rasterize(island: Island, cell: number, rotated: boolean, pad: number): {cells: Uint8Array, width: number, height: number} {
+	let polygons = island.polygons.map(polygon => polygon.map(p => {
+		let x = p[0] / cell, y = p[1] / cell;
+		return (rotated ? [y, island.width / cell - x] : [x, y]) as UV;
+	}));
+	let inner_w = Math.ceil((rotated ? island.height : island.width) / cell);
+	let inner_h = Math.ceil((rotated ? island.width : island.height) / cell);
+	let width = inner_w + pad * 2, height = inner_h + pad * 2;
+	let cells = new Uint8Array(width * height);
+	let inside = (x: number, y: number) => polygons.some(polygon => pointInPolygon([x, y], polygon));
+	for (let x = 0; x < inner_w; x++) {
+		for (let y = 0; y < inner_h; y++) {
+			let hit = inside(x + 0.5, y + 0.5) || inside(x + 0.02, y + 0.02) || inside(x + 0.98, y + 0.02) || inside(x + 0.02, y + 0.98) || inside(x + 0.98, y + 0.98);
+			if (!hit) {
+				let rect_start: UV = [x, y], rect_end: UV = [x + 0.999, y + 0.999];
+				outer: for (let polygon of polygons) {
+					for (let i = 0; i < polygon.length; i++) {
+						let p = polygon[i], q = polygon[(i + 1) % polygon.length];
+						if (pointInRectangle(p, rect_start, rect_end) || lineIntersectsReactangle(p, q, rect_start, rect_end)) { hit = true; break outer; }
 					}
 				}
 			}
-			if (!best) {
-				// Wider than the bin: fall back to the bottom, unrotated
-				let [w, h] = packedSize(island, false);
-				best = {x: 0, y: max_y, rotated: false};
-				island.rotated = false;
-				island.pos = [pad, best.y + pad];
-				place(0, best.y, w + pad, h + pad);
-				continue;
+			if (!hit) continue;
+			for (let dx = -pad; dx <= pad; dx++) {
+				for (let dy = -pad; dy <= pad; dy++) {
+					cells[(x + pad + dx) + (y + pad + dy) * width] = 1;
+				}
 			}
-			let [w, h] = packedSize(island, best.rotated);
-			island.rotated = best.rotated;
-			island.pos = [best.x + pad, best.y + pad];
-			place(best.x, best.y, w + pad, h + pad);
 		}
-		return max_y + pad;
-	};
+	}
+	return {cells, width, height};
+}
 
-	// Aim for a square: try a sweep of bin widths and keep the one with the smallest square side
+/** Packs into a bin GRID cells wide at the given cell size. Returns the used height in cells. */
+function packOnce(islands: Island[], cell: number, pad: number): number {
+	let rows: Uint8Array[] = [];
+	let row = (y: number) => rows[y] ??= new Uint8Array(GRID);
+	let max_y = 0;
+	let masks = islands.map(island => {
+		let options = [{rotated: false, mask: rasterize(island, cell, false, pad)}];
+		if (island.allow_rotation && Math.abs(island.width - island.height) > cell) {
+			options.push({rotated: true, mask: rasterize(island, cell, true, pad)});
+		}
+		return options;
+	});
+	let fits = (mask: {cells: Uint8Array, width: number, height: number}, ox: number, oy: number) => {
+		for (let y = 0; y < mask.height; y++) {
+			let occupied = rows[oy + y];
+			if (!occupied) continue;
+			let base = y * mask.width;
+			for (let x = 0; x < mask.width; x++) {
+				if (mask.cells[base + x] && occupied[ox + x]) return false;
+			}
+		}
+		return true;
+	};
+	islands.forEach((island, i) => {
+		let best: {x: number, y: number, rotated: boolean, mask: any} = null;
+		for (let option of masks[i]) {
+			let mask = option.mask;
+			if (mask.width > GRID) continue;
+			search: for (let y = 0; y <= (best ? best.y : max_y + 1); y++) {
+				for (let x = 0; x + mask.width <= GRID; x++) {
+					if (best && y == best.y && x >= best.x) break search;
+					if (fits(mask, x, y)) { best = {x, y, rotated: option.rotated, mask}; break search; }
+				}
+			}
+		}
+		if (!best) {
+			// Wider than the bin: put it below everything, unrotated
+			let mask = masks[i][0].mask;
+			best = {x: 0, y: max_y, rotated: false, mask};
+		}
+		for (let y = 0; y < best.mask.height; y++) {
+			let occupied = row(best.y + y);
+			let base = y * best.mask.width;
+			for (let x = 0; x < best.mask.width; x++) {
+				if (best.mask.cells[base + x] && best.x + x < GRID) occupied[best.x + x] = 1;
+			}
+		}
+		island.rotated = best.rotated;
+		island.pos = [(best.x + pad) * cell, (best.y + pad) * cell];
+		max_y = Math.max(max_y, best.y + best.mask.height);
+	});
+	return max_y;
+}
+
+/** Lays islands out inside a square and returns the square's side length in model units. */
+function packIslands(islands: Island[], padding_fraction: number): number {
+	islands.sort((a, b) => (Math.max(b.width, b.height) - Math.max(a.width, a.height)) || (b.bbox_area - a.bbox_area));
+	let total = islands.reduce((sum, island) => sum + island.bbox_area, 0);
 	let widest = islands.reduce((m, island) => Math.max(m, Math.min(island.width, island.height)), 0);
-	let best: {width: number, side: number, results: {rotated: boolean, pos: [number, number]}[]} = null;
-	for (let factor of [0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.3, 1.4, 1.5, 1.65, 1.8, 2.0, 2.3, 2.6, 3.0]) {
-		let width = Math.max(bin_width * factor, widest * 1.05);
-		let height = packOnce(width);
-		let side = Math.max(width, height);
+	let pad = Math.max(1, Math.round(padding_fraction * GRID / 2));
+
+	// Try a sweep of bin widths (model units) and keep the one with the smallest square side
+	let best: {side: number, results: {rotated: boolean, pos: [number, number]}[]} = null;
+	for (let factor of [0.9, 1.0, 1.1, 1.2, 1.3, 1.45, 1.6, 1.8, 2.0, 2.3]) {
+		let width = Math.max(Math.sqrt(total) * factor, widest * 1.1);
+		let cell = width / (GRID - pad * 2);
+		let height_cells = packOnce(islands, cell, pad);
+		let side = Math.max(width, (height_cells + pad) * cell);
 		if (!best || side < best.side - 0.0001) {
-			best = {width, side, results: islands.map(island => ({rotated: island.rotated, pos: island.pos}))};
+			best = {side, results: islands.map(island => ({rotated: island.rotated, pos: island.pos}))};
 		}
 	}
 	islands.forEach((island, i) => {
