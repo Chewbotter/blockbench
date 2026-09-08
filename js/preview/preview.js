@@ -1575,6 +1575,9 @@ export class Preview {
 		let rect_end = [c.bx, c.by];
 		let extend_selection = (event.shiftKey || Pressing.overrides.shift) ||
 				((event.ctrlOrCmd || Pressing.overrides.ctrl) && !Keybinds.extra.preview_area_select.keybind.ctrl && !Keybinds.extra.preview_area_select.keybind.meta)
+		// Subtract mode: start from the previous selection and remove whatever the rectangle touches
+		let subtract_selection = !!Keybinds.extra.preview_area_select.keybind.additionalModifierTriggered(event, 'deselect');
+		if (subtract_selection) extend_selection = true;
 		let selection_mode = BarItems.selection_mode.value;
 		let spline_selection_mode = BarItems.spline_selection_mode.value;
 
@@ -1593,11 +1596,18 @@ export class Preview {
 		Outliner.elements.forEach((element) => {
 			let isSelected;
 			let select_in_object_mode = (element instanceof Mesh == false || selection_mode == 'object') && (element instanceof SplineMesh == false || spline_selection_mode == "object");
-			if (extend_selection && this.selection.old_selected.includes(element) && select_in_object_mode) {
+			if (subtract_selection && select_in_object_mode) {
+				isSelected = this.selection.old_selected.includes(element);
+				if (isSelected && element.visibility != false && element.preview_controller?.viewportRectangleOverlap) {
+					let overlaps = element.preview_controller.viewportRectangleOverlap(element, {projectPoint, extend_selection, subtract_selection, rect_start, rect_end, preview: this});
+					if (overlaps) isSelected = false;
+				}
+
+			} else if (extend_selection && this.selection.old_selected.includes(element) && select_in_object_mode) {
 				isSelected = true
 
 			} else if (element.visibility != false && element.preview_controller?.viewportRectangleOverlap) {
-				isSelected = element.preview_controller.viewportRectangleOverlap(element, {projectPoint, extend_selection, rect_start, rect_end, preview: this});
+				isSelected = element.preview_controller.viewportRectangleOverlap(element, {projectPoint, extend_selection, subtract_selection, rect_start, rect_end, preview: this});
 			}
 			if (isSelected) {
 				element.markAsSelected();

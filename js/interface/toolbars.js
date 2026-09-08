@@ -383,7 +383,12 @@ export const BARS = {
 			})
 			new KeybindItem('preview_area_select', {
 				category: 'navigate',
-				keybind: new Keybind({key: 1, ctrl: true, shift: null})
+				keybind: new Keybind({key: 1, ctrl: true, shift: null},
+					{deselect: 'alt'}
+				),
+				variations: {
+					deselect: {name: 'keybind.preview_area_select.deselect'},
+				}
 			})
 
 			new KeybindItem('confirm', {

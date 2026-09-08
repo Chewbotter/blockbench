@@ -1751,7 +1751,7 @@ new NodePreviewController(Mesh, {
 		element.mesh.geometry = geometry_clone;
 		geometry_orig.dispose();
 	},
-	viewportRectangleOverlap(element, {projectPoint, extend_selection, rect_start, rect_end, preview}) {
+	viewportRectangleOverlap(element, {projectPoint, extend_selection, subtract_selection, rect_start, rect_end, preview}) {
 		let selection_mode = BarItems.selection_mode.value;
 		if (!(selection_mode == 'object' || preview.selection.old_selected.includes(element))) return;
 
@@ -1786,28 +1786,57 @@ new NodePreviewController(Mesh, {
 		if (!is_on_screen) {
 			return isSelected;
 		}
+		if (subtract_selection && selection_mode == 'object') {
+			// Object mode subtract is handled by the caller, only report overlap here
+			subtract_selection = false;
+		}
 		if (selection_mode == 'vertex') {
-			for (let vkey in element.vertices) {
-				let point = vertex_points[vkey];
-				if (!mesh_selection.vertices.includes(vkey) && pointInRectangle(point, rect_start, rect_end)) {
-					mesh_selection.vertices.push(vkey);
+			if (subtract_selection) {
+				let removed = [];
+				for (let vkey of mesh_selection.vertices.slice()) {
+					if (pointInRectangle(vertex_points[vkey], rect_start, rect_end)) {
+						mesh_selection.vertices.remove(vkey);
+						removed.push(vkey);
+					}
+				}
+				if (removed.length) {
+					mesh_selection.edges = mesh_selection.edges.filter(edge => !edge.find(vkey => removed.includes(vkey)));
+					mesh_selection.faces = mesh_selection.faces.filter(fkey => !element.faces[fkey]?.vertices.find(vkey => removed.includes(vkey)));
+				}
+			} else {
+				for (let vkey in element.vertices) {
+					let point = vertex_points[vkey];
+					if (!mesh_selection.vertices.includes(vkey) && pointInRectangle(point, rect_start, rect_end)) {
+						mesh_selection.vertices.push(vkey);
+					}
 				}
 			}
 
 		} else if (selection_mode == 'edge') {
-			for (let fkey in element.faces) {
-				let face = element.faces[fkey];
-				let vertices = face.getSortedVertices();
-				for (let i = 0; i < vertices.length; i++) {
-					let vkey = vertices[i];
-					let vkey2 = vertices[i+1]||vertices[0];
-					let p1 = vertex_points[vkey];
-					let p2 = vertex_points[vkey2];
-					if (lineIntersectsReactangle(p1, p2, rect_start, rect_end)) {
-						mesh_selection.vertices.safePush(vkey, vkey2);
-						let edge = [vkey, vkey2];
-						if (!mesh_selection.edges.find(edge2 => sameMeshEdge(edge, edge2))) {
-							mesh_selection.edges.push(edge);
+			if (subtract_selection) {
+				let remaining_edges = mesh_selection.edges.filter(edge => {
+					return !lineIntersectsReactangle(vertex_points[edge[0]], vertex_points[edge[1]], rect_start, rect_end);
+				});
+				if (remaining_edges.length != mesh_selection.edges.length) {
+					mesh_selection.edges = remaining_edges;
+					// Keep only vertices that still belong to a selected edge
+					mesh_selection.vertices = mesh_selection.vertices.filter(vkey => remaining_edges.find(edge => edge.includes(vkey)));
+				}
+			} else {
+				for (let fkey in element.faces) {
+					let face = element.faces[fkey];
+					let vertices = face.getSortedVertices();
+					for (let i = 0; i < vertices.length; i++) {
+						let vkey = vertices[i];
+						let vkey2 = vertices[i+1]||vertices[0];
+						let p1 = vertex_points[vkey];
+						let p2 = vertex_points[vkey2];
+						if (lineIntersectsReactangle(p1, p2, rect_start, rect_end)) {
+							mesh_selection.vertices.safePush(vkey, vkey2);
+							let edge = [vkey, vkey2];
+							if (!mesh_selection.edges.find(edge2 => sameMeshEdge(edge, edge2))) {
+								mesh_selection.edges.push(edge);
+							}
 						}
 					}
 				}
@@ -1836,12 +1865,22 @@ new NodePreviewController(Mesh, {
 						isSelected = true;
 						break;
 					}
+				} else if (subtract_selection) {
+					if (face_intersects) {
+						mesh_selection.faces.remove(fkey);
+					}
 				} else {
 					if (face_intersects) {
 						mesh_selection.vertices.safePush(...face.vertices);
 						mesh_selection.faces.safePush(fkey);
 					}
 				}
+			}
+			if (subtract_selection) {
+				// Keep only vertices that still belong to a selected face
+				mesh_selection.vertices = mesh_selection.vertices.filter(vkey => {
+					return mesh_selection.faces.find(fkey => element.faces[fkey]?.vertices.includes(vkey));
+				});
 			}
 		}
 		return isSelected;
