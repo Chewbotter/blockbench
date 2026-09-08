@@ -1,4 +1,5 @@
 import { editUVSizeDialog } from "./uv_size";
+import './auto_unwrap';
 import { PointerTarget } from "../interface/pointer_target";
 import { dragHelper } from "../util/drag_helper";
 
@@ -2700,6 +2701,7 @@ Interface.definePanels(function() {
 					'uv_transparent',
 					'uv_mirror_x',
 					'uv_mirror_y',
+					'auto_unwrap',
 					'uv_rotation',
 					//Box
 					'toggle_mirror_uv',
