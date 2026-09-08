@@ -164,6 +164,12 @@ new TransformerModule('edit', {
 			Transformer.position.fromArray(center)
 		}
 	},
+	calculateSecondOffset(context) {
+		let {point, second_axis, event} = context;
+		if (Toolbox.selected.id !== 'move_tool' || !second_axis) return null;
+		var snap_factor = canvasGridSize(event.shiftKey || Pressing.overrides.shift, event.ctrlOrCmd || Pressing.overrides.ctrl)
+		return Math.round( point[second_axis] / snap_factor ) * snap_factor;
+	},
 	calculateOffset(context) {
 		let {point, axis, angle, second_axis, event} = context;
 		let tool_id = Toolbox.selected.id;
@@ -265,6 +271,8 @@ new TransformerModule('edit', {
 		var difference = value - (this.previous_value||0)
 		
 		if (tool_id === 'move_tool') {
+			// Plane handles move along two axes at once
+			let second_difference = second_axis ? context.second_value - (this.previous_second_value||0) : 0;
 			var overlapping = false
 			if (Format.cube_size_limiter && !settings.deactivate_size_limit.value) {
 				Cube.selected.forEach(function(obj) {
@@ -272,13 +280,22 @@ new TransformerModule('edit', {
 					let to = obj.to.slice();
 					from[axis_number] += difference;
 					to[axis_number] += difference;
+					if (second_axis) {
+						from[second_axis_number] += second_difference;
+						to[second_axis_number] += second_difference;
+					}
 					overlapping = overlapping || Format.cube_size_limiter.test(obj, {from, to});
 				})
 			}
 			if (!overlapping) {
-				displayDistance(value);
+				if (second_axis) {
+					Blockbench.setCursorTooltip(trimFloatNumber(value) + ', ' + trimFloatNumber(context.second_value));
+				} else {
+					displayDistance(value);
+				}
 
-				moveElementsInSpace(difference, axis_number)
+				if (difference) moveElementsInSpace(difference, axis_number)
+				if (second_difference) moveElementsInSpace(second_difference, second_axis_number)
 
 				updateSelection()
 			}

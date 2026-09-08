@@ -11,6 +11,7 @@ interface TransformContextMove extends TransformContext {
 	direction: 1 | -1
 	angle?: number
 	value?: number
+	second_value?: number
 }
 interface TransformContextEnd extends TransformContext {
 	has_changed: boolean
@@ -25,6 +26,7 @@ interface TransformerModuleOptions {
 	updateGizmo: (this: TransformerModule) => void
 	onPointerDown: (this: TransformerModule, context: TransformContext) => void
 	calculateOffset: (this: TransformerModule, context: TransformContextMove) => number
+	calculateSecondOffset?: (this: TransformerModule, context: TransformContextMove) => number | null
 	onStart: (this: TransformerModule, context: TransformContextMove) => void
 	onMove: (this: TransformerModule, context: TransformContextMove) => void
 	onEnd: (this: TransformerModule, context: TransformContextEnd) => void
@@ -39,6 +41,7 @@ export class TransformerModule implements TransformerModuleOptions {
 	use_condition: any
 
 	previous_value: number | null
+	previous_second_value: number | null
 	initial_value: number | null
 	has_changed: boolean
 
@@ -49,12 +52,14 @@ export class TransformerModule implements TransformerModuleOptions {
 		this.use_condition = options.use_condition;
 
 		this.previous_value = null;
+		this.previous_second_value = null;
 		this.initial_value = null;
 		this.has_changed = false;
 
 		this.updateGizmo = options.updateGizmo;
 		this.onPointerDown = options.onPointerDown;
 		this.calculateOffset = options.calculateOffset;
+		this.calculateSecondOffset = options.calculateSecondOffset;
 		this.onStart = options.onStart;
 		this.onMove = options.onMove;
 		this.onEnd = options.onEnd;
@@ -65,6 +70,7 @@ export class TransformerModule implements TransformerModuleOptions {
 
 	dispatchPointerDown(context: TransformContext) {
 		this.previous_value = null;
+		this.previous_second_value = null;
 		this.initial_value = null;
 
 		if (this.onPointerDown) this.onPointerDown(context);
@@ -73,11 +79,13 @@ export class TransformerModule implements TransformerModuleOptions {
 		if (!Condition(this.use_condition)) return;
 
 		let value = this.calculateOffset(context);
+		let second_value = this.calculateSecondOffset ? this.calculateSecondOffset(context) : null;
 		if (this.previous_value == null) this.previous_value = value;
+		if (this.previous_second_value == null) this.previous_second_value = second_value;
 		if (this.initial_value == null) this.initial_value = value;
-
-		if (value != this.previous_value) {
+		if (value != this.previous_value || second_value != this.previous_second_value) {
 			context.value = value;
+			context.second_value = second_value;
 			if (!this.has_changed && this.onStart) {
 				this.onStart(context)
 			}
@@ -85,6 +93,7 @@ export class TransformerModule implements TransformerModuleOptions {
 				this.onMove(context)
 			}
 			this.previous_value = value;
+			this.previous_second_value = second_value;
 			this.has_changed = true;
 		}
 	}

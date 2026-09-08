@@ -342,6 +342,11 @@ import { TransformerModule } from "./transform_modules";
 			lineZGeometry.setAttribute( 'position', new THREE.Float32BufferAttribute( [ 0, 0, 0,  0, 0, 1 ], 3 ) );
 			lineZGeometry.name = 'gizmo_z'
 
+			// Two-axis plane handles, like the scale gizmo has
+			let planeGeo = new THREE.PlaneGeometry( 0.25, 0.25 );
+			let planePickerGeo = new THREE.PlaneGeometry( 0.35, 0.35 );
+			let plane_offset = 0.35;
+
 			this.handleGizmos = {
 				X: [
 					[ new THREE.Mesh( arrowGeometry, new GizmoMaterial( { color: gizmo_colors.r } ) ), [ 1, 0, 0 ], [ 0, 0, - Math.PI / 2 ] ],
@@ -354,7 +359,16 @@ import { TransformerModule } from "./transform_modules";
 				Z: [
 					[ new THREE.Mesh( arrowGeometry, new GizmoMaterial( { color: gizmo_colors.b } ) ), [ 0, 0, 1 ], [ Math.PI / 2, 0, 0 ] ],
 					[ new THREE.Line( lineZGeometry, new GizmoLineMaterial( { color: gizmo_colors.b } ) ) ]
-				]
+				],
+				YZ: [
+					[ new THREE.Mesh( planeGeo, new GizmoMaterial( { color: gizmo_colors.r, side: THREE.DoubleSide, opacity: 0.5 } ) ), [ 0, plane_offset, plane_offset ], [ 0, Math.PI / 2, 0 ] ],
+				],
+				XZ: [
+					[ new THREE.Mesh( planeGeo, new GizmoMaterial( { color: gizmo_colors.g, side: THREE.DoubleSide, opacity: 0.5 } ) ), [ plane_offset, 0, plane_offset ], [ - Math.PI / 2, 0, 0 ] ],
+				],
+				XY: [
+					[ new THREE.Mesh( planeGeo, new GizmoMaterial( { color: gizmo_colors.b, side: THREE.DoubleSide, opacity: 0.5 } ) ), [ plane_offset, plane_offset, 0 ] ],
+				],
 			};
 
 			this.pickerGizmos = {
@@ -366,13 +380,27 @@ import { TransformerModule } from "./transform_modules";
 				],
 				Z: [
 					[ new THREE.Mesh( pickerCylinderGeo, pickerMaterial ), [ 0, 0, 0.6 ], [ Math.PI / 2, 0, 0 ] ]
-				]
+				],
+				XY: [
+					[ new THREE.Mesh( planePickerGeo, pickerMaterial ), [ plane_offset, plane_offset, 0 ] ]
+				],
+				YZ: [
+					[ new THREE.Mesh( planePickerGeo, pickerMaterial ), [ 0, plane_offset, plane_offset ], [ 0, Math.PI / 2, 0 ] ]
+				],
+				XZ: [
+					[ new THREE.Mesh( planePickerGeo, pickerMaterial ), [ plane_offset, 0, plane_offset ], [ - Math.PI / 2, 0, 0 ] ]
+				],
 			};
 
 			this.setActivePlane = function ( axis, eye ) {
 
 				var tempMatrix = new THREE.Matrix4();
 				eye.applyMatrix4( tempMatrix.copy( tempMatrix.extractRotation( this.planes[ "XY" ].matrixWorld ) ).invert() );
+
+				if ( axis === "XY" || axis === "YZ" || axis === "XZ" ) {
+					this.activePlane = this.planes[ axis ];
+					return;
+				}
 
 				if ( axis === "X" ) {
 					this.activePlane = this.planes[ "XY" ];
