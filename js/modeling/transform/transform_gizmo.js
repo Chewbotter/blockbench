@@ -1486,6 +1486,9 @@ import { TransformerModule } from "./transform_modules";
 					mouseUpEvent.mode = _mode;
 					scope.dispatchEvent( mouseUpEvent );
 					scope.orbit_controls.stopMovement();
+					Canvas.outlines.children.forEach(ghost => {
+						if (ghost.material && ghost.material !== Canvas.outlineMaterial && ghost.material !== Canvas.meshOutlineMaterial) ghost.material.dispose();
+					});
 					Canvas.outlines.children.length = 0;
 					originalValue = null;
 

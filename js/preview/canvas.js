@@ -770,6 +770,14 @@ export const Canvas = {
 			var copy = mesh.outline.clone();
 			copy.geometry = mesh.outline.geometry.clone();
 
+			// Ghost outlines get their own material so their opacity can differ from the live outline
+			let opacity = Math.clamp((settings.ghost_outline_opacity?.value ?? 100) / 100, 0, 1);
+			if (opacity < 1) {
+				copy.material = mesh.outline.material.clone();
+				copy.material.transparent = true;
+				copy.material.opacity = opacity;
+			}
+
 			THREE.fastWorldPosition(mesh, copy.position);
 			copy.position.sub(scene.position);
 			copy.rotation.setFromQuaternion(mesh.getWorldQuaternion(new THREE.Quaternion()));
