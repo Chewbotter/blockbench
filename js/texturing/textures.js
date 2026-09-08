@@ -2492,6 +2492,34 @@ BARS.defineActions(function() {
 			TextureGenerator.addBitmapDialog()
 		}
 	})
+	new Action('create_simple_texture', {
+		icon: 'add_photo_alternate',
+		category: 'textures',
+		condition: () => !Format.single_texture,
+		click() {
+			let dialog = new Dialog({
+				id: 'create_simple_texture',
+				title: 'action.create_simple_texture',
+				width: 420,
+				form: {
+					name: {label: 'generic.name', value: 'texture'},
+					resolution: {label: 'dialog.create_texture.resolution', type: 'select', value: '512', options: {
+						'128': '128 × 128',
+						'256': '256 × 256',
+						'512': '512 × 512',
+						'1024': '1024 × 1024',
+					}},
+					color: {label: 'data.color', type: 'color', colorpicker: TextureGenerator.background_color},
+				},
+				onConfirm(result) {
+					dialog.hide();
+					TextureGenerator.createSimpleTexture(result.name, parseInt(result.resolution), result.color);
+					return false;
+				}
+			});
+			dialog.show();
+		}
+	})
 	new Action('append_to_template', {
 		icon: 'dashboard_customize',
 		category: 'textures',
@@ -2964,6 +2992,7 @@ Interface.definePanels(function() {
 					'import_texture',
 					'create_texture',
 					'create_texture_group',
+					'create_simple_texture',
 					'append_to_template',
 					'+',
 					'search_textures',

@@ -234,6 +234,56 @@ export const TextureGenerator = {
 			TextureGenerator.generateBlank(options.resolution[1], options.resolution[0], options.color, makeTexture);
 		}
 	},
+	/**
+	 * Creates a blank square texture and applies it to all faces of the selected elements,
+	 * rescaling their UVs from whatever UV size they were mapped against to the new texture size,
+	 * so an Auto Unwrap layout keeps its proportions.
+	 */
+	createSimpleTexture(name, size, color) {
+		if (Format.edit_mode && Outliner.selected.length == 0) {
+			SharedActions.runSpecific('select_all', 'outliner');
+		}
+		let elements = Outliner.selected.filter(el => el.faces);
+
+		// Remember the UV size each face is currently mapped against
+		let old_sizes = new Map();
+		for (let element of elements) {
+			for (let fkey in element.faces) {
+				let face = element.faces[fkey];
+				let tex = face.getTexture();
+				old_sizes.set(face, tex instanceof Texture ? [tex.getUVWidth(), tex.getUVHeight()] : [Project.texture_width, Project.texture_height]);
+			}
+		}
+
+		let texture;
+		TextureGenerator.addBitmap({name: name || 'texture', type: 'blank', resolution: [size, size], color, particle: 'auto'}, t => texture = t);
+		if (!texture) return null;
+
+		Undo.initEdit({elements, uv_only: true});
+		let new_w = texture.getUVWidth(), new_h = texture.getUVHeight();
+		for (let element of elements) {
+			for (let fkey in element.faces) {
+				let face = element.faces[fkey];
+				if (face.texture === null) continue; // disabled face
+				let [old_w, old_h] = old_sizes.get(face);
+				let fx = new_w / old_w, fy = new_h / old_h;
+				if (face instanceof MeshFace) {
+					for (let vkey in face.uv) {
+						face.uv[vkey][0] *= fx;
+						face.uv[vkey][1] *= fy;
+					}
+				} else if (face.uv instanceof Array && !element.box_uv) {
+					face.uv[0] *= fx; face.uv[1] *= fy;
+					face.uv[2] *= fx; face.uv[3] *= fy;
+				}
+				face.texture = texture.uuid;
+			}
+		}
+		Undo.finishEdit('Apply simple texture');
+		Canvas.updateView({elements, element_aspects: {faces: true, uv: true}});
+		UVEditor.loadData();
+		return texture;
+	},
 	generateBlank(height, width, color, cb) {
 		var canvas = document.createElement('canvas')
 		canvas.width = width;

@@ -347,7 +347,7 @@ function packOnce(islands: Island[], cell: number, pad: number): number {
 }
 
 /** Lays islands out inside a square and returns the square's side length in model units. */
-function packIslands(islands: Island[], padding_fraction: number): number {
+function packIslands(islands: Island[], padding_fraction: number, reserve_fraction: number): number {
 	islands.sort((a, b) => (Math.max(b.width, b.height) - Math.max(a.width, a.height)) || (b.bbox_area - a.bbox_area));
 	let total = islands.reduce((sum, island) => sum + island.bbox_area, 0);
 	let widest = islands.reduce((m, island) => Math.max(m, Math.min(island.width, island.height)), 0);
@@ -359,8 +359,9 @@ function packIslands(islands: Island[], padding_fraction: number): number {
 		let width = Math.max(Math.sqrt(total) * factor, widest * 1.1);
 		let cell = width / (GRID - pad * 2);
 		let height_cells = packOnce(islands, cell, pad);
-		// Islands may reach GRID - pad cells in x; the square side keeps a pad margin on every edge
-		let side = Math.max(GRID, height_cells + pad) * cell;
+		// Islands may reach GRID - pad cells in x; the square side keeps a pad margin on every edge.
+		// A reserved share of the square is kept free at the bottom for faces added later.
+		let side = Math.max(GRID, (height_cells + pad) / (1 - reserve_fraction)) * cell;
 		if (!best || side < best.side - 0.0001) {
 			best = {side, results: islands.map(island => ({rotated: island.rotated, pos: island.pos}))};
 		}
@@ -402,7 +403,7 @@ function applyIslands(islands: Island[], side: number) {
 
 // MARK: Action
 
-export function autoUnwrap(elements: OutlinerElement[], options: {max_edge_angle: number, padding: number}) {
+export function autoUnwrap(elements: OutlinerElement[], options: {max_edge_angle: number, padding: number, reserve?: number}) {
 	let meshes = elements.filter(el => el instanceof Mesh) as Mesh[];
 	let cubes = elements.filter(el => el instanceof Cube && !el.box_uv) as Cube[];
 	if (!meshes.length && !cubes.length) return null;
@@ -413,7 +414,8 @@ export function autoUnwrap(elements: OutlinerElement[], options: {max_edge_angle
 	if (!islands.length) return null;
 
 	// Padding is given in texels of a 256 texture
-	let side = packIslands(islands, options.padding / 256);
+	let reserve = Math.clamp((options.reserve ?? 0) / 100, 0, 0.9);
+	let side = packIslands(islands, options.padding / 256, reserve);
 	if (!side) return null;
 
 	let affected: OutlinerElement[] = [...meshes, ...cubes];
@@ -435,10 +437,11 @@ BARS.defineActions(() => {
 			form: {
 				max_edge_angle: {type: 'number', label: 'action.auto_unwrap.max_edge_angle', description: 'action.auto_unwrap.max_edge_angle.desc', value: 95, min: 0, max: 180},
 				padding: {type: 'number', label: 'action.auto_unwrap.padding', description: 'action.auto_unwrap.padding.desc', value: 2, min: 0, max: 32},
+				reserve: {type: 'number', label: 'action.auto_unwrap.reserve', description: 'action.auto_unwrap.reserve.desc', value: 0, min: 0, max: 90},
 			}
 		}),
 		click() {
-			let options = (this as Action).tool_config.options as {max_edge_angle: number, padding: number};
+			let options = (this as Action).tool_config.options as {max_edge_angle: number, padding: number, reserve: number};
 			let result = autoUnwrap(Outliner.selected, options);
 			if (result) {
 				Blockbench.showQuickMessage(tl('message.auto_unwrap.done', [result.faces, result.islands]), 2000);
