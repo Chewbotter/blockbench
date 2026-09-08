@@ -7,8 +7,9 @@ import { ToolConfig } from '../interface/dialog';
  * 1. Faces are grown into islands across shared edges (up to a bend angle, seams override),
  *    each face unfolded flat by hinging around the shared edge, rejecting any overlap.
  * 2. Each island is rotated to its dominant edge direction to keep its footprint small.
- * 3. Islands are laid out in rows inside a square at a uniform scale, so every face gets
- *    texture space proportional to its real size, then scaled to fill the UV square.
+ * 3. Islands are packed from the top edge down (skyline, gaps first, 90 degree rotation allowed)
+ *    inside a square at a uniform scale, so every face gets texture space proportional to its
+ *    real size, then scaled to fill the UV square. Leftover space ends up at the bottom.
  *
  * The result is independent of the texture resolution: it fills the project UV square,
  * whatever size a texture created afterwards has.
@@ -239,42 +240,104 @@ function buildCubeIslands(cube: Cube): Island[] {
 	return islands;
 }
 
-// MARK: Packing (simple shelf packer: rows of islands inside a square)
+// MARK: Packing (skyline: fill from the top edge down, gaps first, 90 degree rotation allowed)
 
-/** Lays islands out in rows inside a square and returns the square's side length in model units. */
+/**
+ * Lays islands out inside a square and returns the square's side length in model units.
+ * Keeps a skyline of the lowest occupied height at every x; each island goes to the lowest
+ * spot it fits in (leftmost on ties), in whichever 90 degree orientation gives the lower spot.
+ * Leftover space therefore collects at the bottom.
+ */
 function packIslands(islands: Island[], padding_fraction: number): number {
-	// Wider-than-tall islands pack better into rows
-	for (let island of islands) {
-		island.rotated = island.allow_rotation && island.height > island.width * 1.2;
-	}
-	let packedSize = (island: Island) => island.rotated ? [island.height, island.width] : [island.width, island.height];
-	islands.sort((a, b) => packedSize(b)[1] - packedSize(a)[1]);
+	let packedSize = (island: Island, rotated: boolean) => rotated ? [island.height, island.width] : [island.width, island.height];
+	// Big islands first
+	islands.sort((a, b) => (Math.max(b.width, b.height) - Math.max(a.width, a.height)) || (b.bbox_area - a.bbox_area));
 
-	let total = islands.reduce((sum, island) => { let [w, h] = packedSize(island); return sum + w * h; }, 0);
-	let side = Math.sqrt(total) * 1.1;
-	for (let attempt = 0; attempt < 40; attempt++) {
-		let pad = side * padding_fraction;
-		let x = pad, y = pad, row_height = 0, used_x = 0, ok = true;
-		for (let island of islands) {
-			let [w, h] = packedSize(island);
-			if (x > pad && x + w + pad > side) {
-				x = pad;
-				y += row_height + pad;
-				row_height = 0;
+	let total = islands.reduce((sum, island) => sum + island.bbox_area, 0);
+	let bin_width = Math.sqrt(total);
+
+	let packOnce = (width: number): number => {
+		let pad = width * padding_fraction;
+		let skyline: {x: number, width: number, y: number}[] = [{x: 0, width, y: 0}];
+		let max_y = 0;
+
+		// Lowest y at which a box of the given width fits starting at skyline segment index i, or null
+		let fitAt = (i: number, w: number): number | null => {
+			let x = skyline[i].x;
+			if (x + w > width + 0.0001) return null;
+			let y = 0, remaining = w;
+			for (let j = i; j < skyline.length && remaining > 0.0001; j++) {
+				y = Math.max(y, skyline[j].y);
+				remaining -= skyline[j].width;
 			}
-			if (y + h + pad > side || w + 2 * pad > side) { ok = false; break; }
-			island.pos = [x, y];
-			x += w + pad;
-			used_x = Math.max(used_x, x);
-			row_height = Math.max(row_height, h);
+			return remaining > 0.0001 ? null : y;
+		};
+		let place = (x: number, y: number, w: number, h: number) => {
+			let segment = {x, width: w, y: y + h};
+			let kept: typeof skyline = [];
+			for (let s of skyline) {
+				let s_end = s.x + s.width, end = x + w;
+				if (s_end <= x + 0.0001 || s.x >= end - 0.0001) { kept.push(s); continue; }
+				if (s.x < x) kept.push({x: s.x, width: x - s.x, y: s.y});
+				if (s_end > end) kept.push({x: end, width: s_end - end, y: s.y});
+			}
+			kept.push(segment);
+			kept.sort((p, q) => p.x - q.x);
+			// Merge equal-height neighbours
+			skyline = [];
+			for (let s of kept) {
+				let last = skyline[skyline.length - 1];
+				if (last && Math.abs(last.y - s.y) < 0.0001) last.width += s.width; else skyline.push({...s});
+			}
+			max_y = Math.max(max_y, y + h);
+		};
+
+		for (let island of islands) {
+			let best: {x: number, y: number, rotated: boolean} = null;
+			for (let rotated of island.allow_rotation ? [false, true] : [false]) {
+				let [w, h] = packedSize(island, rotated);
+				w += pad; h += pad;
+				for (let i = 0; i < skyline.length; i++) {
+					let y = fitAt(i, w);
+					if (y == null) continue;
+					if (!best || y < best.y - 0.0001 || (Math.abs(y - best.y) < 0.0001 && skyline[i].x < best.x - 0.0001)) {
+						best = {x: skyline[i].x, y, rotated};
+					}
+				}
+			}
+			if (!best) {
+				// Wider than the bin: fall back to the bottom, unrotated
+				let [w, h] = packedSize(island, false);
+				best = {x: 0, y: max_y, rotated: false};
+				island.rotated = false;
+				island.pos = [pad, best.y + pad];
+				place(0, best.y, w + pad, h + pad);
+				continue;
+			}
+			let [w, h] = packedSize(island, best.rotated);
+			island.rotated = best.rotated;
+			island.pos = [best.x + pad, best.y + pad];
+			place(best.x, best.y, w + pad, h + pad);
 		}
-		if (ok) {
-			// Tighten the square to what was actually used
-			return Math.max(used_x, y + row_height + pad);
+		return max_y + pad;
+	};
+
+	// Aim for a square: try a sweep of bin widths and keep the one with the smallest square side
+	let widest = islands.reduce((m, island) => Math.max(m, Math.min(island.width, island.height)), 0);
+	let best: {width: number, side: number, results: {rotated: boolean, pos: [number, number]}[]} = null;
+	for (let factor of [0.95, 1.0, 1.05, 1.1, 1.15, 1.2, 1.3, 1.4, 1.5, 1.65, 1.8, 2.0, 2.3, 2.6, 3.0]) {
+		let width = Math.max(bin_width * factor, widest * 1.05);
+		let height = packOnce(width);
+		let side = Math.max(width, height);
+		if (!best || side < best.side - 0.0001) {
+			best = {width, side, results: islands.map(island => ({rotated: island.rotated, pos: island.pos}))};
 		}
-		side *= 1.08;
 	}
-	return side;
+	islands.forEach((island, i) => {
+		island.rotated = best.results[i].rotated;
+		island.pos = best.results[i].pos;
+	});
+	return best.side;
 }
 
 // MARK: Apply
