@@ -242,7 +242,7 @@ function buildCubeIslands(cube: Cube): Island[] {
 
 // MARK: Packing (occupancy grid: fill from the top edge down, gaps first, shape-aware, 90 degree rotation allowed)
 
-const GRID = 128;
+const GRID = 256;
 
 /** Cells covered by the island at the given cell size, dilated by pad cells. Returns a mask of width x height cells. */
 function rasterize(island: Island, cell: number, rotated: boolean, pad: number): {cells: Uint8Array, width: number, height: number} {
@@ -254,23 +254,37 @@ function rasterize(island: Island, cell: number, rotated: boolean, pad: number):
 	let inner_h = Math.ceil((rotated ? island.width : island.height) / cell);
 	let width = inner_w + pad * 2, height = inner_h + pad * 2;
 	let cells = new Uint8Array(width * height);
-	let inside = (x: number, y: number) => polygons.some(polygon => pointInPolygon([x, y], polygon));
-	for (let x = 0; x < inner_w; x++) {
-		for (let y = 0; y < inner_h; y++) {
-			let hit = inside(x + 0.5, y + 0.5) || inside(x + 0.02, y + 0.02) || inside(x + 0.98, y + 0.02) || inside(x + 0.02, y + 0.98) || inside(x + 0.98, y + 0.98);
-			if (!hit) {
-				let rect_start: UV = [x, y], rect_end: UV = [x + 0.999, y + 0.999];
-				outer: for (let polygon of polygons) {
-					for (let i = 0; i < polygon.length; i++) {
-						let p = polygon[i], q = polygon[(i + 1) % polygon.length];
-						if (pointInRectangle(p, rect_start, rect_end) || lineIntersectsReactangle(p, q, rect_start, rect_end)) { hit = true; break outer; }
-					}
+
+	// Scanline fill: for each cell row, the polygon's horizontal extent sampled near the row's top,
+	// middle and bottom gives a conservative span of covered cells
+	let spans: [number, number][][] = Array.from({length: inner_h}, () => []);
+	for (let polygon of polygons) {
+		let min_y = Infinity, max_y = -Infinity;
+		for (let p of polygon) { min_y = Math.min(min_y, p[1]); max_y = Math.max(max_y, p[1]); }
+		for (let row = Math.max(0, Math.floor(min_y)); row < Math.min(inner_h, Math.ceil(max_y)); row++) {
+			let lo = Infinity, hi = -Infinity;
+			for (let sy of [row + 0.02, row + 0.5, row + 0.98]) {
+				for (let i = 0; i < polygon.length; i++) {
+					let p = polygon[i], q = polygon[(i + 1) % polygon.length];
+					if ((p[1] <= sy) == (q[1] <= sy)) continue; // edge does not cross this line
+					let x = p[0] + (sy - p[1]) / (q[1] - p[1]) * (q[0] - p[0]);
+					lo = Math.min(lo, x); hi = Math.max(hi, x);
 				}
 			}
-			if (!hit) continue;
-			for (let dx = -pad; dx <= pad; dx++) {
-				for (let dy = -pad; dy <= pad; dy++) {
-					cells[(x + pad + dx) + (y + pad + dy) * width] = 1;
+			// Vertices inside the row band extend the span too
+			for (let p of polygon) {
+				if (p[1] >= row && p[1] <= row + 1) { lo = Math.min(lo, p[0]); hi = Math.max(hi, p[0]); }
+			}
+			if (lo <= hi) spans[row].push([Math.max(0, Math.floor(lo)), Math.min(inner_w - 1, Math.ceil(hi) - 1)]);
+		}
+	}
+	for (let row = 0; row < inner_h; row++) {
+		for (let [x0, x1] of spans[row]) {
+			for (let dy = -pad; dy <= pad; dy++) {
+				let y = row + pad + dy;
+				let base = y * width;
+				for (let x = Math.max(0, x0 + pad - pad); x <= Math.min(width - 1, x1 + pad + pad); x++) {
+					cells[base + x] = 1;
 				}
 			}
 		}
@@ -341,11 +355,12 @@ function packIslands(islands: Island[], padding_fraction: number): number {
 
 	// Try a sweep of bin widths (model units) and keep the one with the smallest square side
 	let best: {side: number, results: {rotated: boolean, pos: [number, number]}[]} = null;
-	for (let factor of [0.9, 1.0, 1.1, 1.2, 1.3, 1.45, 1.6, 1.8, 2.0, 2.3]) {
+	for (let factor of [0.95, 1.05, 1.15, 1.3, 1.45, 1.65, 1.9, 2.2]) {
 		let width = Math.max(Math.sqrt(total) * factor, widest * 1.1);
 		let cell = width / (GRID - pad * 2);
 		let height_cells = packOnce(islands, cell, pad);
-		let side = Math.max(width, (height_cells + pad) * cell);
+		// Islands may reach GRID - pad cells in x; the square side keeps a pad margin on every edge
+		let side = Math.max(GRID, height_cells + pad) * cell;
 		if (!best || side < best.side - 0.0001) {
 			best = {side, results: islands.map(island => ({rotated: island.rotated, pos: island.pos}))};
 		}
