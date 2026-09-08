@@ -144,7 +144,8 @@
 		"generate-types": "tsc --project tsconfig.json && node ./scripts/convert_types.js",
 		"publish-types": "npm publish ./types",
 		"generate-docs": "npm run generate-types && npx typedoc --options typedoc.json",
-		"portable": "npm run build-electron && electron-builder --windows portable --x64 --publish=never && node ./scripts/copy_portable.js"
+		"portable": "npm run build-electron && electron-builder --windows portable --x64 --publish=never && node ./scripts/copy_portable.js",
+		"app": "npm run build-electron && electron-builder --windows dir --x64 --publish=never && node ./scripts/make_shortcut.js"
 	},
 	"overrides": {
 		"three": "$three"

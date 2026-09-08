@@ -11,3 +11,4 @@ service_worker.js
 
 # local portable build
 /Blockbench.exe
+/Blockbench.lnk

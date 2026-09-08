@@ -1436,7 +1436,28 @@ export class Preview {
 			Toolbox.selected.selectElements != false &&
 			!this.selection.click_target
 		) {
-			unselectAllElements();
+			let selection_mode = Condition(BarItems.selection_mode.condition) ? BarItems.selection_mode.value : 'object';
+			let spline_selection_mode = Condition(BarItems.spline_selection_mode.condition) ? BarItems.spline_selection_mode.value : 'object';
+			if (selection_mode != 'object' || spline_selection_mode != 'object') {
+				// In a sub-selection mode, only clear the vertex/edge/face selection and keep the elements (and the mode) selected
+				Undo.initSelection();
+				for (let mesh of Mesh.selected) {
+					let selection = Project.mesh_selection[mesh.uuid];
+					if (selection) {
+						selection.vertices.empty();
+						selection.edges.empty();
+						selection.faces.empty();
+					}
+				}
+				for (let spline of SplineMesh.selected) {
+					let selection = Project.spline_selection[spline.uuid];
+					if (selection) selection.vertices.empty();
+				}
+				updateSelection();
+				Undo.finishSelection('Unselect mesh selection');
+			} else {
+				unselectAllElements();
+			}
 		}
 		delete this.selection.click_target;
 		if (event instanceof TouchEvent) {

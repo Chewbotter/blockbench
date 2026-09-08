@@ -591,6 +591,23 @@ constructor ( object, preview ) {
 	// event handlers - FSM: listen for events and reset state
 	//
 
+	// Navigation keybinds ignore a held Alt key unless they use Alt themselves,
+	// so the view can still be rotated while e.g. subtract-selecting.
+	function navigationTriggered( keybind, event ) {
+		if ( keybind.isTriggered(event) ) return true;
+		if ( keybind.alt === false && event.altKey ) {
+			return keybind.isTriggered({
+				which: event.which,
+				ctrlKey: event.ctrlKey,
+				ctrlOrCmd: event.ctrlOrCmd,
+				shiftKey: event.shiftKey,
+				metaKey: event.metaKey,
+				altKey: false,
+			});
+		}
+		return false;
+	}
+
 	function onMouseDown( event ) {
 
 		if (scope.isEnabled() === false || !PointerTarget.requestTarget(PointerTarget.types.navigate)) return;
@@ -598,7 +615,7 @@ constructor ( object, preview ) {
 		event.preventDefault();
 		scope.hasMoved = false
 		
-		if ( Keybinds.extra.preview_rotate.keybind.isTriggered(event) ) {
+		if ( navigationTriggered(Keybinds.extra.preview_rotate.keybind, event) ) {
 
 			if ( scope.enableRotate === false ) return;
 			if (event.which === 1 && Canvas.raycast(event) && !Modes.display) {
@@ -608,7 +625,7 @@ constructor ( object, preview ) {
 
 			state = STATE.ROTATE;
 
-		} else if ( Keybinds.extra.preview_drag.keybind.isTriggered(event) ) {
+		} else if ( navigationTriggered(Keybinds.extra.preview_drag.keybind, event) ) {
 
 			if ( scope.enablePan === false ) return;
 			if (event.which === 1 && Canvas.raycast(event) && !Modes.display) {
@@ -617,7 +634,7 @@ constructor ( object, preview ) {
 			handleMouseDownPan( event );
 			state = STATE.PAN;
 
-		} else if ( Keybinds.extra.preview_zoom.keybind.isTriggered(event) ) {
+		} else if ( navigationTriggered(Keybinds.extra.preview_zoom.keybind, event) ) {
 
 			if ( scope.enableZoom === false ) return;
 			if (event.which === 1 && Canvas.raycast(event) && !Modes.display) {
