@@ -72,9 +72,10 @@ function setupSettings() {
 	new Setting('uv_checkerboard', 		{category: 'interface', value: true, onChange(val) {
 		UVEditor.vue.checkerboard = val;
 	}});
-	new Setting('display_uv', 			{category: 'interface', value: 'selected_elements', type: 'select', options: {
+	new Setting('display_uv', 			{category: 'interface', value: 'texture_group', type: 'select', options: {
 		selected_faces: 'settings.display_uv.selected_faces',
 		selected_elements: 'settings.display_uv.selected_elements',
+		texture_group: 'settings.display_uv.texture_group',
 		all_elements: 'settings.display_uv.all_elements',
 	}, onChange(value) {
 		BarItems.edit_mode_uv_overlay.value = value == 'all_elements';

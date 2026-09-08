@@ -1104,6 +1104,7 @@
 	"settings.display_uv.desc": "Select which UV faces are displayed in the UV editor",
 	"settings.display_uv.selected_faces": "Only selected faces",
 	"settings.display_uv.selected_elements": "All faces on selected elements",
+	"settings.display_uv.texture_group": "Selected elements and elements sharing their textures",
 	"settings.display_uv.all_elements": "All faces on all elements",
 	"settings.timecode_frame_number": "Display Timecodes as Frame Numbers",
 	"settings.timecode_frame_number.desc": "Display fraction timecodes in the timeline as frame number instead of centisecond",

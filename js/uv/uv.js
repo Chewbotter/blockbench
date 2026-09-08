@@ -1791,7 +1791,7 @@ export const UVEditor = {
 			'zoom_reset'
 		]},
 		{name: 'settings.display_uv', id: 'display_uv', icon: 'visibility', condition: () => (Modes.edit && !Format.image_editor), children: () => {
-			let options = ['selected_faces', 'selected_elements', 'all_elements'];
+			let options = ['selected_faces', 'selected_elements', 'texture_group', 'all_elements'];
 			return options.map(option => {return {
 				id: option,
 				name: `settings.display_uv.${option}`,
@@ -3240,6 +3240,8 @@ Interface.definePanels(function() {
 							}
 							if (UVEditor.vue.display_uv == 'all_elements') {
 								elements = Outliner.elements.filter(el => el.faces && !el.locked);
+							} else if (UVEditor.vue.display_uv == 'texture_group') {
+								elements = UVEditor.vue.getTextureGroupElements();
 							}
 							if (!e1.shiftKey && !Mesh.selected.length) {
 								for (let element of elements) {
@@ -4120,8 +4122,30 @@ Interface.definePanels(function() {
 						return (tex_coord / this.texture.width * this.inner_width + offset) + 'px';
 					}
 				},
+				// Selected elements plus every element that shares a texture with them (one unwrap group).
+				// With nothing selected in paint mode, everything is shown so painting still works.
+				getTextureGroupElements() {
+					let selected = this.mappable_elements;
+					if (!selected.length) return this.mode == 'paint' ? this.all_mappable_elements : selected;
+					let textures = new Set();
+					for (let element of selected) {
+						for (let fkey in element.faces) {
+							let texture = element.faces[fkey].getTexture();
+							if (texture) textures.add(texture);
+						}
+					}
+					if (!textures.size) return selected;
+					return this.all_mappable_elements.filter(element => {
+						if (selected.includes(element)) return true;
+						for (let fkey in element.faces) {
+							if (textures.has(element.faces[fkey].getTexture())) return true;
+						}
+						return false;
+					});
+				},
 				getDisplayedUVElements() {
 					if (this.mode == 'uv' || this.uv_overlay) {
+						if (this.display_uv === 'texture_group') return this.getTextureGroupElements();
 						return (this.display_uv === 'all_elements' || this.mode == 'paint')
 							 ? this.all_mappable_elements
 							 : this.mappable_elements;
@@ -4949,7 +4973,7 @@ Interface.definePanels(function() {
 										v-for="(face, key) in element.faces" :key="element.uuid + ':' + key"
 										v-if="(face.getTexture() == texture || texture == 0) && face.texture !== null && (display_uv !== 'selected_faces' || mode == 'paint' || isFaceSelected(element, key) || element.getTypeBehavior('select_faces') == false)"
 										:title="face_names[key]"
-										:class="{selected: isFaceSelected(element, key), unselected: display_uv === 'all_elements' && !mappable_elements.includes(element)}"
+										:class="{selected: isFaceSelected(element, key), unselected: (display_uv === 'all_elements' || display_uv === 'texture_group') && !mappable_elements.includes(element)}"
 										@mousedown.prevent="dragFace(element, key, $event)"
 										@touchstart.prevent="dragFace(element, key, $event)"
 										@contextmenu="selectFace(element, key, $event, true, false)"
@@ -4960,7 +4984,7 @@ Interface.definePanels(function() {
 											'--height': toPixels(Math.abs(face.uv_size[1]), 2),
 										}"
 									>
-										<template v-if="isFaceSelected(element, key) && mode == 'uv' && !(display_uv === 'all_elements' && !mappable_elements.includes(element))">
+										<template v-if="isFaceSelected(element, key) && mode == 'uv' && !((display_uv === 'all_elements' || display_uv === 'texture_group') && !mappable_elements.includes(element))">
 											{{ face_names[key] || '' }}
 											<div class="uv_resize_side horizontal" @mousedown="resizeFace(key, $event, 0, -1)" @touchstart.prevent="resizeFace(key, $event, 0, -1)" style="width: var(--width)"></div>
 											<div class="uv_resize_side horizontal" @mousedown="resizeFace(key, $event, 0, 1)" @touchstart.prevent="resizeFace(key, $event, 0, 1)" style="top: var(--height); width: var(--width)"></div>
@@ -4987,7 +5011,7 @@ Interface.definePanels(function() {
 									@mousedown.prevent="dragFace(element, null, $event)"
 									@touchstart.prevent="dragFace(element, null, $event)"
 									@click.prevent="selectCube(element, $event)"
-									:class="{unselected: display_uv === 'all_elements' && !mappable_elements.includes(element)}"
+									:class="{unselected: (display_uv === 'all_elements' || display_uv === 'texture_group') && !mappable_elements.includes(element)}"
 									:style="{left: toPixels(element.uv_offset[0]), top: toPixels(element.uv_offset[1])}"
 								>
 									<div class="uv_fill" v-if="element.size(1, 'box_uv') > 0" :style="{left: '-1px', top: toPixels(element.size(2, 'box_uv'), -1), width: toPixels(element.size(2, 'box_uv')*2 + element.size(0, 'box_uv')*2, 2), height: toPixels(element.size(1, 'box_uv'), 2)}" />
