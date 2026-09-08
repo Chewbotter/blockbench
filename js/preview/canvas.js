@@ -71,6 +71,12 @@ export const Canvas = {
 		vertexColors: true
 	}),
 	meshVertexMaterial: new THREE.PointsMaterial({size: 7, sizeAttenuation: false, vertexColors: true}),
+	turnEdgesMaterial: new THREE.LineBasicMaterial({
+		linewidth: 2,
+		depthTest: true,
+		transparent: true,
+		color: 0xffa726
+	}),
 	wireframeMaterial: new THREE.MeshBasicMaterial({
 		wireframe: true
 	}),

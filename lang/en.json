@@ -1857,6 +1857,8 @@
 	"action.invert_face.desc": "Invert the selected faces to make them face the opposite direction",
 	"action.switch_face_crease": "Switch Face Crease",
 	"action.switch_face_crease.desc": "Switch in which direction the quad folds in the middle",
+	"action.turn_edges_tool": "Turn Edges",
+	"action.turn_edges_tool.desc": "Show the hidden diagonal of every quad on the selected meshes. Click a diagonal to flip it",
 	"action.extrude_mesh_selection": "Extrude Selection",
 	"action.extrude_mesh_selection.desc": "Extrude the selected parts of the mesh",
 	"action.extrude_spline_selection": "Extrude Spline",

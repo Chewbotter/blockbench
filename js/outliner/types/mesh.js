@@ -1122,6 +1122,18 @@ new NodePreviewController(Mesh, {
 		mesh.add(outline);
 		outline.vertex_order = [];
 
+		// Quad diagonals, shown by the Turn Edges tool
+		let turn_edges = new THREE.LineSegments(new THREE.BufferGeometry(), Canvas.turnEdgesMaterial);
+		turn_edges.no_export = true;
+		turn_edges.name = element.uuid+'_turn_edges';
+		turn_edges.is_turn_edges = true;
+		turn_edges.visible = false;
+		turn_edges.renderOrder = 2;
+		turn_edges.frustumCulled = false;
+		turn_edges.vertex_order = [];
+		mesh.turn_edges = turn_edges;
+		mesh.add(turn_edges);
+
 		// Vertex Points
 		let points = new THREE.Points(new THREE.BufferGeometry(), Canvas.meshVertexMaterial);
 		points.element_uuid = element.uuid;
@@ -1181,6 +1193,7 @@ new NodePreviewController(Mesh, {
 		let indices = [];
 		let outline_positions = [];
 		mesh.outline.vertex_order.empty();
+		if (mesh.turn_edges) mesh.turn_edges.vertex_order.empty();
 		let {vertices, faces} = element;
 		let cached_face_vertices = {};
 		
@@ -1382,6 +1395,10 @@ new NodePreviewController(Mesh, {
 					if (i != 0) mesh.outline.vertex_order.push(key);
 				})
 				mesh.outline.vertex_order.push(sorted_vertices[0]);
+				// The quad is triangulated along the 0-2 diagonal
+				if (mesh.turn_edges) {
+					mesh.turn_edges.vertex_order.push(sorted_vertices[0], sorted_vertices[2]);
+				}
 			}
 		}
 
@@ -1403,6 +1420,14 @@ new NodePreviewController(Mesh, {
 		// Update selection
 		mesh.outline.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(outline_positions), 3));
 		mesh.vertex_points.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(point_position_array), 3));
+		if (mesh.turn_edges) {
+			let turn_edge_positions = [];
+			mesh.turn_edges.vertex_order.forEach(key => {
+				turn_edge_positions.push(...vertices[key]);
+			})
+			mesh.turn_edges.geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(turn_edge_positions), 3));
+			mesh.turn_edges.geometry.computeBoundingSphere();
+		}
 
 		mesh.geometry.setAttribute('highlight', new THREE.BufferAttribute(new Uint8Array(outline_positions.length/3).fill(mesh.geometry.attributes.highlight.array[0]), 1));
 
@@ -1637,6 +1662,9 @@ new NodePreviewController(Mesh, {
 		
 		mesh.vertex_points.visible = ((Mode.selected.id == 'edit' && Mesh.isVertexSelectionMode()) || Toolbox.selected.id == 'knife_tool') && element.selected;
 		if (Toolbox.selected.id == 'weight_brush') mesh.vertex_points.visible = true;
+		if (mesh.turn_edges) {
+			mesh.turn_edges.visible = Mode.selected.id == 'edit' && Toolbox.selected.id == 'turn_edges_tool' && element.selected;
+		}
 
 		this.dispatchEvent('update_selection', {element});
 	},

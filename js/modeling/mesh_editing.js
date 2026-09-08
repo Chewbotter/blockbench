@@ -279,6 +279,8 @@ BARS.defineActions(function() {
 			if (value == 'cluster') value = 'face';
 			// Welding mode is vertex mode with weld-on-drop, so it shares vertex mode's selection handling
 			if (value == 'weld') value = 'vertex';
+			// Picking a selection mode leaves the Turn Edges tool
+			if (Toolbox.selected.id == 'turn_edges_tool') BarItems.move_tool.select();
 			if (value === previous_selection_mode) return;
 			if (value === 'object') {
 				Mesh.selected.forEach(mesh => {
@@ -680,6 +682,12 @@ BARS.defineActions(function() {
 			Canvas.updateView({elements: Mesh.selected, element_aspects: {geometry: true, uv: true, faces: true}});
 		}
 	})
+	// Rotate a quad's vertex order so it triangulates along the other diagonal
+	function switchFaceCrease(face) {
+		let new_vertices = face.getSortedVertices().slice();
+		new_vertices.push(new_vertices.shift());
+		face.vertices.replace(new_vertices);
+	}
 	new Action('switch_face_crease', {
 		icon: 'signal_cellular_off',
 		category: 'edit',
@@ -690,14 +698,54 @@ BARS.defineActions(function() {
 				for (let fkey in mesh.faces) {
 					let face = mesh.faces[fkey];
 					if (face.vertices.length == 4 && face.isSelected(fkey)) {
-						let new_vertices = face.getSortedVertices().slice();
-						new_vertices.push(new_vertices.shift());
-						face.vertices.replace(new_vertices);
+						switchFaceCrease(face);
 					}
 				}
 			})
 			Undo.finishEdit('Switch mesh face crease');
 			Canvas.updateView({elements: Mesh.selected, element_aspects: {geometry: true, uv: true, faces: true}});
+		}
+	})
+	new Tool('turn_edges_tool', {
+		icon: 'flip',
+		category: 'tools',
+		transformerMode: 'hidden',
+		selectElements: false,
+		cursor: 'pointer',
+		raycast_options: {turn_edges: true},
+		modes: ['edit'],
+		condition: () => Modes.edit && Format.meshes,
+		keybind: new Keybind({key: '3', shift: true}),
+		onCanvasClick(data) {
+			if (!data || !data.intersects) return;
+			// Ignore diagonals hidden behind a surface that is clearly in front of them
+			let first_surface = data.intersects.find(intersect => !intersect.object.is_turn_edges);
+			let max_distance = first_surface ? first_surface.distance + 0.5 : Infinity;
+			let hit = data.intersects.find(intersect => intersect.object.is_turn_edges && intersect.distance <= max_distance);
+			if (!hit) return;
+
+			let mesh = OutlinerNode.uuids[hit.object.parent.name];
+			if (!(mesh instanceof Mesh)) return;
+			let diagonal = hit.object.vertex_order.slice(hit.index, hit.index + 2);
+			let fkey = Object.keys(mesh.faces).find(fkey => {
+				let face = mesh.faces[fkey];
+				if (face.vertices.length != 4 || !diagonal.allAre(vkey => face.vertices.includes(vkey))) return false;
+				let sorted = face.getSortedVertices();
+				return Math.abs(sorted.indexOf(diagonal[0]) - sorted.indexOf(diagonal[1])) == 2;
+			});
+			if (!fkey) return;
+
+			Undo.initEdit({elements: [mesh]});
+			switchFaceCrease(mesh.faces[fkey]);
+			Undo.finishEdit('Turn edge');
+			Canvas.updateView({elements: [mesh], element_aspects: {geometry: true, uv: true, faces: true}});
+		},
+		onSelect() {
+			Mesh.selected.forEach(mesh => mesh.preview_controller.updateSelection(mesh));
+		},
+		onUnselect() {
+			// Runs before the next tool becomes active, so defer the visibility update
+			setTimeout(() => Mesh.selected.forEach(mesh => mesh.preview_controller.updateSelection(mesh)), 0);
 		}
 	})
 	new Action('extrude_mesh_selection', {

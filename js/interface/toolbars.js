@@ -761,6 +761,7 @@ export const BARS = {
 				'vertex_snap_tool',
 				'stretch_tool',
 				'knife_tool',
+				'turn_edges_tool',
 				'seam_tool',
 				'weight_brush',
 				'pan_tool',

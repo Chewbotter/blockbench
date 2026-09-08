@@ -447,6 +447,9 @@ export class Preview {
 					if (element instanceof Mesh && ((mesh.outline.visible && BarItems.selection_mode.value == 'edge') || options.edges)) {
 						objects.push(mesh.outline);
 					}
+					if (element instanceof Mesh && mesh.turn_edges && (mesh.turn_edges.visible || options.turn_edges)) {
+						objects.push(mesh.turn_edges);
+					}
 				} else if (element instanceof SplineMesh && element.render_mode !== "mesh") {
 					objects.push(mesh.pathLine);
 				}
@@ -1161,7 +1164,7 @@ export class Preview {
 					Undo.finishSelection('Select keyframe');
 				}
 
-			} else if (data.type == 'vertex' && Toolbox.selected.id !== 'vertex_snap_tool') {
+			} else if (data.type == 'vertex' && Toolbox.selected.id !== 'vertex_snap_tool' && Toolbox.selected.id !== 'turn_edges_tool') {
 				Undo.initSelection();
 				let list = data.element.getSelectedVertices(true);
 				let edges;
@@ -1182,7 +1185,7 @@ export class Preview {
 				updateSelection();
 				Undo.finishSelection('Select vertex');
 
-			} else if (data.type == 'line') {
+			} else if (data.type == 'line' && Toolbox.selected.id !== 'turn_edges_tool') {
 
 				Undo.initSelection();
 				let vertices = data.element.getSelectedVertices(true);
