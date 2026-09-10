@@ -217,7 +217,7 @@ export function buildSkinnedMeshFromGroup(root_group) {
 				if (tex && tex.uuid) {
 					materials.push(tex.getMaterial())
 				} else {
-					materials.push(Canvas.getEmptyMaterial(child.color))
+					materials.push(Canvas.getElementEmptyMaterial(child))
 				}
 				if (face.vertices && face.vertices.length == 3) {
 					face_vertex_counts.push(3);
@@ -339,7 +339,7 @@ export function buildSkinnedMesh(armature, scale) {
 			if (tex && tex.uuid) {
 				materials.push(tex.getMaterial())
 			} else {
-				materials.push(Canvas.getEmptyMaterial(mesh_obj.color))
+				materials.push(Canvas.getElementEmptyMaterial(mesh_obj))
 			}
 			if (face.vertices && face.vertices.length == 3) {
 				face_vertex_counts.push(3);

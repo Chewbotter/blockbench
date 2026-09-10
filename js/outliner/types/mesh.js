@@ -1103,6 +1103,22 @@ new Property(Mesh, 'vector', 'origin');
 new Property(Mesh, 'vector', 'rotation');
 // Bitmask of smoothing groups (bit n = group n+1). Faces sharing a group get smooth normals across their shared edges.
 new Property(MeshFace, 'number', 'smoothing_group', {default: 0});
+// Optional flat colour for untextured faces; exports as the material's base colour
+new Property(Mesh, 'string', 'flat_color', {
+	default: '',
+	inputs: {
+		element_panel: {
+			input: {label: 'mesh.flat_color', description: 'mesh.flat_color.desc', type: 'color', toggle_enabled: true, toggle_default: false},
+			onChange(value, elements) {
+				let hex = value ? new tinycolor(value).toHexString() : '';
+				elements.forEach(element => {
+					if (element instanceof Mesh) element.flat_color = hex;
+				});
+				Canvas.updateView({elements, element_aspects: {faces: true}});
+			}
+		}
+	}
+});
 new Property(Mesh, 'enum', 'shading', {
 	default: 'flat',
 	values: ['flat', 'smooth'],
@@ -1515,7 +1531,7 @@ new NodePreviewController(Mesh, {
 
 		} else if (Format.single_texture) {
 			let tex = Texture.getDefault();
-			mesh.material = tex ? tex.getMaterial() : Canvas.getEmptyMaterial(element.color);
+			mesh.material = tex ? tex.getMaterial() : Canvas.getElementEmptyMaterial(element);
 
 		} else {
 			let faces = element.faces;
@@ -1526,7 +1542,7 @@ new NodePreviewController(Mesh, {
 				if (tex && tex.uuid) {
 					materials.push(tex.getMaterial())
 				} else {
-					materials.push(Canvas.getEmptyMaterial(element.color));
+					materials.push(Canvas.getElementEmptyMaterial(element));
 				}
 			}
 			if (materials.allEqual(materials[0])) materials = materials[0];

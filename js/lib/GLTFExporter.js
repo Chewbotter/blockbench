@@ -928,8 +928,11 @@ GLTFExporter.prototype = {
 			if (cachedMaterials[original.uuid]) {
 				return cachedMaterials[original.uuid];
 			} else {
+				// Marker and flat colour shaders carry their colour in the 'base' uniform
+				let base = original.uniforms && original.uniforms.base && original.uniforms.base.value;
 				let material = new THREE.MeshLambertMaterial({
-					color: 0xffffff,
+					// glTF base colour factors are linear; the viewport colour is sRGB
+					color: base ? new THREE.Color(base).convertSRGBToLinear() : 0xffffff,
 					map: original.map,
 					transparent: true,
 					side: Canvas.getRenderSide(),

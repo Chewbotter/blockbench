@@ -154,6 +154,15 @@ Interface.definePanels(function() {
 			}
 		}
 		element_properties_panel.form.setValues(values);
+		// Inputs with an enable toggle: on when the property has a value
+		let toggles = {};
+		for (let input_id in element_properties_panel.form.form_config) {
+			let config = element_properties_panel.form.form_config[input_id];
+			if (typeof config == 'object' && config.toggle_enabled && input_id in values) {
+				toggles[input_id] = values[input_id] !== '' && values[input_id] != null && values[input_id] !== false;
+			}
+		}
+		element_properties_panel.form.setToggles(toggles, false);
 		element_properties_panel.form.update(values);
 		element_properties_panel.form.updateLabelWidth(true);
 	});

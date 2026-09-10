@@ -2631,6 +2631,8 @@
 	"cube.color.silver": "Silver",
 
 	"mesh.shading": "Shading",
+	"mesh.flat_color": "Flat Color",
+	"mesh.flat_color.desc": "Colour for faces without a texture. Shown in the viewport and exported as the material colour, so no UV map or texture is needed",
 	"mesh.smoothing_groups": "Smoothing Groups",
 	"mesh.smoothing_groups.desc": "Faces in the same group are shaded smooth across their shared edges. Faces without a group are flat, unless Shading is set to Smooth. Click to toggle a group on the selected faces, Shift+click to make it their only group",
 	"mesh.smoothing_groups.button": "Smoothing group %0",

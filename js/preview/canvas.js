@@ -134,6 +134,32 @@ export const Canvas = {
 	})(),
 	emptyMaterials: [],
 	coloredSolidMaterials: [],
+	flatColorMaterials: {},
+	/** Marker colour material for untextured faces, or the element's own flat colour if it has one */
+	getElementEmptyMaterial(element) {
+		if (element.flat_color) return Canvas.getFlatColorMaterial(element.flat_color);
+		return Canvas.getEmptyMaterial(element.color);
+	},
+	getFlatColorMaterial(hex) {
+		let key = new tinycolor(hex).toHexString();
+		if (Canvas.flatColorMaterials[key]) return Canvas.flatColorMaterials[key];
+		let reference = Canvas.emptyMaterials[0];
+		let material = new THREE.ShaderMaterial({
+			uniforms: {
+				map: reference.uniforms.map,
+				// Shared with the marker materials so shading and brightness settings apply
+				SHADE: reference.uniforms.SHADE,
+				BRIGHTNESS: reference.uniforms.BRIGHTNESS,
+				base: {value: new THREE.Color().set(key)}
+			},
+			vertexShader: reference.vertexShader,
+			fragmentShader: reference.fragmentShader,
+			side: reference.side,
+		});
+		material.name = 'flat_' + key.replace('#', '');
+		Canvas.flatColorMaterials[key] = material;
+		return material;
+	},
 	getEmptyMaterial(index) {
 		return Canvas.emptyMaterials[index % Canvas.emptyMaterials.length];
 	},
@@ -734,6 +760,9 @@ export const Canvas = {
 		Canvas.emptyMaterials.forEach(function(mat) {
 			mat.side = side
 		})
+		for (let key in Canvas.flatColorMaterials) {
+			Canvas.flatColorMaterials[key].side = side;
+		}
 	},
 	updatePositions(leave_selection) {
 		updateNslideValues()
