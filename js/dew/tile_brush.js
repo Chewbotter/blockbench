@@ -17,6 +17,7 @@ const BRUSH = {
 	ATLAS_HALF_LINE: 'rgba(255, 255, 255, 0.25)',
 	ATLAS_TILE_LINE: 'rgba(255, 255, 255, 0.6)',
 	ATLAS_PICK_COLOR: '#ffd24a',
+	SELECT_COLOR: 0x6fe38a,		// tile select ghost
 };
 
 const H = DEW.HALF_CELL;
@@ -40,7 +41,7 @@ let previous_selection_mode = null;
 const round3 = v => Math.round(v * 1000) / 1000;
 const snap = (v, step = H) => Math.round(v / step) * step;
 const isActive = () => Toolbox.selected && Toolbox.selected.id == 'dew_tile_brush';
-const isDewTool = () => Toolbox.selected && ['dew_tile_brush', 'dew_texture_brush'].includes(Toolbox.selected.id);
+const isDewTool = () => Toolbox.selected && ['dew_tile_select', 'dew_tile_brush', 'dew_texture_brush', 'dew_paint_bucket'].includes(Toolbox.selected.id);
 
 function planePoint(axis, depth, u, v) {
 	let [ua, va] = PLANE_AXES[axis];
@@ -582,7 +583,7 @@ function onPaintHover(event) {
 function updateAtlasOverlay() {
 	let vue = UVEditor.vue;
 	if (!vue) return;
-	let texture = Toolbox.selected && Toolbox.selected.id == 'dew_texture_brush' && vue.texture instanceof Texture ? vue.texture : null;
+	let texture = Toolbox.selected && Toolbox.selected.atlas_picker && vue.texture instanceof Texture ? vue.texture : null;
 	if (!texture || !texture.width) {
 		vue.atlas_overlay = null;
 		return;
@@ -634,6 +635,144 @@ function refreshAtlasView() {
 Blockbench.on('select_texture', () => {
 	if (Toolbox.selected && Toolbox.selected.atlas_picker) refreshAtlasView();
 });
+
+// Tile select: paints a face selection. A plain stroke replaces the selection, Shift adds, Ctrl removes.
+// It is Blockbench's own mesh face selection, so the move gizmo and mesh actions work on it afterwards.
+let select_stroke = null;
+let active_hover = null;	// hover handler of the active select / texture / bucket tool, re-run when C changes the size
+
+// The face under the cursor. Face selection mode can put vertex points or edges in front, so this falls back to
+// the first element surface behind them (same triangle-to-face mapping as Preview.raycast)
+function hitFace(preview, event) {
+	let data = preview.raycast(event);
+	if (!data || !data.intersects) return null;
+	if (data.type == 'element') {
+		return data.element instanceof Mesh && data.element.faces[data.face] ? {element: data.element, face: data.face} : null;
+	}
+	let intersect = data.intersects.find(i => i.object.isElement);
+	let element = intersect && OutlinerNode.uuids[intersect.object.name];
+	if (!(element instanceof Mesh)) return null;
+	let index = intersect.faceIndex;
+	for (let fkey in element.faces) {
+		let count = element.faces[fkey].vertices.length;
+		if (count < 3) continue;
+		let triangles = count == 4 ? 2 : 1;
+		if (index < triangles) return {element, face: fkey};
+		index -= triangles;
+	}
+	return null;
+}
+function setFacesSelected(mesh, fkeys, remove) {
+	let faces = mesh.getSelectedFaces(true);
+	let changed = false;
+	for (let fkey of fkeys) {
+		if (faces.includes(fkey) == !remove) continue;
+		if (remove) {
+			faces.remove(fkey);
+		} else {
+			faces.push(fkey);
+		}
+		changed = true;
+	}
+	if (!changed) return false;
+	// Selected vertices follow the selected faces, as they do for a face click
+	mesh.getSelectedVertices(true).replace([...new Set(faces.flatMap(fkey => mesh.faces[fkey] ? mesh.faces[fkey].vertices : []))]);
+	if (!remove && !mesh.selected) mesh.markAsSelected();
+	return true;
+}
+function selectStep(event) {
+	let hit = hitFace(select_stroke.preview, event);
+	if (!hit) return;
+	if (setFacesSelected(hit.element, blockTiles(hit.element, hit.face).fkeys, select_stroke.remove)) updateSelection();
+}
+function startSelectStroke(preview, event) {
+	let remove = event.ctrlKey, add = event.shiftKey;
+	Undo.initSelection();
+	if (!remove && !add) {
+		unselectAllElements();
+		updateSelection();
+	}
+	select_stroke = {preview, remove};
+	selectStep(event);
+	document.addEventListener('mousemove', moveSelectStroke);
+	document.addEventListener('mouseup', endSelectStroke);
+}
+function moveSelectStroke(event) {
+	if (select_stroke) selectStep(event);
+}
+function endSelectStroke() {
+	document.removeEventListener('mousemove', moveSelectStroke);
+	document.removeEventListener('mouseup', endSelectStroke);
+	if (!select_stroke) return;
+	select_stroke = null;
+	// Cancels itself when the selection did not change
+	Undo.finishSelection('Select tiles');
+}
+function onSelectHover(event) {
+	last_paint_hover_event = event;
+	let preview = select_stroke ? select_stroke.preview : event.target && event.target.preview;
+	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	let hit = hitFace(preview, event);
+	let block = hit && blockTiles(hit.element, hit.face);
+	if (!block || !block.tile) return hideGhost();
+	let removing = select_stroke ? select_stroke.remove : event.ctrlKey;
+	showGhost(block.tile.axis, block.tile.depth, block.tile.sign, block.cu, block.cv, state.size, removing ? BRUSH.ERASE_COLOR : BRUSH.SELECT_COLOR);
+}
+
+// Paint bucket: floods the clicked tile's region (same plane and facing, connected edge to edge, across meshes)
+// with the picked atlas cells. A multi-cell pick tiles from a fixed anchor, the plane origin, so fills always line up.
+function bucketFill(tile) {
+	let texture = getAtlasTexture();
+	let size = state.size;
+	let region = atlasRegion(size);
+	let tiles = buildTileIndex();
+	let plane = planeKey(tile);
+	let [ru, rv] = textureDirections(tile.axis, tile.sign);
+	let changed = new Set();
+	let seen = new Set();
+	let queue = [[tile.u, tile.v]];
+	while (queue.length) {
+		let [u, v] = queue.pop();
+		let key = `${plane}|${round3(u)}|${round3(v)}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		let entry = tiles.get(key);
+		let face = entry && entry.mesh.faces[entry.fkey];
+		if (!face) continue;
+		let [bu, bv] = blockOf({u, v}, size);
+		let a = posMod(Math.round(ru * bu / size), region.cols);
+		let b = posMod(Math.round(rv * bv / size), region.rows);
+		if (paintFace(entry.mesh, face, tile.axis, tile.sign, bu, bv, size, region.x + a * size, region.y + b * size, texture)) {
+			changed.add(entry.mesh);
+		}
+		queue.push([u + H, v], [u - H, v], [u, v + H], [u, v - H]);
+	}
+	return changed;
+}
+function bucketClick(preview, event) {
+	if (!getAtlasTexture()) {
+		Blockbench.showQuickMessage('Pick a tile in the UV editor first', BRUSH.MESSAGE_TIME);
+		return;
+	}
+	let hit = hitFace(preview, event);
+	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
+	if (!tile) return;
+	Undo.initEdit({elements: Mesh.all.filter(mesh => mesh.visibility !== false && !mesh.locked), uv_only: true});
+	let changed = bucketFill(tile);
+	if (!changed.size) return Undo.cancelEdit();
+	Undo.finishEdit('Fill tiles');
+	Canvas.updateView({elements: [...changed], element_aspects: {uv: true, faces: true}});
+}
+function onBucketHover(event) {
+	last_paint_hover_event = event;
+	let preview = event.target && event.target.preview;
+	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	let hit = hitFace(preview, event);
+	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
+	if (!tile) return hideGhost();
+	let [cu, cv] = blockOf(tile, state.size);
+	showGhost(tile.axis, tile.depth, tile.sign, cu, cv, state.size, BRUSH.PAINT_COLOR);
+}
 
 BARS.defineActions(function() {
 	new Tool('dew_tile_brush', {
@@ -692,11 +831,13 @@ BARS.defineActions(function() {
 			paint_previous_selection_mode = BarItems.selection_mode.value;
 			BarItems.selection_mode.set('object');
 			updateSelection();
+			active_hover = onPaintHover;
 			document.addEventListener('mousemove', onPaintHover);
 			refreshAtlasView();
 		},
 		onUnselect() {
 			document.removeEventListener('mousemove', onPaintHover);
+			active_hover = null;
 			hideGhost();
 			if (paint_previous_selection_mode && paint_previous_selection_mode != 'object') {
 				BarItems.selection_mode.set(paint_previous_selection_mode);
@@ -709,6 +850,72 @@ BARS.defineActions(function() {
 	// Tool only copies the options it knows, so the hooks the UV editor looks for are attached here
 	texture_brush.atlas_picker = true;
 	texture_brush.onAtlasClick = pickAtlasCell;
+
+	new Tool('dew_tile_select', {
+		name: 'Tile Select',
+		description: 'Paint to select tiles. Shift adds, Ctrl removes, C switches full / half tiles',
+		icon: 'highlight_alt',
+		category: 'tools',
+		transformerMode: 'hidden',
+		selectElements: false,
+		cursor: 'crosshair',
+		modes: ['edit'],
+		condition: () => Modes.edit && Format.id == 'dew_scene',
+		onCanvasClick(data) {
+			let event = data && data.event;
+			if (!event || event.button !== 0 || event.altKey || select_stroke) return;
+			startSelectStroke(Preview.selected, event);
+		},
+		onSelect() {
+			// Face mode shows the selection and leaves it ready for the move gizmo and mesh actions
+			BarItems.selection_mode.set('face');
+			updateSelection();
+			active_hover = onSelectHover;
+			document.addEventListener('mousemove', onSelectHover);
+		},
+		onUnselect() {
+			document.removeEventListener('mousemove', onSelectHover);
+			active_hover = null;
+			hideGhost();
+		},
+	});
+
+	let paint_bucket = new Tool('dew_paint_bucket', {
+		name: 'Paint Bucket',
+		description: 'Fill the connected tiles of a plane with the picked atlas tiles. C switches full / half tiles',
+		icon: 'format_color_fill',
+		category: 'tools',
+		transformerMode: 'hidden',
+		selectElements: false,
+		cursor: 'crosshair',
+		modes: ['edit'],
+		condition: () => Modes.edit && Format.id == 'dew_scene',
+		onCanvasClick(data) {
+			let event = data && data.event;
+			if (!event || event.button !== 0 || event.altKey) return;
+			bucketClick(Preview.selected, event);
+		},
+		onSelect() {
+			paint_previous_selection_mode = BarItems.selection_mode.value;
+			BarItems.selection_mode.set('object');
+			updateSelection();
+			active_hover = onBucketHover;
+			document.addEventListener('mousemove', onBucketHover);
+			refreshAtlasView();
+		},
+		onUnselect() {
+			document.removeEventListener('mousemove', onBucketHover);
+			active_hover = null;
+			hideGhost();
+			if (paint_previous_selection_mode && paint_previous_selection_mode != 'object') {
+				BarItems.selection_mode.set(paint_previous_selection_mode);
+				updateSelection();
+			}
+			setTimeout(refreshAtlasView, 0);
+		},
+	});
+	paint_bucket.atlas_picker = true;
+	paint_bucket.onAtlasClick = pickAtlasCell;
 
 	new Action('dew_tile_plane_axis', {
 		name: 'Tile Brush: Cycle Work Plane',
@@ -753,12 +960,12 @@ BARS.defineActions(function() {
 		condition: isDewTool,
 		click() {
 			state.size = state.size == DEW.TILE ? H : DEW.TILE;
-			if (Toolbox.selected.id == 'dew_texture_brush') {
+			if (Toolbox.selected.id == 'dew_tile_brush') {
+				announce();
+			} else {
 				Blockbench.showQuickMessage(state.size == DEW.TILE ? 'Full tile' : 'Half tile', BRUSH.MESSAGE_TIME);
 				updateAtlasOverlay();
-				if (last_paint_hover_event) onPaintHover(last_paint_hover_event);
-			} else {
-				announce();
+				if (active_hover && last_paint_hover_event) active_hover(last_paint_hover_event);
 			}
 		}
 	});
