@@ -241,6 +241,14 @@ export const Canvas = {
 		three_grid.name = 'grid_group'
 		gizmo_colors.grid.set(parseInt('0x'+CustomTheme.data.colors.grid.replace('#', ''), 16));
 
+		// Formats with their own grid (DEW Scene) replace the default one entirely
+		if (typeof Format.buildGrid == 'function') {
+			Format.buildGrid(three_grid);
+			scene.add(three_grid);
+			Canvas.side_grids = {x: new THREE.Object3D(), z: new THREE.Object3D()};
+			return;
+		}
+
 		const block_size = Format.block_size ?? 16;
 
 		Canvas.northMarkMaterial.color = gizmo_colors.grid
