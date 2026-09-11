@@ -2994,6 +2994,7 @@ Interface.definePanels(function() {
 					'create_texture',
 					'create_texture_group',
 					'create_simple_texture',
+					'create_dew_atlas',
 					'append_to_template',
 					'+',
 					'search_textures',
