@@ -9,6 +9,8 @@ uniform sampler2D map;
 uniform bool SHADE;
 uniform bool EMISSIVE;
 uniform vec3 LIGHTCOLOR;
+uniform float BACKFACE_TINT;
+uniform vec3 BACKFACE_COLOR;
 
 centroid varying vec2 vUv;
 varying float light;
@@ -40,6 +42,9 @@ void main(void)
 		gl_FragColor.r = gl_FragColor.r * 0.6;
 		gl_FragColor.g = gl_FragColor.g * 0.7;
 	}
-  
+
+	// Back faces pulled toward a flat color (DEW scenes); a tint of 0 leaves them untouched
+	if (!gl_FrontFacing) gl_FragColor.rgb = mix(gl_FragColor.rgb, BACKFACE_COLOR, BACKFACE_TINT);
+
 	#include <clipping_planes_fragment>
 }

@@ -14,6 +14,8 @@ export const DEW = {
 	THIN_LINE_OPACITY: 0.3,		// half-cell lines; full-tile lines are opaque
 	STOREY_LINE_OPACITY: 0.35,
 	CAMERA_OFFSET: [220, 260, 380],	// new scenes look at the cluster center from here
+	BACKFACE_TINT: 0.85,		// how far back faces are pulled toward BACKFACE_COLOR in the viewport, 0 to 1
+	BACKFACE_COLOR: '#2a3348',
 };
 
 function lineSegments(points, material) {
@@ -84,6 +86,14 @@ const dew_format = new ModelFormat('dew_scene', {
 	animated_textures: true,
 	locators: true,
 	pbr: true,
+	// Viewport only: the exporter never sees the shader tint
+	onActivation() {
+		Canvas.backfaceUniforms.BACKFACE_TINT.value = DEW.BACKFACE_TINT;
+		Canvas.backfaceUniforms.BACKFACE_COLOR.value.set(DEW.BACKFACE_COLOR);
+	},
+	onDeactivation() {
+		Canvas.backfaceUniforms.BACKFACE_TINT.value = 0;
+	},
 	onSetup(project, new_model) {
 		if (!new_model) return;
 		// Stored per project, so the global export scale used by other projects stays untouched

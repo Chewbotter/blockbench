@@ -80,7 +80,8 @@ export class Texture {
 				SHADE: {type: 'bool', value: settings.shading.value},
 				LIGHTCOLOR: {type: 'vec3', value: new THREE.Color().copy(Canvas.global_light_color).multiplyScalar(settings.brightness.value / 50)},
 				LIGHTSIDE: {type: 'int', value: Canvas.global_light_side},
-				EMISSIVE: {type: 'bool', value: this.render_mode == 'emissive'}
+				EMISSIVE: {type: 'bool', value: this.render_mode == 'emissive'},
+				...Canvas.backfaceUniforms,
 			},
 			vertexShader: prepareShader(VertShader),
 			fragmentShader: prepareShader(FragShader),

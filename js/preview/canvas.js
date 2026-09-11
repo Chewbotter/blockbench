@@ -33,11 +33,18 @@ export const Reusable = {
 }
 
 
+// Shared by every face material so one change tints back faces everywhere; the DEW Scene format turns it on
+const backface_uniforms = {
+	BACKFACE_TINT: {value: 0},
+	BACKFACE_COLOR: {value: new THREE.Color(0x2a3348)},
+};
+
 export const Canvas = {
 	// Stores various colors for the 3D scene
 	gizmo_colors,
 	// Main Blockbench 3D scene
 	scene,
+	backfaceUniforms: backface_uniforms,
 	// Pivot marker
 	pivot_marker: new THREE.Object3D(),
 	gizmos: [],
@@ -85,7 +92,8 @@ export const Canvas = {
 			uniforms: {
 				SHADE: {type: 'bool', value: settings.shading.value},
 				BRIGHTNESS: {type: 'bool', value: settings.brightness.value / 50},
-				base: {value: gizmo_colors.solid}
+				base: {value: gizmo_colors.solid},
+				...backface_uniforms,
 			},
 			vertexShader: prepareShader(SolidMaterialVertShader),
 			fragmentShader: prepareShader(SolidMaterialFragShader),
@@ -150,7 +158,8 @@ export const Canvas = {
 				// Shared with the marker materials so shading and brightness settings apply
 				SHADE: reference.uniforms.SHADE,
 				BRIGHTNESS: reference.uniforms.BRIGHTNESS,
-				base: {value: new THREE.Color().set(key)}
+				base: {value: new THREE.Color().set(key)},
+				...backface_uniforms,
 			},
 			vertexShader: reference.vertexShader,
 			fragmentShader: reference.fragmentShader,
@@ -185,7 +194,8 @@ export const Canvas = {
 			let commonUniforms = {
 				SHADE: {type: 'bool', value: settings.shading.value},
 				BRIGHTNESS: {type: 'bool', value: settings.brightness.value / 50},
-				base: {value: new THREE.Color().set(color.pastel)}
+				base: {value: new THREE.Color().set(color.pastel)},
+				...backface_uniforms,
 			}
 
 			// Empty texture materials
@@ -943,6 +953,7 @@ export const Canvas = {
 		if (Canvas.layered_material && !layers) return Canvas.layered_material;
 		// https://codepen.io/Fyrestar/pen/YmpXYr
 		var uniforms = {
+			...backface_uniforms,
 			SHADE: {type: 'bool', value: settings.shading.value},
 			t0: {type: 't', value: null},
 			t1: {type: 't', value: null},
