@@ -141,6 +141,7 @@ function setupSettings() {
 	new Setting('audio_scrubbing',					{category: 'preview', value: true});
 	new Setting('save_view_per_tab',				{category: 'preview', value: true});
 	new Setting('fit_view_on_open',				{category: 'preview', value: true});
+	new Setting('orbit_around_selection',		{category: 'preview', value: true});
 	new Setting('ghost_outline_opacity',		{category: 'preview', value: 50, min: 0, max: 100, type: 'number'});
 	new Setting('ghost_outline_dashed',		{category: 'preview', value: true});
 	new Setting('display_skin',						{category: 'preview', value: false, type: 'click', icon: 'icon-player', click: function() { changeDisplaySkin() }});

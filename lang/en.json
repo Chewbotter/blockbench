@@ -1055,6 +1055,8 @@
 	"settings.save_view_per_tab.desc": "Save the current view angle for each tab separately",
 	"settings.fit_view_on_open": "Fit View on Open",
 	"settings.fit_view_on_open.desc": "Zoom the camera out so the whole model is visible when opening a project",
+	"settings.orbit_around_selection": "Orbit Around Selection",
+	"settings.orbit_around_selection.desc": "Rotate the view around whatever is selected. The view does not move when selecting, only the pivot",
 	"settings.ghost_outline_opacity": "Ghost Outline Opacity",
 	"settings.ghost_outline_opacity.desc": "Opacity in percent of the outline left at the original position while transforming",
 	"settings.ghost_outline_dashed": "Dashed Ghost Outline",

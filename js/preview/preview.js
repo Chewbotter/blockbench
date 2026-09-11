@@ -6,6 +6,7 @@ import { toSnakeCase } from '../util/util';
 import { electron, ipcRenderer } from '../native_apis';
 import { Pressing } from '../misc';
 import { PointerTarget } from '../interface/pointer_target';
+import './orbit_selection';
 
 window.scene = null;
 window.main_preview = null;
