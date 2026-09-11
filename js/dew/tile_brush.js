@@ -880,16 +880,84 @@ function addShaveFace(mesh, points, uvs, texture, normal) {
 	if (worldNormal(mesh, face).dot(normal) < 0) face.invert();
 	shave_stroke.touched.add(mesh);
 }
-function findTriangle(points) {
+// End triangles already in this end plane, with their leg length. A neighbouring cut of the same size leaves one
+// that cancels against this one; a different size leaves one nested inside the other.
+function cornerTrianglesAt(c, w) {
+	let found = [];
+	let side = c.inside ? 1 : -1;
 	for (let mesh of Mesh.all) {
 		for (let fkey in mesh.faces) {
 			let face = mesh.faces[fkey];
 			if (face.vertices.length != 3) continue;
-			let corners = face.vertices.map(vkey => worldVertex(mesh, vkey));
-			if (points.every(point => corners.some(corner => samePoint(corner, point)))) return {mesh, fkey};
+			let points = face.vertices.map(vkey => worldVertex(mesh, vkey));
+			if (!points.every(p => Math.abs(p[c.al] - w) < 1e-3)) continue;
+			let at_corner = points.find(p => Math.abs(p[c.a1] - c.d1) < 1e-3 && Math.abs(p[c.n] - c.e) < 1e-3);
+			let along_n = points.find(p => Math.abs(p[c.a1] - c.d1) < 1e-3 && Math.abs(p[c.n] - c.e) > 1e-3);
+			let along_a1 = points.find(p => Math.abs(p[c.n] - c.e) < 1e-3 && Math.abs(p[c.a1] - c.d1) > 1e-3);
+			if (!at_corner || !along_n || !along_a1) continue;
+			let leg_n = (c.e - along_n[c.n]) * c.s2;
+			let leg_a1 = (along_a1[c.a1] - c.d1) * c.s1 * side;
+			if (leg_n < 0 || Math.abs(leg_n - leg_a1) > 1e-3) continue;
+			found.push({mesh, fkey, size: leg_n});
 		}
 	}
-	return null;
+	return found;
+}
+// Cuts that meet can leave a triangular gap, for instance where a ramp runs into a corner that was shaved
+// afterwards: the tile that closed the ramp's end is gone. Any three-edge hole gets a triangle, wound to match
+// its neighbours and textured from them.
+function capTriangularHoles(stroke) {
+	for (let mesh of stroke.touched) {
+		if (!mesh.faces) continue;
+		let edges = new Map();
+		for (let fkey in mesh.faces) {
+			let vertices = mesh.faces[fkey].getSortedVertices();
+			if (vertices.length < 3) continue;
+			vertices.forEach((vkey, i) => {
+				let next = vertices[(i + 1) % vertices.length];
+				let key = [vkey, next].slice().sort().join('|');
+				let entry = edges.get(key) || {vertices: [vkey, next], faces: []};
+				entry.faces.push(fkey);
+				edges.set(key, entry);
+			});
+		}
+		let open = [...edges.values()].filter(entry => entry.faces.length == 1);
+		let by_vertex = new Map();
+		for (let entry of open) {
+			for (let vkey of entry.vertices) {
+				by_vertex.set(vkey, (by_vertex.get(vkey) || []).concat([entry]));
+			}
+		}
+		let capped = new Set();
+		for (let entry of open) {
+			let [a, b] = entry.vertices;
+			for (let second of by_vertex.get(b) || []) {
+				let c = second.vertices.find(vkey => vkey != b);
+				if (second == entry || !c || c == a) continue;
+				if (!(by_vertex.get(c) || []).find(other => other != second && other.vertices.includes(a))) continue;
+				let id = [a, b, c].slice().sort().join('|');
+				if (capped.has(id)) continue;
+				// Collinear "loops" are T-junctions, where one long edge runs along two short ones, not holes
+				let points = [a, b, c].map(vkey => worldVertex(mesh, vkey));
+				let area = new THREE.Vector3().subVectors(points[1], points[0]).cross(new THREE.Vector3().subVectors(points[2], points[0])).length();
+				if (area < 1e-3) continue;
+				capped.add(id);
+
+				// Wind against the face on the other side of the first edge so the cap faces outward
+				let neighbour = mesh.faces[entry.faces[0]];
+				let order = neighbour.getSortedVertices();
+				let forward = order[(order.indexOf(a) + 1) % order.length] == b;
+				let vkeys = forward ? [b, a, c] : [a, b, c];
+				let texture = neighbour.texture;
+				let uv = {};
+				for (let vkey of vkeys) {
+					let source = neighbour.uv[vkey] ? neighbour : Object.values(mesh.faces).find(face => face.texture == texture && face.uv[vkey]);
+					uv[vkey] = source ? source.uv[vkey].slice() : [0, 0];
+				}
+				mesh.addFaces(new MeshFace(mesh, {vertices: vkeys, uv, texture}));
+			}
+		}
+	}
 }
 function uvOnQuads(quads, world) {
 	for (let {mesh, fkey} of quads) {
@@ -924,13 +992,20 @@ function trimCap(c, {mesh, fkey}) {
 }
 function closeEnd(c, w, dir, gap_uv) {
 	let triangle = [cornerE(c, w), cornerF1(c, w), cornerF2(c, w)];
-	// Shaved earlier from the other side: the corner is now cut on both sides of this end
-	let gap = findTriangle(triangle);
-	if (gap) {
-		delete gap.mesh.faces[gap.fkey];
-		shave_stroke.touched.add(gap.mesh);
+	let existing = cornerTrianglesAt(c, w);
+	let same = existing.find(t => Math.abs(t.size - c.S) < 1e-3);
+	if (same) {
+		// Cut earlier from the other side at the same size: the corner is now cut on both sides of this end
+		delete same.mesh.faces[same.fkey];
+		shave_stroke.touched.add(same.mesh);
 		return;
 	}
+	// A smaller neighbour's end triangle sits inside this one, so it goes; a larger one already covers this end
+	for (let smaller of existing.filter(t => t.size < c.S)) {
+		delete smaller.mesh.faces[smaller.fkey];
+		shave_stroke.touched.add(smaller.mesh);
+	}
+	if (existing.some(t => t.size > c.S)) return;
 	let tiles = shave_stroke.tiles;
 	let square = {[c.a1]: [c.d1, c.d1 + (c.inside ? 1 : -1) * c.s1 * c.S], [c.n]: [c.e - c.s2 * c.S, c.e]};
 	let normal = new THREE.Vector3();
@@ -1007,6 +1082,7 @@ function endShaveStroke() {
 	let finished = shave_stroke;
 	shave_stroke = null;
 	if (!finished.changed) return Undo.cancelEdit();
+	capTriangularHoles(finished);
 	finished.touched.forEach(removeLooseVertices);
 	Undo.finishEdit(finished.inside ? 'Ramp corners' : 'Shave corners');
 	Canvas.updateView({elements: [...finished.touched], element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
