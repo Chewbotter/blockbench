@@ -18,6 +18,7 @@ const BRUSH = {
 	ATLAS_TILE_LINE: 'rgba(255, 255, 255, 0.6)',
 	ATLAS_PICK_COLOR: '#ffd24a',
 	SELECT_COLOR: 0x6fe38a,		// tile select ghost
+	SHAVE_COLOR: 0xff9e3d,		// shave preview, drawn on top since the cut lies behind the corner tiles
 };
 
 const H = DEW.HALF_CELL;
@@ -41,7 +42,7 @@ let previous_selection_mode = null;
 const round3 = v => Math.round(v * 1000) / 1000;
 const snap = (v, step = H) => Math.round(v / step) * step;
 const isActive = () => Toolbox.selected && Toolbox.selected.id == 'dew_tile_brush';
-const isDewTool = () => Toolbox.selected && ['dew_tile_select', 'dew_tile_brush', 'dew_texture_brush', 'dew_paint_bucket'].includes(Toolbox.selected.id);
+const isDewTool = () => Toolbox.selected && ['dew_tile_select', 'dew_tile_brush', 'dew_shave', 'dew_texture_brush', 'dew_paint_bucket'].includes(Toolbox.selected.id);
 
 function planePoint(axis, depth, u, v) {
 	let [ua, va] = PLANE_AXES[axis];
@@ -333,14 +334,18 @@ function hideGhost() {
 	ghost = null;
 }
 function showGhost(axis, depth, sign, u0, v0, size, color, size_v = size) {
-	hideGhost();
 	let lifted = depth + BRUSH.LIFT * sign;
-	let c = [[0, 0], [size, 0], [size, size_v], [0, size_v]].map(([du, dv]) => planePoint(axis, lifted, u0 + du, v0 + dv));
+	showGhostQuad([[0, 0], [size, 0], [size, size_v], [0, size_v]].map(([du, dv]) => planePoint(axis, lifted, u0 + du, v0 + dv)), color);
+}
+// Ghost over any four world points; on_top draws it through geometry
+function showGhostQuad(c, color, on_top = false) {
+	hideGhost();
 	let fill = new THREE.Mesh(
 		new THREE.BufferGeometry().setFromPoints([c[0], c[1], c[2], c[0], c[2], c[3]]),
-		new THREE.MeshBasicMaterial({color, transparent: true, opacity: BRUSH.GHOST_OPACITY, side: THREE.DoubleSide, depthWrite: false})
+		new THREE.MeshBasicMaterial({color, transparent: true, opacity: BRUSH.GHOST_OPACITY, side: THREE.DoubleSide, depthWrite: false, depthTest: !on_top})
 	);
-	let outline = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(c), new THREE.LineBasicMaterial({color}));
+	let outline = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(c), new THREE.LineBasicMaterial({color, depthTest: !on_top}));
+	if (on_top) fill.renderOrder = outline.renderOrder = 20;
 	ghost = new THREE.Group();
 	ghost.name = 'dew_tile_ghost';
 	ghost.add(fill, outline);
@@ -647,7 +652,7 @@ function hitFace(preview, event) {
 	let data = preview.raycast(event);
 	if (!data || !data.intersects) return null;
 	if (data.type == 'element') {
-		return data.element instanceof Mesh && data.element.faces[data.face] ? {element: data.element, face: data.face} : null;
+		return data.element instanceof Mesh && data.element.faces[data.face] ? {element: data.element, face: data.face, point: data.intersects[0].point} : null;
 	}
 	let intersect = data.intersects.find(i => i.object.isElement);
 	let element = intersect && OutlinerNode.uuids[intersect.object.name];
@@ -657,7 +662,7 @@ function hitFace(preview, event) {
 		let count = element.faces[fkey].vertices.length;
 		if (count < 3) continue;
 		let triangles = count == 4 ? 2 : 1;
-		if (index < triangles) return {element, face: fkey};
+		if (index < triangles) return {element, face: fkey, point: intersect.point};
 		index -= triangles;
 	}
 	return null;
@@ -774,6 +779,234 @@ function onBucketHover(event) {
 	showGhost(tile.axis, tile.depth, tile.sign, cu, cv, state.size, BRUSH.PAINT_COLOR);
 }
 
+// Shave: bevels an outside corner where two planes of square tiles meet. The cut is 45 degrees and exactly one block
+// deep on both sides (a half or full tile, per C): the two blocks touching the corner edge become one diagonal face
+// that keeps the texture of the side the cursor touched. Ends close automatically: a tile in the end plane (a top
+// face) is trimmed to the inside of the cut, a notch against a still-square stretch of the corner gets a triangle,
+// and a triangle left by shaving the neighboring stretch earlier is removed.
+let shave_stroke = null;
+let shave_previous_selection_mode = null;
+
+const samePoint = (a, b) => a.distanceToSquared(b) < 1e-6;
+function worldVertex(mesh, vkey) {
+	return mesh.mesh.localToWorld(new THREE.Vector3().fromArray(mesh.vertices[vkey]));
+}
+// Tile quads of one plane inside a box given as world-axis ranges; null if one is missing, unless partial
+function quadsIn(tiles, axis, depth, sign, ranges, partial = false) {
+	let [ua, va] = PLANE_AXES[axis];
+	let [u_lo, u_hi] = ranges[ua].slice().sort((a, b) => a - b);
+	let [v_lo, v_hi] = ranges[va].slice().sort((a, b) => a - b);
+	let found = [];
+	for (let u = u_lo; u < u_hi - 1e-6; u += H) {
+		for (let v = v_lo; v < v_hi - 1e-6; v += H) {
+			let entry = tiles.get(`${axis}|${round3(depth)}|${sign}|${round3(u)}|${round3(v)}`);
+			if (entry) {
+				found.push(entry);
+			} else if (!partial) {
+				return null;
+			}
+		}
+	}
+	return found;
+}
+
+// The corner a click would shave: the hovered tile's block edge nearest the cursor, when a complete block of the
+// perpendicular plane meets it there as an outside corner. a1 / d1 / s1 is the touched plane, n the axis across the
+// edge (the other plane's normal, e its position, s2 its facing), al the axis along the edge from lo to hi.
+function shaveTarget(preview, event, tiles) {
+	let hit = hitFace(preview, event);
+	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
+	if (!tile) return null;
+	let S = state.size;
+	let {axis: a1, depth: d1, sign: s1} = tile;
+	let [pu, pv] = PLANE_AXES[a1];
+	let [cu, cv] = blockOf(tile, S);
+	let p = hit.point;
+	let edge = [
+		{n: pu, e: cu, s2: -1, al: pv, lo: cv, dist: p[pu] - cu},
+		{n: pu, e: cu + S, s2: 1, al: pv, lo: cv, dist: cu + S - p[pu]},
+		{n: pv, e: cv, s2: -1, al: pu, lo: cu, dist: p[pv] - cv},
+		{n: pv, e: cv + S, s2: 1, al: pu, lo: cu, dist: cv + S - p[pv]},
+	].reduce((best, next) => next.dist < best.dist ? next : best);
+	let c = {a1, d1, s1, S, n: edge.n, e: edge.e, s2: edge.s2, al: edge.al, lo: edge.lo, hi: edge.lo + S,
+		mesh: hit.element, texture: hit.element.faces[hit.face].texture || false};
+	let along = [c.lo, c.hi];
+	c.touched = quadsIn(tiles, a1, d1, s1, {[c.n]: [c.e - c.s2 * S, c.e], [c.al]: along});
+	c.other = quadsIn(tiles, c.n, c.e, c.s2, {[a1]: [d1 - s1 * S, d1], [c.al]: along});
+	return c.touched && c.other ? c : null;
+}
+function cornerPoint(c, a1_value, n_value, along) {
+	let point = new THREE.Vector3();
+	point[c.a1] = a1_value;
+	point[c.n] = n_value;
+	point[c.al] = along;
+	return point;
+}
+// E runs along the corner edge, F1 along the far edge of the touched block, F2 along the far edge of the other block
+const cornerE = (c, w) => cornerPoint(c, c.d1, c.e, w);
+const cornerF1 = (c, w) => cornerPoint(c, c.d1, c.e - c.s2 * c.S, w);
+const cornerF2 = (c, w) => cornerPoint(c, c.d1 - c.s1 * c.S, c.e, w);
+const chamferPoints = c => [cornerF1(c, c.lo), cornerF1(c, c.hi), cornerF2(c, c.hi), cornerF2(c, c.lo)];
+
+function strokeVertex(mesh, world) {
+	let map = shave_stroke.vertex_maps.get(mesh);
+	if (!map) shave_stroke.vertex_maps.set(mesh, map = buildVertexMap(mesh));
+	let local = mesh.mesh.worldToLocal(world.clone());
+	let position = [round3(local.x), round3(local.y), round3(local.z)];
+	let id = position.join(',');
+	let vkey = map.get(id);
+	if (!vkey || !mesh.vertices[vkey]) {
+		vkey = mesh.addVertices(position)[0];
+		map.set(id, vkey);
+	}
+	return vkey;
+}
+function addShaveFace(mesh, points, uvs, texture, normal) {
+	let vkeys = points.map(point => strokeVertex(mesh, point));
+	let uv = {};
+	vkeys.forEach((vkey, i) => uv[vkey] = uvs[i]);
+	let face = new MeshFace(mesh, {vertices: vkeys, uv, texture});
+	mesh.addFaces(face);
+	if (worldNormal(mesh, face).dot(normal) < 0) face.invert();
+	shave_stroke.touched.add(mesh);
+}
+function findTriangle(points) {
+	for (let mesh of Mesh.all) {
+		for (let fkey in mesh.faces) {
+			let face = mesh.faces[fkey];
+			if (face.vertices.length != 3) continue;
+			let corners = face.vertices.map(vkey => worldVertex(mesh, vkey));
+			if (points.every(point => corners.some(corner => samePoint(corner, point)))) return {mesh, fkey};
+		}
+	}
+	return null;
+}
+function uvOnQuads(quads, world) {
+	for (let {mesh, fkey} of quads) {
+		let face = mesh.faces[fkey];
+		for (let vkey of face.vertices) {
+			if (samePoint(worldVertex(mesh, vkey), world)) return face.uv[vkey] ? face.uv[vkey].slice() : [0, 0];
+		}
+	}
+	return [0, 0];
+}
+// A face of the end plane loses what lies on the corner side of the cut: removed whole, or cut to a triangle
+// where the diagonal splits it
+function trimCap(c, {mesh, fkey}) {
+	let face = mesh.faces[fkey];
+	let side = vkey => {
+		let p = worldVertex(mesh, vkey);
+		return c.s1 * (p[c.a1] - c.d1) + c.s2 * (p[c.n] - c.e) + c.S;
+	};
+	let sorted = face.getSortedVertices();
+	let values = sorted.map(side);
+	if (values.every(v => v <= 1e-3)) return;
+	if (values.every(v => v >= -1e-3)) {
+		delete mesh.faces[fkey];
+	} else {
+		let keep = sorted.filter((vkey, i) => values[i] <= 1e-3);
+		sorted.forEach(vkey => {
+			if (!keep.includes(vkey)) delete face.uv[vkey];
+		});
+		face.vertices.replace(keep);
+	}
+	shave_stroke.touched.add(mesh);
+}
+function closeEnd(c, w, dir, gap_uv) {
+	let triangle = [cornerE(c, w), cornerF1(c, w), cornerF2(c, w)];
+	// Shaved earlier from the other side: the corner is now cut on both sides of this end
+	let gap = findTriangle(triangle);
+	if (gap) {
+		delete gap.mesh.faces[gap.fkey];
+		shave_stroke.touched.add(gap.mesh);
+		return;
+	}
+	let tiles = shave_stroke.tiles;
+	let square = {[c.a1]: [c.d1 - c.s1 * c.S, c.d1], [c.n]: [c.e - c.s2 * c.S, c.e]};
+	let caps = quadsIn(tiles, c.al, w, dir, square, true);
+	if (caps.length) {
+		caps.forEach(cap => trimCap(c, cap));
+		return;
+	}
+	// The corner stays square past this end: close the notch with a triangle facing back along the corner
+	let beyond = dir > 0 ? [w, w + H] : [w - H, w];
+	let continues = quadsIn(tiles, c.a1, c.d1, c.s1, {[c.n]: [c.e - c.s2 * H, c.e], [c.al]: beyond})
+		&& quadsIn(tiles, c.n, c.e, c.s2, {[c.a1]: [c.d1 - c.s1 * H, c.d1], [c.al]: beyond});
+	if (!continues) return;
+	let normal = new THREE.Vector3();
+	normal[c.al] = -dir;
+	addShaveFace(c.mesh, triangle, triangle.map(gap_uv), c.texture, normal);
+}
+function shaveCorner(c) {
+	// Read the touched side's UVs before its tiles go
+	let uvs = [cornerF1(c, c.lo), cornerF1(c, c.hi), cornerE(c, c.hi), cornerE(c, c.lo)].map(point => uvOnQuads(c.touched, point));
+	let texture = c.texture && Texture.all.find(t => t.uuid == c.texture);
+	let fx = texture ? texture.getUVWidth() / texture.width : 1;
+	let fy = texture ? texture.getUVHeight() / texture.height : 1;
+	let cell = [Math.min(...uvs.map(uv => uv[0])), Math.min(...uvs.map(uv => uv[1]))];
+	for (let {mesh, fkey} of [...c.touched, ...c.other]) {
+		delete mesh.faces[fkey];
+		shave_stroke.touched.add(mesh);
+	}
+	let normal = new THREE.Vector3();
+	normal[c.a1] = c.s1;
+	normal[c.n] = c.s2;
+	// The diagonal stretches the touched block's texture across its width: F1 keeps its UVs, F2 takes the corner edge's
+	addShaveFace(c.mesh, chamferPoints(c), uvs, c.texture, normal);
+	// Gap triangles map the touched block's cell flat onto the end plane
+	let [qu, qv] = PLANE_AXES[c.al];
+	let corner = cornerE(c, 0), far = cornerPoint(c, c.d1 - c.s1 * c.S, c.e - c.s2 * c.S, 0);
+	let origin = [Math.min(corner[qu], far[qu]), Math.min(corner[qv], far[qv])];
+	let gapUV = sign => point => {
+		let [tu, tv] = tileUV(c.al, sign, Math.round(point[qu] - origin[0]), Math.round(point[qv] - origin[1]), c.S);
+		return [cell[0] + tu * fx, cell[1] + tv * fy];
+	};
+	closeEnd(c, c.lo, -1, gapUV(1));
+	closeEnd(c, c.hi, 1, gapUV(-1));
+}
+
+function shaveStep(event) {
+	let corner = shaveTarget(shave_stroke.preview, event, shave_stroke.tiles);
+	if (!corner) return;
+	shaveCorner(corner);
+	shave_stroke.changed = true;
+	shave_stroke.tiles = buildTileIndex();
+	Canvas.updateView({elements: [...shave_stroke.touched], element_aspects: {geometry: true, faces: true, uv: true}});
+}
+function startShaveStroke(preview, event) {
+	Undo.initEdit({elements: Mesh.all.filter(mesh => mesh.visibility !== false && !mesh.locked)});
+	shave_stroke = {preview, tiles: buildTileIndex(), vertex_maps: new Map(), touched: new Set(), changed: false};
+	shaveStep(event);
+	document.addEventListener('mousemove', moveShaveStroke);
+	document.addEventListener('mouseup', endShaveStroke);
+}
+function moveShaveStroke(event) {
+	if (shave_stroke) shaveStep(event);
+}
+function endShaveStroke() {
+	document.removeEventListener('mousemove', moveShaveStroke);
+	document.removeEventListener('mouseup', endShaveStroke);
+	if (!shave_stroke) return;
+	let finished = shave_stroke;
+	shave_stroke = null;
+	if (!finished.changed) return Undo.cancelEdit();
+	finished.touched.forEach(removeLooseVertices);
+	Undo.finishEdit('Shave corners');
+	Canvas.updateView({elements: [...finished.touched], element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
+	if (last_paint_hover_event) onShaveHover(last_paint_hover_event);
+}
+function onShaveHover(event) {
+	last_paint_hover_event = event;
+	let preview = shave_stroke ? shave_stroke.preview : event.target && event.target.preview;
+	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	let corner = shaveTarget(preview, event, shave_stroke ? shave_stroke.tiles : buildTileIndex());
+	if (!corner) return hideGhost();
+	let lift = new THREE.Vector3();
+	lift[corner.a1] = corner.s1 * BRUSH.LIFT;
+	lift[corner.n] = corner.s2 * BRUSH.LIFT;
+	showGhostQuad(chamferPoints(corner).map(point => point.add(lift)), BRUSH.SHAVE_COLOR, true);
+}
+
 BARS.defineActions(function() {
 	new Tool('dew_tile_brush', {
 		name: 'Tile Brush',
@@ -847,6 +1080,39 @@ BARS.defineActions(function() {
 			}
 			// Runs before the next tool becomes active, so the UV editor refresh waits for the switch
 			setTimeout(refreshAtlasView, 0);
+		},
+	});
+
+	new Tool('dew_shave', {
+		name: 'Shave',
+		description: 'Bevel outside corners: click or drag along a corner to cut it at 45 degrees, one block deep. C switches full / half tiles',
+		icon: 'change_history',
+		category: 'tools',
+		transformerMode: 'hidden',
+		selectElements: false,
+		cursor: 'crosshair',
+		modes: ['edit'],
+		condition: () => Modes.edit && Format.id == 'dew_scene',
+		onCanvasClick(data) {
+			let event = data && data.event;
+			if (!event || event.button !== 0 || event.altKey || shave_stroke) return;
+			startShaveStroke(Preview.selected, event);
+		},
+		onSelect() {
+			shave_previous_selection_mode = BarItems.selection_mode.value;
+			BarItems.selection_mode.set('object');
+			updateSelection();
+			active_hover = onShaveHover;
+			document.addEventListener('mousemove', onShaveHover);
+		},
+		onUnselect() {
+			document.removeEventListener('mousemove', onShaveHover);
+			active_hover = null;
+			hideGhost();
+			if (shave_previous_selection_mode && shave_previous_selection_mode != 'object') {
+				BarItems.selection_mode.set(shave_previous_selection_mode);
+				updateSelection();
+			}
 		},
 	});
 

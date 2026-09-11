@@ -24,7 +24,7 @@ Personal fork of Blockbench 5.1.6 (JannisX11/blockbench). All work goes on branc
 
 ### Code map
 - `js/dew/dew_scene.js`: DEW Scene format, `DEW` constants, game grid, back-face tint on/off, per-project glTF export options, camera framing for new scenes.
-- `js/dew/tile_brush.js`: Tile Select, Tile Brush, Texture Brush, Paint Bucket and their shared helpers (`describeTile`, `tileUV`, `blockTiles`, `stampBlocks`, `buildTileIndex`, snapshot raycast for erasing).
+- `js/dew/tile_brush.js`: Tile Select, Tile Brush, Shave, Texture Brush, Paint Bucket and their shared helpers (`describeTile`, `tileUV`, `blockTiles`, `stampBlocks`, `buildTileIndex`, `hitFace`, snapshot raycast for erasing). Shave cuts outside corners at 45 degrees one block deep (16 or 32 per C, full size only on the 32 grid), keeps the touched side's texture, and closes the ends (trims end-plane tiles, adds or removes notch triangles).
 - `js/dew/dew_atlas.js`: DEW Atlas button (flat-color test atlas).
 - Small core hooks: `js/preview/canvas.js` (`Format.buildGrid`, back-face uniforms), `js/shaders/{texture,marker,solid,layered}.frag.glsl` (back-face tint), `js/texturing/textures.js` (uniforms, atlas button), `js/uv/uv.js` (tools with `atlas_picker` make the UV editor show `Texture.selected`, receive `onAtlasClick`, and draw `atlas_overlay`), `js/interface/toolbars.js`, `js/main.ts`.
 - Tile tool keys: click or drag paints, Ctrl erases or removes, Shift adds (select), W cycles the work plane, A / D step it a half cell, C switches full / half tiles. Bare keys still free: J K L N O Y [ ] 5 7 8 9 0.
@@ -42,5 +42,6 @@ Personal fork of Blockbench 5.1.6 (JannisX11/blockbench). All work goes on branc
 - CDP tests: a world point can project off the canvas; log the screen point when a click seems to do nothing. Image loads are async; wait before reading a new texture.
 
 ## Current state (newest first)
+- 2026-09-11: Shave tool (outside corners only; undo is the only way back for now; the texture brush and bucket do not paint diagonal or triangle faces yet).
 - 2026-09-11: Tile Select and Paint Bucket; multi-cell atlas stamps; Texture Brush and DEW Atlas; erase no longer drills through; back-face tint; Tile Brush; DEW Scene format. Earlier fork features (fit view, welding mode, turn edges, chamfer, auto unwrap and more) are in `git log`.
 - Open, not designed yet: move / group / flip for selected tiles; slopes (proposed: tile corner heights in 4-unit steps, Turn Edges picks the fold); diagonal walls; material and cluster edge tags; one-click export to the game folder; stable element names (proposed: element id in glTF node extras, since Blockbench names are neither unique nor stable).
