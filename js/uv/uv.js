@@ -2749,6 +2749,7 @@ Interface.definePanels(function() {
 				helper_lines: {x: -1, y: -1},
 				brush_type: BarItems.brush_shape.value,
 				overlay_canvas_mode: null,
+				atlas_overlay: null,	// {grid, cell} styles drawn over the texture by atlas-picking tools
 				selection_rect: {
 					pos_x: 0,
 					pos_y: 0,
@@ -2931,6 +2932,9 @@ Interface.definePanels(function() {
 					let texture;
 					if (Format.single_texture) {
 						texture = Texture.getDefault();
+					} else if (Toolbox.selected && Toolbox.selected.atlas_picker && Texture.selected) {
+						// Tools that pick from a texture atlas show the selected texture
+						texture = Texture.selected;
 					} else {
 						let elements = UVEditor.getMappableElements();
 						if (elements.length) {
@@ -3167,6 +3171,12 @@ Interface.definePanels(function() {
 						addEventListeners(document, 'pointerup', dragMouseWheelStop);
 						event.preventDefault();
 						$(getFocusedTextInput()).trigger('blur');
+						return false;
+
+					} else if (Toolbox.selected.onAtlasClick && event.which === 1 && this.texture) {
+						// Tools that pick from a texture atlas take left clicks on the texture
+						Toolbox.selected.onAtlasClick(this.texture, UVEditor.getBrushCoordinates(event, this.texture), event);
+						event.preventDefault();
 						return false;
 
 					} else if (
@@ -3450,7 +3460,7 @@ Interface.definePanels(function() {
 					UVEditor.vue.updateTexture()
 				},
 				reverseSelect(event) {
-					if (this.mode !== 'uv') return;
+					if (this.mode !== 'uv' || Toolbox.selected.atlas_picker) return;
 					var offset = $(this.$refs.frame).offset();
 					let local_position = [
 						event.clientX - offset.left,
@@ -4157,6 +4167,7 @@ Interface.definePanels(function() {
 					});
 				},
 				getDisplayedUVElements() {
+					if (Toolbox.selected && Toolbox.selected.atlas_picker) return [];
 					if (this.mode == 'uv' || this.uv_overlay) {
 						if (this.display_uv === 'texture_group') return this.getTextureGroupElements();
 						return (this.display_uv === 'all_elements' || this.mode == 'paint')
@@ -4978,6 +4989,8 @@ Interface.definePanels(function() {
 							:style="{width: inner_width + 'px', height: inner_height + 'px', margin: getFrameMargin(true), '--inner-width': inner_width + 'px', '--inner-height': inner_height + 'px'}"
 						>
 							<div id="uv_frame_spacer" :style="{left: (inner_width+getFrameMargin()[0])+'px', top: (inner_height+getFrameMargin()[1])+'px'}"></div>
+							<div v-if="atlas_overlay" :style="atlas_overlay.grid"></div>
+							<div v-if="atlas_overlay && atlas_overlay.cell" :style="atlas_overlay.cell"></div>
 
 							<template v-for="element in getDisplayedUVElements()">
 

@@ -13,6 +13,10 @@ const BRUSH = {
 	LIFT: 0.05,					// ghost and plane grid sit this far toward the camera to stay above tiles
 	NEW_MESH_NAME: 'tiles',
 	MESSAGE_TIME: 1200,
+	PAINT_COLOR: 0xffd24a,		// texture brush ghost
+	ATLAS_HALF_LINE: 'rgba(255, 255, 255, 0.25)',
+	ATLAS_TILE_LINE: 'rgba(255, 255, 255, 0.6)',
+	ATLAS_PICK_COLOR: '#ffd24a',
 };
 
 const H = DEW.HALF_CELL;
@@ -36,6 +40,7 @@ let previous_selection_mode = null;
 const round3 = v => Math.round(v * 1000) / 1000;
 const snap = (v, step = H) => Math.round(v / step) * step;
 const isActive = () => Toolbox.selected && Toolbox.selected.id == 'dew_tile_brush';
+const isDewTool = () => Toolbox.selected && ['dew_tile_brush', 'dew_texture_brush'].includes(Toolbox.selected.id);
 
 function planePoint(axis, depth, u, v) {
 	let [ua, va] = PLANE_AXES[axis];
@@ -76,11 +81,12 @@ function worldNormal(mesh, face) {
 	return normal.applyQuaternion(mesh.mesh.getWorldQuaternion(new THREE.Quaternion()));
 }
 
-// Texture coordinates inside one tile, oriented so textures read upright and unmirrored from the facing side
-function tileUV(axis, sign, du, dv) {
-	if (axis == 'y') return [sign > 0 ? du : H - du, dv];
-	let u = (axis == 'x') == (sign > 0) ? H - du : du;
-	return [u, H - dv];
+// Texture coordinates inside a tile block of the given size, oriented so textures read upright and
+// unmirrored from the facing side
+function tileUV(axis, sign, du, dv, size = H) {
+	if (axis == 'y') return [sign > 0 ? du : size - du, dv];
+	let u = (axis == 'x') == (sign > 0) ? size - du : du;
+	return [u, size - dv];
 }
 
 // An axis-aligned half-cell quad as {axis, depth, u, v, sign} in world space, or null
@@ -183,11 +189,10 @@ function paintAt(point) {
 	}
 }
 
-// Faces to erase for a hit: the face itself, or every same-facing tile of the full-tile cell around it
-function eraseTargets(mesh, fkey) {
+// Faces a brush acts on for a hit: the face itself, or every same-facing tile of the full-tile cell around it
+function blockTiles(mesh, fkey, size = state.size) {
 	let tile = describeTile(mesh, mesh.faces[fkey]);
 	if (!tile) return {fkeys: [fkey], tile: null};
-	let size = state.size;
 	let [cu, cv] = [Math.floor(tile.u / size + 1e-6) * size, Math.floor(tile.v / size + 1e-6) * size];
 	let fkeys = [];
 	for (let key in mesh.faces) {
@@ -236,7 +241,7 @@ function eraseStep(event) {
 	let hit = snapshotHit(event);
 	if (!hit || !hit.element.faces[hit.face]) return;
 	let mesh = hit.element;
-	for (let fkey of eraseTargets(mesh, hit.face).fkeys) {
+	for (let fkey of blockTiles(mesh, hit.face).fkeys) {
 		delete mesh.faces[fkey];
 	}
 	stroke.touched.add(mesh);
@@ -383,7 +388,7 @@ function onHover(event, ctrl_held = event.ctrlKey) {
 	if (erasing) {
 		let hit = stroke ? snapshotHit(event) : preview.raycast(event);
 		if (hit && (stroke || hit.type == 'element') && hit.element instanceof Mesh && hit.element.faces[hit.face]) {
-			let {tile, cu, cv} = eraseTargets(hit.element, hit.face);
+			let {tile, cu, cv} = blockTiles(hit.element, hit.face);
 			if (tile) return showGhost(tile.axis, tile.depth, tile.sign, cu, cv, state.size, BRUSH.ERASE_COLOR);
 		}
 		return hideGhost();
@@ -418,6 +423,144 @@ function announce() {
 	updatePlaneGrid();
 	if (last_hover_event) onHover(last_hover_event);
 }
+
+// Texture brush: pick a cell of the atlas in the UV editor, then click or drag over tiles to paint it.
+// Faces keep 1 texel per unit: each corner takes its texel from its offset inside the tile block.
+const texture_state = {
+	atlas: null,	// {texture: uuid, x, y}, the picked texel; snapped to the brush size when painting
+};
+let paint_stroke = null;
+let last_paint_hover_event = null;
+let paint_previous_selection_mode = null;
+
+function getAtlasTexture() {
+	return texture_state.atlas && Texture.all.find(texture => texture.uuid == texture_state.atlas.texture);
+}
+function atlasCell(size) {
+	let {x, y} = texture_state.atlas;
+	return [Math.floor(x / size) * size, Math.floor(y / size) * size];
+}
+function paintTile(mesh, fkey) {
+	let texture = getAtlasTexture();
+	if (!texture) return false;
+	let size = state.size;
+	let {fkeys, tile, cu, cv} = blockTiles(mesh, fkey, size);
+	if (!tile) return false;
+	let [ax, ay] = atlasCell(size);
+	let [ua, va] = PLANE_AXES[tile.axis];
+	let factor_x = texture.getUVWidth() / texture.width;
+	let factor_y = texture.getUVHeight() / texture.height;
+	let changed = false;
+	for (let key of fkeys) {
+		let face = mesh.faces[key];
+		for (let vkey of face.vertices) {
+			let point = mesh.mesh.localToWorld(new THREE.Vector3().fromArray(mesh.vertices[vkey]));
+			let [tu, tv] = tileUV(tile.axis, tile.sign, Math.round(point[ua] - cu), Math.round(point[va] - cv), size);
+			let uv = [(ax + tu) * factor_x, (ay + tv) * factor_y];
+			if (!face.uv[vkey] || face.uv[vkey][0] != uv[0] || face.uv[vkey][1] != uv[1]) changed = true;
+			face.uv[vkey] = uv;
+		}
+		if (face.texture != texture.uuid) {
+			face.texture = texture.uuid;
+			changed = true;
+		}
+	}
+	return changed;
+}
+
+function paintStep(event) {
+	let hit = paint_stroke.preview.raycast(event);
+	if (!hit || hit.type != 'element' || !(hit.element instanceof Mesh) || !hit.element.faces[hit.face]) return;
+	if (paintTile(hit.element, hit.face)) {
+		paint_stroke.changed = true;
+		Canvas.updateView({elements: [hit.element], element_aspects: {uv: true, faces: true}});
+	}
+}
+function startPaintStroke(preview, event) {
+	if (!getAtlasTexture()) {
+		Blockbench.showQuickMessage('Pick a tile in the UV editor first', BRUSH.MESSAGE_TIME);
+		return;
+	}
+	Undo.initEdit({elements: Mesh.all.filter(mesh => mesh.visibility !== false && !mesh.locked), uv_only: true});
+	paint_stroke = {preview, changed: false};
+	paintStep(event);
+	document.addEventListener('mousemove', movePaintStroke);
+	document.addEventListener('mouseup', endPaintStroke);
+}
+function movePaintStroke(event) {
+	if (paint_stroke) paintStep(event);
+}
+function endPaintStroke() {
+	document.removeEventListener('mousemove', movePaintStroke);
+	document.removeEventListener('mouseup', endPaintStroke);
+	if (!paint_stroke) return;
+	let changed = paint_stroke.changed;
+	paint_stroke = null;
+	if (changed) {
+		Undo.finishEdit('Paint tile textures');
+	} else {
+		Undo.cancelEdit();
+	}
+}
+
+function onPaintHover(event) {
+	last_paint_hover_event = event;
+	let preview = paint_stroke ? paint_stroke.preview : event.target && event.target.preview;
+	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	let hit = preview.raycast(event);
+	if (hit && hit.type == 'element' && hit.element instanceof Mesh && hit.element.faces[hit.face]) {
+		let {tile, cu, cv} = blockTiles(hit.element, hit.face);
+		if (tile) return showGhost(tile.axis, tile.depth, tile.sign, cu, cv, state.size, BRUSH.PAINT_COLOR);
+	}
+	hideGhost();
+}
+
+// Grid lines and the picked cell drawn over the atlas in the UV editor, sized in percent so they follow zoom
+function updateAtlasOverlay() {
+	let vue = UVEditor.vue;
+	if (!vue) return;
+	let texture = Toolbox.selected && Toolbox.selected.id == 'dew_texture_brush' && vue.texture instanceof Texture ? vue.texture : null;
+	if (!texture || !texture.width) {
+		vue.atlas_overlay = null;
+		return;
+	}
+	let w = texture.width, h = texture.height;
+	let lines = color => `linear-gradient(to right, ${color} 1px, transparent 1px), linear-gradient(to bottom, ${color} 1px, transparent 1px)`;
+	let tile_size = `${DEW.TILE / w * 100}% ${DEW.TILE / h * 100}%`;
+	let half_size = `${H / w * 100}% ${H / h * 100}%`;
+	let grid = {
+		position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 2,
+		backgroundImage: `${lines(BRUSH.ATLAS_TILE_LINE)}, ${lines(BRUSH.ATLAS_HALF_LINE)}`,
+		backgroundSize: `${tile_size}, ${tile_size}, ${half_size}, ${half_size}`,
+	};
+	let cell = null;
+	if (texture_state.atlas && texture_state.atlas.texture == texture.uuid) {
+		let [x, y] = atlasCell(state.size);
+		cell = {
+			position: 'absolute', pointerEvents: 'none', zIndex: 3, boxSizing: 'border-box',
+			left: x / w * 100 + '%', top: y / h * 100 + '%', width: state.size / w * 100 + '%', height: state.size / h * 100 + '%',
+			border: `2px solid ${BRUSH.ATLAS_PICK_COLOR}`, boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.6)',
+		};
+	}
+	vue.atlas_overlay = {grid, cell};
+}
+function pickAtlasCell(texture, coords) {
+	texture_state.atlas = {
+		texture: texture.uuid,
+		x: Math.clamp(Math.floor(coords.x), 0, texture.width - 1),
+		y: Math.clamp(Math.floor(coords.y), 0, texture.height - 1),
+	};
+	updateAtlasOverlay();
+}
+function refreshAtlasView() {
+	if (!UVEditor.vue) return;
+	UVEditor.vue.updateTexture();
+	updateAtlasOverlay();
+}
+// Picking a texture in the textures panel only refreshes the UV editor in paint mode, so the brush does it here
+Blockbench.on('select_texture', () => {
+	if (Toolbox.selected && Toolbox.selected.atlas_picker) refreshAtlasView();
+});
 
 BARS.defineActions(function() {
 	new Tool('dew_tile_brush', {
@@ -456,6 +599,43 @@ BARS.defineActions(function() {
 			}
 		},
 	});
+
+	let texture_brush = new Tool('dew_texture_brush', {
+		name: 'Texture Brush',
+		description: 'Pick a tile of the atlas in the UV editor, then click or drag over tiles to paint it. C switches full / half tiles',
+		icon: 'format_paint',
+		category: 'tools',
+		transformerMode: 'hidden',
+		selectElements: false,
+		cursor: 'crosshair',
+		modes: ['edit'],
+		condition: () => Modes.edit && Format.id == 'dew_scene',
+		onCanvasClick(data) {
+			let event = data && data.event;
+			if (!event || event.button !== 0 || event.altKey || paint_stroke) return;
+			startPaintStroke(Preview.selected, event);
+		},
+		onSelect() {
+			paint_previous_selection_mode = BarItems.selection_mode.value;
+			BarItems.selection_mode.set('object');
+			updateSelection();
+			document.addEventListener('mousemove', onPaintHover);
+			refreshAtlasView();
+		},
+		onUnselect() {
+			document.removeEventListener('mousemove', onPaintHover);
+			hideGhost();
+			if (paint_previous_selection_mode && paint_previous_selection_mode != 'object') {
+				BarItems.selection_mode.set(paint_previous_selection_mode);
+				updateSelection();
+			}
+			// Runs before the next tool becomes active, so the UV editor refresh waits for the switch
+			setTimeout(refreshAtlasView, 0);
+		},
+	});
+	// Tool only copies the options it knows, so the hooks the UV editor looks for are attached here
+	texture_brush.atlas_picker = true;
+	texture_brush.onAtlasClick = pickAtlasCell;
 
 	new Action('dew_tile_plane_axis', {
 		name: 'Tile Brush: Cycle Work Plane',
@@ -497,10 +677,16 @@ BARS.defineActions(function() {
 		icon: 'photo_size_select_small',
 		category: 'tools',
 		keybind: new Keybind({key: 'c'}),
-		condition: isActive,
+		condition: isDewTool,
 		click() {
 			state.size = state.size == DEW.TILE ? H : DEW.TILE;
-			announce();
+			if (Toolbox.selected.id == 'dew_texture_brush') {
+				Blockbench.showQuickMessage(state.size == DEW.TILE ? 'Full tile' : 'Half tile', BRUSH.MESSAGE_TIME);
+				updateAtlasOverlay();
+				if (last_paint_hover_event) onPaintHover(last_paint_hover_event);
+			} else {
+				announce();
+			}
 		}
 	});
 });
@@ -512,7 +698,7 @@ Blockbench.on('unselect_project', () => {
 	removePlaneGrid();
 });
 Blockbench.on('select_project', () => {
-	if (!isActive()) return;
+	if (!isDewTool()) return;
 	if (Format.id != 'dew_scene') {
 		BarItems.move_tool.select();
 	} else {
@@ -520,4 +706,4 @@ Blockbench.on('select_project', () => {
 	}
 });
 
-Object.assign(window, {DEWTileBrush: {state, BRUSH}});
+Object.assign(window, {DEWTileBrush: {state, texture_state, BRUSH}});
