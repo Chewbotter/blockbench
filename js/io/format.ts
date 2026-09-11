@@ -396,6 +396,10 @@ export class ModelFormat implements FormatOptions {
 		if (this.format_page && this.format_page.component) {
 			Vue.component(`format_page_${this.id}`, this.format_page.component)
 		}
+		// Keep options this constructor does not know (custom format hooks) instead of silently dropping them
+		for (let key in data) {
+			if (!(key in this)) (this as any)[key] = (data as any)[key];
+		}
 		Blockbench.dispatchEvent('construct_format', {format: this});
 	}
 	select() {

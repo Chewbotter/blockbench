@@ -812,7 +812,7 @@ BARS.defineActions(function() {
 		},
 	});
 
-	let texture_brush = new Tool('dew_texture_brush', {
+	new Tool('dew_texture_brush', {
 		name: 'Texture Brush',
 		description: 'Pick a tile of the atlas in the UV editor (drag to pick several as one stamp), then click or drag over tiles to paint. C switches full / half tiles',
 		icon: 'format_paint',
@@ -827,6 +827,8 @@ BARS.defineActions(function() {
 			if (!event || event.button !== 0 || event.altKey || paint_stroke) return;
 			startPaintStroke(Preview.selected, event);
 		},
+		atlas_picker: true,			// the UV editor shows the selected texture and hands clicks to onAtlasClick
+		onAtlasClick: pickAtlasCell,
 		onSelect() {
 			paint_previous_selection_mode = BarItems.selection_mode.value;
 			BarItems.selection_mode.set('object');
@@ -847,9 +849,6 @@ BARS.defineActions(function() {
 			setTimeout(refreshAtlasView, 0);
 		},
 	});
-	// Tool only copies the options it knows, so the hooks the UV editor looks for are attached here
-	texture_brush.atlas_picker = true;
-	texture_brush.onAtlasClick = pickAtlasCell;
 
 	new Tool('dew_tile_select', {
 		name: 'Tile Select',
@@ -880,7 +879,7 @@ BARS.defineActions(function() {
 		},
 	});
 
-	let paint_bucket = new Tool('dew_paint_bucket', {
+	new Tool('dew_paint_bucket', {
 		name: 'Paint Bucket',
 		description: 'Fill the connected tiles of a plane with the picked atlas tiles. C switches full / half tiles',
 		icon: 'format_color_fill',
@@ -895,6 +894,8 @@ BARS.defineActions(function() {
 			if (!event || event.button !== 0 || event.altKey) return;
 			bucketClick(Preview.selected, event);
 		},
+		atlas_picker: true,
+		onAtlasClick: pickAtlasCell,
 		onSelect() {
 			paint_previous_selection_mode = BarItems.selection_mode.value;
 			BarItems.selection_mode.set('object');
@@ -914,8 +915,6 @@ BARS.defineActions(function() {
 			setTimeout(refreshAtlasView, 0);
 		},
 	});
-	paint_bucket.atlas_picker = true;
-	paint_bucket.onAtlasClick = pickAtlasCell;
 
 	new Action('dew_tile_plane_axis', {
 		name: 'Tile Brush: Cycle Work Plane',

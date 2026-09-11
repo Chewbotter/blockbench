@@ -64,7 +64,7 @@ export function frameCluster(preview = Preview.selected) {
 	if (preview.controls.update) preview.controls.update();
 }
 
-const dew_format = new ModelFormat('dew_scene', {
+new ModelFormat('dew_scene', {
 	name: 'DEW Scene',
 	description: 'Distant Early Warning cluster: game grid, tile brush, glTF export at scale 16',
 	icon: 'grid_on',
@@ -86,6 +86,7 @@ const dew_format = new ModelFormat('dew_scene', {
 	animated_textures: true,
 	locators: true,
 	pbr: true,
+	buildGrid: buildDewGrid,	// Canvas.buildGrid uses this instead of the default grid
 	// Viewport only: the exporter never sees the shader tint
 	onActivation() {
 		Canvas.backfaceUniforms.BACKFACE_TINT.value = DEW.BACKFACE_TINT;
@@ -107,6 +108,5 @@ const dew_format = new ModelFormat('dew_scene', {
 		frameCluster();
 	},
 });
-dew_format.buildGrid = buildDewGrid;
 
 Object.assign(window, {DEW});

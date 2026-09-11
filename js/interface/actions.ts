@@ -788,6 +788,10 @@ export class Tool extends Action implements ToolSpecificOptions {
 		this.onTextureEditorClick = data.onTextureEditorClick;
 		this.onSelect = data.onSelect;
 		this.onUnselect = data.onUnselect;
+		// Keep options this constructor does not know (custom tool flags and hooks) instead of silently dropping them
+		for (let key in data) {
+			if (!(key in this)) (this as any)[key] = (data as any)[key];
+		}
 		this.node.onclick = () => {
 			scope.select();
 		}
@@ -815,7 +819,9 @@ export class Tool extends Action implements ToolSpecificOptions {
 		delete Toolbox.original;
 		this.uses++;
 		if (Project) {
-			Project.tool = Mode.selected.tool = this.id;
+			Project.tool = this.id;
+			// Mode.selected is still false while a project is being switched in
+			if (Mode.selected) Mode.selected.tool = this.id;
 		}
 
 		if (this.transformerMode) {

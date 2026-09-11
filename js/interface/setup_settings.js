@@ -164,7 +164,7 @@ function setupSettings() {
 	new Setting('selection_tolerance', 		{category: 'controls', value: 10, type: 'number', min: 1, max: 50});
 
 	//Edit
-	new Setting('undo_selections',			{category: 'edit', value: false});
+	new Setting('undo_selections',			{category: 'edit', value: true});
 	new Setting('undo_limit',				{category: 'edit', value: 256, type: 'number', min: 1});
 	new Setting('highlight_cubes',  		{category: 'edit', value: true, onChange() {
 		updateCubeHighlights();
