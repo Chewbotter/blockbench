@@ -765,6 +765,7 @@ export const BARS = {
 				'pivot_tool',
 				'vertex_snap_tool',
 				'stretch_tool',
+				'dew_tile_brush',
 				'knife_tool',
 				'turn_edges_tool',
 				'seam_tool',
