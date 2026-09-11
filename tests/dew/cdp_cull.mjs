@@ -35,18 +35,18 @@ await ev(`(() => {
 console.log('start:', await ev(counts), ' expect ground 16, group 5, far 4');
 
 console.log('A. cull from the group:', await ev(`(() => { let g = Mesh.all.find(m => m.name == 'group'); BarItems.dew_cull_overlapping.click(g); return true; })()`) && await ev(counts),
-	' expect ground 12 (its four overlapped tiles gone), group 5 untouched, far 4');
-console.log('   what is left on the ground:', await ev(state));
+	' expect both sides cleared: ground 12, group 1 (only its wall tile), far 4');
+console.log('   what is left:', await ev(state));
 
 console.log('B. undo:', await ev(`(() => { Undo.undo(); return true; })()`) && await ev(counts), ' expect ground 16 again');
 
 console.log('C. nothing overlapping the far patch:', await ev(`(() => { let f = Mesh.all.find(m => m.name == 'far'); BarItems.dew_cull_overlapping.click(f); return true; })()`) && await ev(counts),
 	' expect no change');
 
-console.log('D. a fully covered element is removed:', await ev(`(() => { let g = Mesh.all.find(m => m.name == 'group');
+console.log('D. an element left with nothing is removed:', await ev(`(() => { let g = Mesh.all.find(m => m.name == 'group');
 	let cover = __build('cover', [['y', 0, 1, 0, 0, 2, 2]]); unselectAllElements();
 	BarItems.dew_cull_overlapping.click(g);
-	return JSON.stringify({cover_gone: !Mesh.all.find(m => m.name == 'cover')}); })()`), ' expect cover_gone true');
+	return JSON.stringify({cover_gone: !Mesh.all.find(m => m.name == 'cover')}); })()`), ' expect cover_gone true: its four tiles all coincided');
 console.log('   ', await ev(counts));
 
 console.log('E. in the menu and only in DEW scenes:', await ev(`JSON.stringify({in_mesh_menu: Mesh.prototype.menu.structure.includes('dew_cull_overlapping'), dew: Condition(BarItems.dew_cull_overlapping.condition)})`),

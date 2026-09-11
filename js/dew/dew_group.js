@@ -116,22 +116,24 @@ function rotateGroup(clockwise) {
 	Canvas.updateView({elements: meshes, element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
 }
 
-// Tiles of other elements sitting exactly where this element has tiles: the overlap a duplicated group leaves on
-// what was already there. Facing is ignored, so a tile and a back-to-back twin both go.
+// Tiles sharing a plane and cell with this element's tiles: the overlap a duplicated group leaves on what was
+// already there. Both sides go, since a coincident pair is hidden from outside and fights in the depth buffer.
+// Facing is ignored, so a tile and a back-to-back twin both go.
 function cullOverlappingFaces(mesh) {
 	if (!(mesh instanceof Mesh)) return 0;
-	let cells = new Set();
-	for (let fkey in mesh.faces) {
-		let tile = describeTile(mesh, mesh.faces[fkey]);
-		if (tile) cells.add(`${tile.axis}|${tile.depth}|${tile.u}|${tile.v}`);
-	}
-	let victims = [];
+	let cells = new Map();
 	for (let other of Mesh.all) {
-		if (other == mesh || other.locked) continue;
+		if (other.locked) continue;
 		for (let fkey in other.faces) {
 			let tile = describeTile(other, other.faces[fkey]);
-			if (tile && cells.has(`${tile.axis}|${tile.depth}|${tile.u}|${tile.v}`)) victims.push({mesh: other, fkey});
+			if (!tile) continue;
+			let key = `${tile.axis}|${tile.depth}|${tile.u}|${tile.v}`;
+			cells.set(key, (cells.get(key) || []).concat([{mesh: other, fkey}]));
 		}
+	}
+	let victims = [];
+	for (let faces of cells.values()) {
+		if (faces.length > 1 && faces.some(face => face.mesh == mesh)) victims.push(...faces);
 	}
 	if (!victims.length) {
 		Blockbench.showQuickMessage('No overlapping tiles', 1200);
