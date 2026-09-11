@@ -3,8 +3,8 @@
  *
  * A rim is a closed loop of open edges (edges used by exactly one face). A loop is tiled
  * with quads (and a triangle when the count is odd) by splitting it recursively at the
- * diagonal that keeps both halves as flat as possible, so a bent rim gets its crease and a
- * flat rim gets an orderly cap. New faces are oriented to match their neighbours.
+ * shortest chord, so vertices that sit close together get joined and a strip becomes a run
+ * of quads. Flatness and sliver avoidance settle ties. New faces are oriented to match their neighbours.
  */
 
 type Vec3 = ArrayVector3;
@@ -109,6 +109,35 @@ function planarityError(mesh: Mesh, loop: string[], scale: number): number {
 	return max_distance / scale;
 }
 
+// Split score weights. Chord length leads; the rest only settle near ties.
+const SCORE_CHORD = 1;
+const SCORE_FLATNESS = 0.5;
+const SCORE_PARITY = 0.05;
+const SCORE_SLIVER = 1;
+// A corner of a final face wider than this (degrees) counts as a sliver
+const SLIVER_ANGLE = 120;
+
+/**
+ * Penalty for a piece that would become a face (3 or 4 vertices) with a near-straight corner,
+ * such as a needle triangle cut along a column of vertices. 0 for larger pieces, which are split further.
+ */
+function sliverPenalty(mesh: Mesh, piece: string[]): number {
+	if (piece.length > 4) return 0;
+	let widest = 0;
+	for (let i = 0; i < piece.length; i++) {
+		let v = mesh.vertices[piece[i]];
+		let prev = mesh.vertices[piece[(i + piece.length - 1) % piece.length]];
+		let next = mesh.vertices[piece[(i + 1) % piece.length]];
+		let a = [prev[0] - v[0], prev[1] - v[1], prev[2] - v[2]];
+		let b = [next[0] - v[0], next[1] - v[1], next[2] - v[2]];
+		let la = Math.hypot(a[0], a[1], a[2]), lb = Math.hypot(b[0], b[1], b[2]);
+		if (la == 0 || lb == 0) return 1;
+		let cos = Math.clamp((a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (la * lb), -1, 1);
+		widest = Math.max(widest, Math.acos(cos) * 180 / Math.PI);
+	}
+	return Math.max(0, (widest - SLIVER_ANGLE) / (180 - SLIVER_ANGLE));
+}
+
 /** Recursively splits a loop into pieces of at most 4 vertices. */
 function splitLoop(mesh: Mesh, loop: string[], scale: number, output: string[][]) {
 	if (loop.length <= 4) {
@@ -124,11 +153,13 @@ function splitLoop(mesh: Mesh, loop: string[], scale: number, output: string[][]
 			let side_b = loop.slice(j).concat(loop.slice(0, i + 1));
 			if (side_a.length < 3 || side_b.length < 3) continue;
 
-			// Flatness dominates; prefer all-quad splits, then short diagonals
+			// Shortest chord first, so vertices that sit close together get joined (rungs across a
+			// strip). Flatness, quad parity and sliver avoidance break the near ties.
+			let diagonal = distance(mesh.vertices[loop[i]], mesh.vertices[loop[j]]) / scale;
 			let flatness = planarityError(mesh, side_a, scale) + planarityError(mesh, side_b, scale);
 			let parity = (side_a.length % 2) + (side_b.length % 2);
-			let diagonal = distance(mesh.vertices[loop[i]], mesh.vertices[loop[j]]) / scale;
-			let score = flatness * 10 + parity * 0.05 + diagonal * 0.1;
+			let sliver = sliverPenalty(mesh, side_a) + sliverPenalty(mesh, side_b);
+			let score = diagonal * SCORE_CHORD + flatness * SCORE_FLATNESS + parity * SCORE_PARITY + sliver * SCORE_SLIVER;
 			if (!best || score < best.score) best = {score, a: side_a, b: side_b};
 		}
 	}
