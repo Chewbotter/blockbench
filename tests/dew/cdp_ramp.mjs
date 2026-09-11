@@ -80,7 +80,7 @@ console.log('start:', await ev(counts), ' expect floor 16, wall_z 12, wall_x 8, 
 await hover([24, 0, 6]);
 console.log('A. hover on the floor by the wall:', await ev(`!!Canvas.scene.getObjectByName('dew_tile_ghost')`), ' expect true');
 await hover([24, 0, 40]);
-console.log('B. hover mid floor:', await ev(`!!Canvas.scene.getObjectByName('dew_tile_ghost')`), ' expect false');
+console.log('B. hover mid floor:', await ev(`!!Canvas.scene.getObjectByName('dew_tile_ghost')`), ' expect true: any edge now offers a free diagonal');
 
 await click([24, 0, 6]);
 console.log('C. ramp the floor/wall corner at x 16..32:', await ev(counts), ' expect floor 18 (tile out, slope plus two ends in), wall_z 11, untextured_new 0');

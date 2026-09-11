@@ -1104,6 +1104,189 @@ function onShaveHover(event) {
 	showGhostQuad(chamferPoints(corner).map(point => point.add(lift)), inside ? BRUSH.RAMP_COLOR : BRUSH.SHAVE_COLOR, !inside);
 }
 
+// Ramp drawing: a run of 45 degree faces starting at an edge. A piece started on a flat tile folds away from it
+// (out across the edge, then out of the plane); a piece started on a diagonal continues that diagonal. Dragging
+// adds further pieces in a straight line from the first, so one stroke climbs several tiles or extends a
+// diagonal wall. Starting on an inside corner keeps the old behaviour for the first piece: the corner fills and
+// the tiles behind the slope go.
+const RAMP = {
+	MAX_PIECES: 64,
+};
+
+const facePoints = (mesh, face) => face.getSortedVertices().map(vkey => worldVertex(mesh, vkey));
+function nearestFaceEdge(points, cursor) {
+	let best = null;
+	for (let i = 0; i < points.length; i++) {
+		let a = points[i], b = points[(i + 1) % points.length];
+		let distance = a.clone().add(b).multiplyScalar(0.5).distanceTo(cursor);
+		if (!best || distance < best.distance) best = {a, b, index: i, distance};
+	}
+	return best;
+}
+const pieceKey = points => points.map(p => [p.x, p.y, p.z].map(round3).join(',')).sort().join('|');
+
+// Where a ramp stroke would start from the face under the cursor: the edge nearest it, and the step to the far edge
+function rampStart(mesh, face, cursor, size) {
+	let tile = describeTile(mesh, face);
+	if (tile) {
+		let [pu, pv] = PLANE_AXES[tile.axis];
+		let [cu, cv] = blockOf(tile, size);
+		let edge = [
+			{n: pu, sign: -1, e: cu, al: pv, lo: cv, dist: cursor[pu] - cu},
+			{n: pu, sign: 1, e: cu + size, al: pv, lo: cv, dist: cu + size - cursor[pu]},
+			{n: pv, sign: -1, e: cv, al: pu, lo: cu, dist: cursor[pv] - cv},
+			{n: pv, sign: 1, e: cv + size, al: pu, lo: cu, dist: cv + size - cursor[pv]},
+		].sort((first, second) => first.dist - second.dist)[0];
+		let at = along => {
+			let point = new THREE.Vector3();
+			point[tile.axis] = tile.depth;
+			point[edge.n] = edge.e;
+			point[edge.al] = along;
+			return point;
+		};
+		let step = new THREE.Vector3();
+		step[edge.n] = edge.sign * size;
+		step[tile.axis] = tile.sign * size;
+		// The far corners of the block are where the piece takes its far UVs from
+		let opposite = along => {
+			let point = at(along);
+			point[edge.n] -= edge.sign * size;
+			return point;
+		};
+		return {a: at(edge.lo), b: at(edge.lo + size), step, uv_far: [opposite(edge.lo), opposite(edge.lo + size)]};
+	}
+	let points = facePoints(mesh, face);
+	if (points.length != 4) return null;
+	let edge = nearestFaceEdge(points, cursor);
+	let far_a = points[(edge.index + 3) % 4], far_b = points[(edge.index + 2) % 4];
+	let step = edge.a.clone().add(edge.b).sub(far_a).sub(far_b).multiplyScalar(0.5);
+	return {a: edge.a.clone(), b: edge.b.clone(), step, uv_far: [far_a, far_b]};
+}
+function uvAtPoint(mesh, face, point) {
+	for (let vkey of face.vertices) {
+		if (samePoint(worldVertex(mesh, vkey), point)) return face.uv[vkey] ? face.uv[vkey].slice() : [0, 0];
+	}
+	return [0, 0];
+}
+function addRampPiece(run, index) {
+	let offset = run.step.clone().multiplyScalar(index);
+	let near_a = run.a.clone().add(offset), near_b = run.b.clone().add(offset);
+	let far_b = near_b.clone().add(run.step), far_a = near_a.clone().add(run.step);
+	let points = [near_a, near_b, far_b, far_a];
+	let key = pieceKey(points);
+	if (run.placed.has(key)) return false;
+	run.placed.add(key);
+	// Faces the side the camera is on, like a placed tile
+	let normal = new THREE.Vector3().subVectors(near_b, near_a).cross(new THREE.Vector3().subVectors(far_a, near_a)).normalize();
+	if (normal.dot(new THREE.Vector3().subVectors(run.preview.camera.position, near_a)) < 0) normal.negate();
+	addShaveFace(run.mesh, points, run.uvs, run.texture, normal);
+	return true;
+}
+// How many pieces the cursor reaches along the run, from the closest approach of the cursor ray to the run line
+function rampReach(run, event) {
+	let ray = getRay(run.preview, event);
+	let origin = run.a.clone().add(run.b).multiplyScalar(0.5);
+	let direction = run.step.clone().normalize();
+	let between = origin.clone().sub(ray.origin);
+	let dd = direction.dot(ray.direction);
+	let denominator = 1 - dd * dd;
+	if (Math.abs(denominator) < 1e-6) return 1;
+	let distance = (dd * ray.direction.dot(between) - direction.dot(between)) / denominator;
+	return Math.clamp(Math.round(distance / run.step.length()), 0, RAMP.MAX_PIECES);
+}
+function extendRamp(count) {
+	let run = shave_stroke.run;
+	let changed = false;
+	for (let index = 0; index < count; index++) {
+		if (addRampPiece(run, index)) changed = true;
+	}
+	if (!changed) return;
+	shave_stroke.changed = true;
+	Canvas.updateView({elements: [...shave_stroke.touched], element_aspects: {geometry: true, faces: true, uv: true}});
+}
+
+function startRampStroke(preview, event) {
+	let tiles = buildTileIndex();
+	shave_stroke = {preview, inside: true, tiles, vertex_maps: new Map(), touched: new Set(), changed: false};
+	let corner = shaveTarget(preview, event, tiles, true);
+	let run = null;
+	if (corner) {
+		// An inside corner still fills, and the run carries on from the top edge of that slope
+		Undo.initEdit({elements: Mesh.all.filter(mesh => mesh.visibility !== false && !mesh.locked)});
+		shaveCorner(corner);
+		shave_stroke.changed = true;
+		let step = cornerF2(corner, corner.lo).sub(cornerF1(corner, corner.lo));
+		run = {
+			preview, mesh: corner.mesh, texture: corner.texture, placed: new Set(),
+			a: cornerF2(corner, corner.lo), b: cornerF2(corner, corner.hi), step,
+			uvs: [[0, 0], [0, 0], [0, 0], [0, 0]],
+		};
+		let slope = [cornerF1(corner, corner.lo), cornerF1(corner, corner.hi), cornerF2(corner, corner.hi), cornerF2(corner, corner.lo)];
+		run.placed.add(pieceKey(slope));
+		// The corner fill is the stroke's first piece: a plain click adds nothing beyond it
+		run.min_pieces = 0;
+	} else {
+		let hit = hitFace(preview, event);
+		let start = hit && rampStart(hit.element, hit.element.faces[hit.face], hit.point, state.size);
+		if (!start) {
+			shave_stroke = null;
+			return;
+		}
+		let face = hit.element.faces[hit.face];
+		Undo.initEdit({elements: Mesh.all.filter(mesh => mesh.visibility !== false && !mesh.locked)});
+		run = {
+			preview, mesh: hit.element, texture: face.texture || false, placed: new Set(),
+			a: start.a, b: start.b, step: start.step,
+			// The near edge keeps the source's UVs, the far edge takes the source's opposite edge
+			uvs: [uvAtPoint(hit.element, face, start.a), uvAtPoint(hit.element, face, start.b),
+				uvAtPoint(hit.element, face, start.uv_far[1]), uvAtPoint(hit.element, face, start.uv_far[0])],
+		};
+		// A click draws the first piece here, since there is nothing yet
+		run.min_pieces = 1;
+	}
+	// Faces already standing where a piece would go are left alone
+	for (let mesh of Mesh.all) {
+		for (let fkey in mesh.faces) run.placed.add(pieceKey(facePoints(mesh, mesh.faces[fkey])));
+	}
+	run.placed.delete(pieceKey([run.a, run.b, run.b.clone().add(run.step), run.a.clone().add(run.step)]));
+	shave_stroke.run = run;
+	extendRamp(run.min_pieces);
+	document.addEventListener('mousemove', moveRampStroke);
+	document.addEventListener('mouseup', endRampStroke);
+}
+function moveRampStroke(event) {
+	if (!shave_stroke || !shave_stroke.run) return;
+	extendRamp(Math.max(shave_stroke.run.min_pieces, rampReach(shave_stroke.run, event)));
+}
+function endRampStroke() {
+	document.removeEventListener('mousemove', moveRampStroke);
+	document.removeEventListener('mouseup', endRampStroke);
+	if (!shave_stroke) return;
+	let finished = shave_stroke;
+	shave_stroke = null;
+	if (!finished.changed) return Undo.cancelEdit();
+	finished.touched.forEach(removeLooseVertices);
+	Undo.finishEdit('Draw ramp');
+	Canvas.updateView({elements: [...finished.touched], element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
+}
+function onRampHover(event) {
+	last_paint_hover_event = event;
+	let preview = shave_stroke ? shave_stroke.preview : event.target && event.target.preview;
+	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	if (shave_stroke && shave_stroke.run) {
+		let run = shave_stroke.run;
+		let offset = run.step.clone().multiplyScalar(rampReach(run, event) - 1);
+		let a = run.a.clone().add(offset), b = run.b.clone().add(offset);
+		return showGhostQuad([a, b, b.clone().add(run.step), a.clone().add(run.step)], BRUSH.RAMP_COLOR);
+	}
+	let corner = shaveTarget(preview, event, buildTileIndex(), true);
+	if (corner) return showGhostQuad(chamferPoints(corner), BRUSH.RAMP_COLOR);
+	let hit = hitFace(preview, event);
+	let start = hit && rampStart(hit.element, hit.element.faces[hit.face], hit.point, state.size);
+	if (!start) return hideGhost();
+	showGhostQuad([start.a, start.b, start.b.clone().add(start.step), start.a.clone().add(start.step)], BRUSH.RAMP_COLOR);
+}
+
 BARS.defineActions(function() {
 	new Tool('dew_tile_brush', {
 		name: 'Tile Brush',
@@ -1215,7 +1398,7 @@ BARS.defineActions(function() {
 
 	new Tool('dew_ramp', {
 		name: 'Ramp',
-		description: 'Fill inside corners: click or drag along a corner to close it with a 45 degree slope, one block deep. C switches full / half tiles',
+		description: 'Draw 45 degree faces from an edge: drag to run several in a line, up a slope or along a diagonal wall. An inside corner fills as before. C switches full / half tiles',
 		icon: 'trending_up',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -1226,17 +1409,17 @@ BARS.defineActions(function() {
 		onCanvasClick(data) {
 			let event = data && data.event;
 			if (!event || event.button !== 0 || event.altKey || shave_stroke) return;
-			startShaveStroke(Preview.selected, event);
+			startRampStroke(Preview.selected, event);
 		},
 		onSelect() {
 			shave_previous_selection_mode = BarItems.selection_mode.value;
 			BarItems.selection_mode.set('object');
 			updateSelection();
-			active_hover = onShaveHover;
-			document.addEventListener('mousemove', onShaveHover);
+			active_hover = onRampHover;
+			document.addEventListener('mousemove', onRampHover);
 		},
 		onUnselect() {
-			document.removeEventListener('mousemove', onShaveHover);
+			document.removeEventListener('mousemove', onRampHover);
 			active_hover = null;
 			hideGhost();
 			if (shave_previous_selection_mode && shave_previous_selection_mode != 'object') {
