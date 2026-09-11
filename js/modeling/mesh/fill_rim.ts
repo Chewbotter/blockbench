@@ -18,9 +18,8 @@ function edgeKey(a: string, b: string) {
  * Finds every closed loop of open edges whose vertices are all in `candidates`.
  * Vertices that are not on exactly two such open edges are ignored.
  */
-export function findRimLoops(mesh: Mesh, candidates: string[]): RimLoop[] {
-	if (candidates.length < 3) return [];
-
+/** Open edges (used by exactly one face) between candidate vertices: neighbour lists and the face each edge belongs to */
+function openEdges(mesh: Mesh, candidates: string[]) {
 	let edge_usage = new Map<string, {edge: [string, string], count: number, face: MeshFace}>();
 	for (let fkey in mesh.faces) {
 		let face = mesh.faces[fkey];
@@ -49,6 +48,12 @@ export function findRimLoops(mesh: Mesh, candidates: string[]): RimLoop[] {
 		adjacency.get(edge[1]).push(edge[0]);
 		edge_faces.set(edgeKey(edge[0], edge[1]), face);
 	}
+	return {adjacency, edge_faces};
+}
+
+export function findRimLoops(mesh: Mesh, candidates: string[]): RimLoop[] {
+	if (candidates.length < 3) return [];
+	let {adjacency, edge_faces} = openEdges(mesh, candidates);
 
 	let loops: RimLoop[] = [];
 	let visited = new Set<string>();
@@ -238,13 +243,41 @@ export function fillRimLoop(mesh: Mesh, {loop, reference_face}: RimLoop): string
 }
 
 /**
- * Fills the rim formed by the selected vertices. Returns the keys of the new faces,
- * or null if the selection is not exactly one closed rim covering all selected vertices.
+ * An open chain of rim edges through every candidate vertex (two ends with one open edge each,
+ * everything else with two), such as part of a strip's open side. Returned as a loop that is
+ * closed by the chord between the two ends. Null if the candidates do not form exactly one such chain.
+ */
+export function findRimChain(mesh: Mesh, candidates: string[]): RimLoop | null {
+	if (candidates.length < 3) return null;
+	let {adjacency, edge_faces} = openEdges(mesh, candidates);
+	let ends = candidates.filter(vkey => adjacency.get(vkey)?.length == 1);
+	if (ends.length != 2) return null;
+	let chain = [ends[0]];
+	let previous: string = null;
+	let current = ends[0];
+	while (current != ends[1]) {
+		let neighbours = adjacency.get(current);
+		let next = neighbours?.find(vkey => vkey != previous);
+		if (!next || chain.includes(next)) return null;
+		chain.push(next);
+		previous = current;
+		current = next;
+	}
+	if (chain.length != candidates.length) return null;
+	return {loop: chain, reference_face: edge_faces.get(edgeKey(chain[0], chain[1]))};
+}
+
+/**
+ * Fills the rim formed by the selected vertices: one closed rim, or one open chain of rim edges
+ * that gets closed across its ends. Returns the keys of the new faces, or null if the selection
+ * is neither.
  */
 export function fillSelectedRim(mesh: Mesh, selected: string[]): string[] | null {
 	let loops = findRimLoops(mesh, selected);
-	if (loops.length != 1 || loops[0].loop.length != selected.length) return null;
-	return fillRimLoop(mesh, loops[0]);
+	if (loops.length == 1 && loops[0].loop.length == selected.length) return fillRimLoop(mesh, loops[0]);
+	if (loops.length) return null;
+	let chain = findRimChain(mesh, selected);
+	return chain ? fillRimLoop(mesh, chain) : null;
 }
 
 /** Fills every closed rim found among the candidate vertices. */
