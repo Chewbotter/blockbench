@@ -1043,6 +1043,7 @@ export class Mesh extends OutlinerElement {
 		'split_mesh',
 		'split_closed_mesh',
 		'merge_meshes',
+		'dew_cull_overlapping',
 		...Outliner.control_menu_group,
 		new MenuSeparator('settings'),
 		'allow_element_mirror_modeling',

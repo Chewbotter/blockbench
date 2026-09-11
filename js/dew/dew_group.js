@@ -4,6 +4,7 @@
 // open) and rotation is 90 degrees in place, so tiles stay axis aligned and on the grid.
 import { THREE } from "../lib/libs";
 import { DEW } from "./dew_scene";
+import { describeTile } from "./tile_brush";
 
 const GROUP = {
 	NAME: 'group',
@@ -115,7 +116,54 @@ function rotateGroup(clockwise) {
 	Canvas.updateView({elements: meshes, element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
 }
 
+// Tiles of other elements sitting exactly where this element has tiles: the overlap a duplicated group leaves on
+// what was already there. Facing is ignored, so a tile and a back-to-back twin both go.
+function cullOverlappingFaces(mesh) {
+	if (!(mesh instanceof Mesh)) return 0;
+	let cells = new Set();
+	for (let fkey in mesh.faces) {
+		let tile = describeTile(mesh, mesh.faces[fkey]);
+		if (tile) cells.add(`${tile.axis}|${tile.depth}|${tile.u}|${tile.v}`);
+	}
+	let victims = [];
+	for (let other of Mesh.all) {
+		if (other == mesh || other.locked) continue;
+		for (let fkey in other.faces) {
+			let tile = describeTile(other, other.faces[fkey]);
+			if (tile && cells.has(`${tile.axis}|${tile.depth}|${tile.u}|${tile.v}`)) victims.push({mesh: other, fkey});
+		}
+	}
+	if (!victims.length) {
+		Blockbench.showQuickMessage('No overlapping tiles', 1200);
+		return 0;
+	}
+	let meshes = [...new Set(victims.map(victim => victim.mesh))];
+	Undo.initEdit({elements: meshes, outliner: true});
+	victims.forEach(victim => delete victim.mesh.faces[victim.fkey]);
+	let emptied = [];
+	for (let other of meshes) {
+		removeLooseVertices(other);
+		if (!Object.keys(other.faces).length) emptied.push(other);
+	}
+	emptied.forEach(other => other.remove());
+	let left = meshes.filter(other => !emptied.includes(other));
+	Undo.finishEdit('Cull overlapping faces', {elements: left, outliner: true});
+	Canvas.updateView({elements: left, element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
+	Blockbench.showQuickMessage(`Removed ${victims.length} overlapping tiles`, 1500);
+	return victims.length;
+}
+
 BARS.defineActions(function() {
+	new Action('dew_cull_overlapping', {
+		name: 'Cull Overlapping Faces',
+		description: 'Remove tiles of other elements that sit exactly where this element has tiles',
+		icon: 'layers_clear',
+		category: 'edit',
+		condition: () => Format.id == 'dew_scene',
+		click(context) {
+			cullOverlappingFaces(context instanceof Mesh ? context : Mesh.selected[0]);
+		},
+	});
 	new Action('dew_group_tiles', {
 		name: 'Group Tiles',
 		description: 'Move the selected tiles into their own element, to select, duplicate, move or rotate as a unit',

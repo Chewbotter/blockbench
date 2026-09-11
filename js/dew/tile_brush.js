@@ -94,7 +94,7 @@ function tileUV(axis, sign, du, dv, size = H) {
 }
 
 // An axis-aligned half-cell quad as {axis, depth, u, v, sign} in world space, or null
-function describeTile(mesh, face) {
+export function describeTile(mesh, face) {
 	if (!face || face.vertices.length != 4) return null;
 	let points = face.vertices.map(vkey => mesh.mesh.localToWorld(new THREE.Vector3().fromArray(mesh.vertices[vkey])));
 	for (let axis of AXES) {
@@ -1382,4 +1382,4 @@ Blockbench.on('select_project', () => {
 });
 
 // The internals the scripted tests poke at
-Object.assign(window, {DEWTileBrush: {state, texture_state, BRUSH, hitFace, describeTile, buildTileIndex, shaveTarget}});
+Object.assign(window, {DEWTileBrush: {state, texture_state, BRUSH, hitFace, describeTile, buildTileIndex, shaveTarget, tileUV, PLANE_AXES}});
