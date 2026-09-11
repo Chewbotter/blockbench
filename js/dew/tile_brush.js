@@ -197,9 +197,44 @@ function eraseTargets(mesh, fkey) {
 	}
 	return {fkeys, tile, cu, cv};
 }
+// Erase strokes raycast against the geometry as it was when the stroke started, so planes revealed
+// by erasing (the far side of a box seen through the new hole) can never be hit
+function snapshotMeshes() {
+	let material = new THREE.MeshBasicMaterial({side: THREE.DoubleSide});
+	let proxies = [];
+	for (let mesh of Mesh.all) {
+		if (mesh.visibility === false || mesh.locked || !mesh.mesh.geometry) continue;
+		mesh.mesh.updateMatrixWorld(true);
+		let proxy = new THREE.Mesh(mesh.mesh.geometry.clone(), material);
+		proxy.matrixAutoUpdate = false;
+		proxy.matrixWorld.copy(mesh.mesh.matrixWorld);
+		// Triangle index to face key, in the order the mesh geometry is built (same mapping as Preview.raycast)
+		proxy.triangle_faces = [];
+		for (let fkey in mesh.faces) {
+			let count = mesh.faces[fkey].vertices.length;
+			if (count < 3) continue;
+			proxy.triangle_faces.push(fkey);
+			if (count == 4) proxy.triangle_faces.push(fkey);
+		}
+		proxy.element = mesh;
+		proxies.push(proxy);
+	}
+	return {proxies, material};
+}
+function disposeSnapshot(snapshot) {
+	snapshot.proxies.forEach(proxy => proxy.geometry.dispose());
+	snapshot.material.dispose();
+}
+function snapshotHit(event) {
+	let raycaster = new THREE.Raycaster();
+	raycaster.ray.copy(getRay(stroke.preview, event));
+	let intersect = raycaster.intersectObjects(stroke.snapshot.proxies, false)[0];
+	if (!intersect) return null;
+	return {element: intersect.object.element, face: intersect.object.triangle_faces[intersect.faceIndex]};
+}
 function eraseStep(event) {
-	let hit = stroke.preview.raycast(event);
-	if (!hit || hit.type != 'element' || !(hit.element instanceof Mesh) || !hit.element.faces[hit.face]) return;
+	let hit = snapshotHit(event);
+	if (!hit || !hit.element.faces[hit.face]) return;
 	let mesh = hit.element;
 	for (let fkey of eraseTargets(mesh, hit.face).fkeys) {
 		delete mesh.faces[fkey];
@@ -218,7 +253,7 @@ function removeLooseVertices(mesh) {
 function startStroke(preview, event) {
 	if (event.ctrlKey) {
 		Undo.initEdit({elements: Mesh.all.filter(mesh => mesh.visibility !== false && !mesh.locked)});
-		stroke = {erase: true, preview, touched: new Set()};
+		stroke = {erase: true, preview, touched: new Set(), snapshot: snapshotMeshes()};
 		eraseStep(event);
 	} else {
 		let target = getTarget(preview, event);
@@ -267,6 +302,7 @@ function endStroke() {
 	let finished = stroke;
 	stroke = null;
 	if (finished.erase) {
+		disposeSnapshot(finished.snapshot);
 		if (!finished.touched.size) return Undo.cancelEdit();
 		finished.touched.forEach(removeLooseVertices);
 		Undo.finishEdit('Erase tiles');
@@ -345,8 +381,8 @@ function onHover(event, ctrl_held = event.ctrlKey) {
 
 	let erasing = stroke ? stroke.erase : ctrl_held;
 	if (erasing) {
-		let hit = preview.raycast(event);
-		if (hit && hit.type == 'element' && hit.element instanceof Mesh && hit.element.faces[hit.face]) {
+		let hit = stroke ? snapshotHit(event) : preview.raycast(event);
+		if (hit && (stroke || hit.type == 'element') && hit.element instanceof Mesh && hit.element.faces[hit.face]) {
 			let {tile, cu, cv} = eraseTargets(hit.element, hit.face);
 			if (tile) return showGhost(tile.axis, tile.depth, tile.sign, cu, cv, state.size, BRUSH.ERASE_COLOR);
 		}
