@@ -22,6 +22,8 @@ export const DEW = {
 	FIGURE_COLOR: 4,				// marker color index
 };
 
+let previous_edit_size = null;	// the user's move snap, restored when another format takes over
+
 function lineSegments(points, material) {
 	let geometry = new THREE.BufferGeometry();
 	geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
@@ -113,9 +115,16 @@ new ModelFormat('dew_scene', {
 	onActivation() {
 		Canvas.backfaceUniforms.BACKFACE_TINT.value = DEW.BACKFACE_TINT;
 		Canvas.backfaceUniforms.BACKFACE_COLOR.value.set(DEW.BACKFACE_COLOR);
+		// Moves and nudges step by a half cell here: canvasGridSize is 16 / edit_size
+		if (previous_edit_size === null) previous_edit_size = settings.edit_size.value;
+		settings.edit_size.value = 16 / DEW.HALF_CELL;
 	},
 	onDeactivation() {
 		Canvas.backfaceUniforms.BACKFACE_TINT.value = 0;
+		if (previous_edit_size !== null) {
+			settings.edit_size.value = previous_edit_size;
+			previous_edit_size = null;
+		}
 	},
 	onSetup(project, new_model) {
 		if (!new_model) return;

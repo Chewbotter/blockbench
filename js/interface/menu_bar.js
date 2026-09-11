@@ -308,6 +308,10 @@ export const MenuBar = {
 			condition: {modes: ['edit']},
 		})
 		new BarMenu('mesh', [
+			new MenuSeparator('dew'),
+			'dew_group_tiles',
+			'dew_rotate_group_cw',
+			'dew_rotate_group_ccw',
 			new MenuSeparator('geometry'),
 			'extrude_mesh_selection',
 			'inset_mesh_selection',
