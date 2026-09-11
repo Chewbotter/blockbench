@@ -1,5 +1,7 @@
 import { TransformerModule } from "./transform_modules";
 import { weldDroppedVertex } from "../mesh/auto_fix";
+import { extrudeMeshSelection } from "../mesh/extrude";
+import { orientNewFaces } from "../mesh/fill_rim";
 import { getPivotObjects, getRotationObjects, getSelectedMovingElements, moveElementsInSpace } from "../transform";
 
 function displayDistance(number) {
@@ -78,6 +80,15 @@ export function getEditTransformSpace() {
 new TransformerModule('edit', {
 	priority: 1,
 	condition: () => Modes.id === 'edit' || Modes.id === 'pose' || Toolbox.selected.id == 'pivot_tool',
+	onPointerDown(context) {
+		// Shift+drag on the move gizmo in edge mode extrudes the selected edges first, then drags the new edge
+		let event = context.event;
+		this.extrude_on_start = !!(event && (event.shiftKey || Pressing.overrides.shift)
+			&& Modes.edit && Toolbox.selected.id == 'move_tool'
+			&& Condition(BarItems.selection_mode.condition) && BarItems.selection_mode.value == 'edge'
+			&& Mesh.selected.some(mesh => mesh.getSelectedEdges().length));
+		this.extruded_faces = null;
+	},
 	updateGizmo() {
 		if (Transformer.visible) {
 			let rotation_tool = false;
@@ -264,6 +275,17 @@ new TransformerModule('edit', {
 		} else {
 			Undo.initEdit({elements: getSelectedMovingElements(), groups: Group.all.filter(g => g.selected)});
 		}
+		if (this.extrude_on_start) {
+			// After the undo snapshot, so the extrusion and the move are one undo step
+			this.extrude_on_start = false;
+			this.extruded_faces = [];
+			for (let mesh of Mesh.selected) {
+				if (!mesh.getSelectedEdges().length) continue;
+				let keys = extrudeMeshSelection(mesh, 0);
+				this.extruded_faces.push({mesh, keys});
+			}
+			Canvas.updateView({elements: Mesh.selected, element_aspects: {geometry: true, uv: true, faces: true}, selection: true});
+		}
 	},
 	onMove(context) {
 		let {axis, axis_number, value, second_axis, second_axis_number} = context;
@@ -435,14 +457,25 @@ new TransformerModule('edit', {
 				afterRotateOnAxis();
 				Undo.finishEdit('Rotate selection')
 			} else {
-				Undo.finishEdit('Move selection')
+				if (this.extruded_faces) {
+					// The new faces had no area when created; orient them against their neighbours now
+					for (let {mesh, keys} of this.extruded_faces) {
+						orientNewFaces(mesh, keys.map(key => mesh.faces[key]).filter(Boolean));
+					}
+					Canvas.updateView({elements: Mesh.selected, element_aspects: {geometry: true, faces: true}});
+					Undo.finishEdit('Extrude edge');
+				} else {
+					Undo.finishEdit('Move selection')
+				}
 				weldDroppedVertex(context.event);
 			}
 		}
+		this.extruded_faces = null;
 		autoFixMeshEdit()
 		updateSelection()
 	},
 	onCancel(context) {
+		this.extruded_faces = null;
 		Undo.cancelEdit(true);
 	}
 });
