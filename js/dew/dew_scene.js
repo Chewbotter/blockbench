@@ -16,6 +16,10 @@ export const DEW = {
 	CAMERA_OFFSET: [220, 260, 380],	// new scenes look at the cluster center from here
 	BACKFACE_TINT: 0.85,		// how far back faces are pulled toward BACKFACE_COLOR in the viewport, 0 to 1
 	BACKFACE_COLOR: '#2a3348',
+	FIGURE_NAME: 'scale_figure',
+	FIGURE_SIZE: [32, 48, 32],		// a soldier: 2 x 2 half cells on the ground, 3 half cells tall
+	FIGURE_POSITION: [-48, 0, 0],	// parked outside the cluster so it never sits in the way
+	FIGURE_COLOR: 4,				// marker color index
 };
 
 function lineSegments(points, material) {
@@ -54,6 +58,24 @@ function buildDewGrid(parent) {
 	let z_color = typeof gizmo_colors != 'undefined' ? gizmo_colors.b : new THREE.Color(0x2d5ee8);
 	parent.add(lineSegments([0, axis_y, 0, C, axis_y, 0], new THREE.LineBasicMaterial({color: x_color})));
 	parent.add(lineSegments([0, axis_y, 0, 0, axis_y, C], new THREE.LineBasicMaterial({color: z_color})));
+}
+
+// A body-sized block for checking doors, windows and headroom by eye. It is a normal element, so it moves and
+// snaps with the usual tools, but it is marked as not exported: the glTF exporter skips it and the tile tools
+// ignore it, so it can stand in a doorway without getting in the way.
+export function createScaleFigure() {
+	let [x, y, z] = DEW.FIGURE_POSITION;
+	let [width, height, depth] = DEW.FIGURE_SIZE;
+	let figure = new Cube({
+		name: DEW.FIGURE_NAME,
+		from: [x, y, z],
+		to: [x + width, y + height, z + depth],
+		origin: [x, y, z],
+		autouv: 0,
+		color: DEW.FIGURE_COLOR,
+	}).init();
+	figure.export = false;
+	return figure;
 }
 
 export function frameCluster(preview = Preview.selected) {
@@ -106,7 +128,30 @@ new ModelFormat('dew_scene', {
 			animations: false,
 		};
 		frameCluster();
+		createScaleFigure();
 	},
+});
+
+BARS.defineActions(function() {
+	new Toggle('dew_scale_figure', {
+		name: 'Scale Figure',
+		description: 'Show a soldier-sized block (2 x 2 half cells, 3 tall) for checking doors and headroom. Never exported',
+		icon: 'accessibility_new',
+		category: 'view',
+		default: true,
+		condition: () => Format.id == 'dew_scene',
+		onChange(value) {
+			let figures = Cube.all.filter(cube => cube.name == DEW.FIGURE_NAME);
+			if (!figures.length && value) {
+				Undo.initEdit({outliner: true, elements: [], selection: true});
+				figures = [createScaleFigure()];
+				Undo.finishEdit('Add scale figure', {outliner: true, elements: figures, selection: true});
+			}
+			figures.forEach(figure => figure.visibility = value);
+			if (Canvas.updateVisibility) Canvas.updateVisibility();
+			updateSelection();
+		}
+	});
 });
 
 Object.assign(window, {DEW});

@@ -134,12 +134,10 @@ function buildVertexMap(mesh) {
 // Where a click would paint. Over geometry the plane moves through the hit point and keeps its axis,
 // otherwise it is the current plane.
 function getTarget(preview, event) {
-	let hit = preview.raycast(event);
-	if (hit && hit.type == 'element' && hit.intersects && hit.intersects[0]) {
-		let intersect = hit.intersects[0];
-		let normal = intersect.face.normal.clone().transformDirection(intersect.object.matrixWorld);
+	let hit = hitFace(preview, event);
+	if (hit) {
 		// Nudged off the surface so a wall started on a floor lands above it
-		let point = intersect.point.clone().addScaledVector(normal, 0.01);
+		let point = hit.point.clone().addScaledVector(hit.normal, 0.01);
 		return {depth: snap(point[state.axis]), point, hit};
 	}
 	let point = intersectPlane(getRay(preview, event), state.axis, state.depth);
@@ -394,8 +392,8 @@ function onHover(event, ctrl_held = event.ctrlKey) {
 
 	let erasing = stroke ? stroke.erase : ctrl_held;
 	if (erasing) {
-		let hit = stroke ? snapshotHit(event) : preview.raycast(event);
-		if (hit && (stroke || hit.type == 'element') && hit.element instanceof Mesh && hit.element.faces[hit.face]) {
+		let hit = stroke ? snapshotHit(event) : hitFace(preview, event);
+		if (hit && hit.element instanceof Mesh && hit.element.faces[hit.face]) {
 			let {tile, cu, cv} = blockTiles(hit.element, hit.face);
 			if (tile) return showGhost(tile.axis, tile.depth, tile.sign, cu, cv, state.size, BRUSH.ERASE_COLOR);
 		}
@@ -531,8 +529,8 @@ function paintStamp(tile) {
 }
 
 function paintStep(event) {
-	let hit = paint_stroke.preview.raycast(event);
-	if (!hit || hit.type != 'element' || !(hit.element instanceof Mesh)) return;
+	let hit = hitFace(paint_stroke.preview, event);
+	if (!hit) return;
 	let tile = describeTile(hit.element, hit.element.faces[hit.face]);
 	if (!tile) return;
 	let changed = paintStamp(tile);
@@ -572,8 +570,8 @@ function onPaintHover(event) {
 	last_paint_hover_event = event;
 	let preview = paint_stroke ? paint_stroke.preview : event.target && event.target.preview;
 	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
-	let hit = preview.raycast(event);
-	let tile = hit && hit.type == 'element' && hit.element instanceof Mesh && describeTile(hit.element, hit.element.faces[hit.face]);
+	let hit = hitFace(preview, event);
+	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
 	if (!tile) return hideGhost();
 	// The ghost covers the whole stamp a click (or the current stroke) would paint
 	let size = state.size;
@@ -653,19 +651,23 @@ let active_hover = null;	// hover handler of the active select / texture / bucke
 function hitFace(preview, event) {
 	let data = preview.raycast(event);
 	if (!data || !data.intersects) return null;
-	if (data.type == 'element') {
-		return data.element instanceof Mesh && data.element.faces[data.face] ? {element: data.element, face: data.face, point: data.intersects[0].point} : null;
-	}
-	let intersect = data.intersects.find(i => i.object.isElement);
-	let element = intersect && OutlinerNode.uuids[intersect.object.name];
-	if (!(element instanceof Mesh)) return null;
-	let index = intersect.faceIndex;
-	for (let fkey in element.faces) {
-		let count = element.faces[fkey].vertices.length;
-		if (count < 3) continue;
-		let triangles = count == 4 ? 2 : 1;
-		if (index < triangles) return {element, face: fkey, point: intersect.point};
-		index -= triangles;
+	for (let intersect of data.intersects) {
+		if (!intersect.object.isElement) continue;
+		let element = OutlinerNode.uuids[intersect.object.name];
+		// Helpers such as the scale figure are marked as not exported, and the tile tools look straight through them
+		if (!(element instanceof Mesh) || element.export === false) continue;
+		let normal = intersect.face ? intersect.face.normal.clone().transformDirection(intersect.object.matrixWorld) : new THREE.Vector3();
+		if (data.type == 'element' && data.element == element && element.faces[data.face]) {
+			return {element, face: data.face, point: intersect.point, normal};
+		}
+		let index = intersect.faceIndex;
+		for (let fkey in element.faces) {
+			let count = element.faces[fkey].vertices.length;
+			if (count < 3) continue;
+			let triangles = count == 4 ? 2 : 1;
+			if (index < triangles) return {element, face: fkey, point: intersect.point, normal};
+			index -= triangles;
+		}
 	}
 	return null;
 }

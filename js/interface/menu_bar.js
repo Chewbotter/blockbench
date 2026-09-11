@@ -515,6 +515,7 @@ export const MenuBar = {
 			'toggle_shading',
 			'toggle_all_grids',
 			'toggle_ground_plane',
+			'dew_scale_figure',
 			'preview_checkerboard',
 			'pixel_grid',
 			'painting_grid',
