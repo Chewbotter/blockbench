@@ -390,6 +390,11 @@ export const BARS = {
 					deselect: {name: 'keybind.preview_area_select.deselect'},
 				}
 			})
+			// Face mode: drag to select every face the cursor passes over
+			new KeybindItem('preview_paint_select', {
+				category: 'navigate',
+				keybind: new Keybind({key: 1, shift: true})
+			})
 
 			new KeybindItem('confirm', {
 				category: 'navigate',

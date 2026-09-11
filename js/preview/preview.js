@@ -972,6 +972,7 @@ export class Preview {
 			Transformer.dispatchPointerHover(event);
 		}
 		if (Transformer.hoverAxis !== null) return;
+		if (this.startPaintSelect(event)) return true;
 		let is_canvas_click = Keybinds.extra.preview_select.keybind.key == event.which || event.button === 0 || (Modes.paint && Keybinds.extra.paint_secondary_color.keybind.isTriggered(event));
 
 		var data = is_canvas_click && this.raycast(event);
@@ -1443,7 +1444,8 @@ export class Preview {
 			!this.selection.activated &&
 			!Transformer.was_clicked &&
 			Toolbox.selected.selectElements != false &&
-			!this.selection.click_target
+			!this.selection.click_target &&
+			!this.paint_move_f
 		) {
 			let selection_mode = Condition(BarItems.selection_mode.condition) ? BarItems.selection_mode.value : 'object';
 			let spline_selection_mode = Condition(BarItems.spline_selection_mode.condition) ? BarItems.spline_selection_mode.value : 'object';
@@ -1653,6 +1655,42 @@ export class Preview {
 		this.selection.box.detach()
 		this.selection.activated = false;
 		Undo.finishSelection('Area select');
+	}
+	// Paint select: in face mode, drag to add every face under the cursor. Only the visible (nearest) face is hit.
+	startPaintSelect(event) {
+		if (this.paint_move_f) return false;
+		if (!Modes.edit || Toolbox.selected.selectElements == false) return false;
+		if (!Condition(BarItems.selection_mode.condition) || BarItems.selection_mode.value != 'face') return false;
+		if (!Keybinds.extra.preview_paint_select.keybind.isTriggered(event)) return false;
+
+		Undo.initSelection();
+		this.paint_move_f = event => this.movePaintSelect(event);
+		this.paint_stop_f = event => this.stopPaintSelect(event);
+		addEventListeners(this.canvas, 'mousemove touchmove', this.paint_move_f);
+		addEventListeners(document, 'mouseup touchend', this.paint_stop_f);
+		this.movePaintSelect(event);
+		return true;
+	}
+	movePaintSelect(event) {
+		let data = this.raycast(event);
+		if (!data || !(data.element instanceof Mesh) || !data.face) return;
+		let mesh = data.element;
+		let face = mesh.faces[data.face];
+		if (!face) return;
+		if (!mesh.selected) mesh.markAsSelected();
+		let selected_faces = mesh.getSelectedFaces(true);
+		if (selected_faces.includes(data.face)) return;
+		selected_faces.push(data.face);
+		mesh.getSelectedVertices(true).safePush(...face.vertices);
+		TickUpdates.selection = true;
+	}
+	stopPaintSelect(event) {
+		removeEventListeners(this.canvas, 'mousemove touchmove', this.paint_move_f);
+		removeEventListeners(document, 'mouseup touchend', this.paint_stop_f);
+		delete this.paint_move_f;
+		delete this.paint_stop_f;
+		updateSelection();
+		Undo.finishSelection('Paint select');
 	}
 	// Background
 	loadBackground() {
