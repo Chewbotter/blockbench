@@ -26,7 +26,11 @@ async function key(letter) {
 	await send('Input.dispatchKeyEvent', { type: 'keyUp', key: letter, code: 'Key' + letter.toUpperCase(), windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
 	await sleep(80);
 }
-const camera = (tx, ty, tz, px, py, pz) => ev(`(() => { let p = Preview.selected; p.controls.target.set(${tx}, ${ty}, ${tz}); p.camera.position.set(${px}, ${py}, ${pz}); p.controls.update(); return true; })()`);
+// The camera matrix that world points project through only updates on render, so wait a frame before clicking
+const camera = async (tx, ty, tz, px, py, pz) => {
+	await ev(`(() => { let p = Preview.selected; p.controls.target.set(${tx}, ${ty}, ${tz}); p.camera.position.set(${px}, ${py}, ${pz}); p.controls.update(); return true; })()`);
+	await sleep(150);
+};
 // Face summary of a mesh: count, triangles with their normals and corners, diagonal faces with corners, UVs and texture
 const info = name => `(() => { let m = Mesh.all.find(m => m.name == '${name}'); let r = v => Math.round(v * 100) / 100;
 	let faces = Object.values(m.faces); let world = k => m.vertices[k].map(r);

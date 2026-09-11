@@ -768,6 +768,7 @@ export const BARS = {
 				'dew_tile_select',
 				'dew_tile_brush',
 				'dew_shave',
+				'dew_ramp',
 				'dew_texture_brush',
 				'dew_paint_bucket',
 				'knife_tool',

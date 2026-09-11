@@ -24,7 +24,7 @@ Personal fork of Blockbench 5.1.6 (JannisX11/blockbench). All work goes on branc
 
 ### Code map
 - `js/dew/dew_scene.js`: DEW Scene format, `DEW` constants, game grid, back-face tint on/off, per-project glTF export options, camera framing for new scenes.
-- `js/dew/tile_brush.js`: Tile Select, Tile Brush, Shave, Texture Brush, Paint Bucket and their shared helpers (`describeTile`, `tileUV`, `blockTiles`, `stampBlocks`, `buildTileIndex`, `hitFace`, snapshot raycast for erasing). Shave cuts outside corners at 45 degrees one block deep (16 or 32 per C, full size only on the 32 grid), keeps the touched side's texture, and closes the ends (trims end-plane tiles, adds or removes notch triangles).
+- `js/dew/tile_brush.js`: Tile Select, Tile Brush, Shave, Ramp, Texture Brush, Paint Bucket and their shared helpers (`describeTile`, `tileUV`, `blockTiles`, `stampBlocks`, `buildTileIndex`, `hitFace`, snapshot raycast for erasing). Shave cuts outside corners at 45 degrees one block deep (16 or 32 per C, full size only on the 32 grid), keeps the touched side's texture, and closes the ends (trims end-plane tiles, adds or removes notch triangles). Ramp is the same operation on an inside corner, filling it with a slope (a walkable ramp on a floor, a trimmed underside on an overhang); both run through `shaveTarget` / `shaveCorner` with the `inside` flag.
 - `js/dew/dew_atlas.js`: DEW Atlas button (flat-color test atlas).
 - Small core hooks: `js/preview/canvas.js` (`Format.buildGrid`, back-face uniforms), `js/shaders/{texture,marker,solid,layered}.frag.glsl` (back-face tint), `js/texturing/textures.js` (uniforms, atlas button), `js/uv/uv.js` (tools with `atlas_picker` make the UV editor show `Texture.selected`, receive `onAtlasClick`, and draw `atlas_overlay`), `js/interface/toolbars.js`, `js/main.ts`.
 - Tile tool keys: click or drag paints, Ctrl erases or removes, Shift adds (select), W cycles the work plane, A / D step it a half cell, C switches full / half tiles. Bare keys still free: J K L N O Y [ ] 5 7 8 9 0.
@@ -39,7 +39,8 @@ Personal fork of Blockbench 5.1.6 (JannisX11/blockbench). All work goes on branc
 - Selection undo follows the Undo Selections setting (default on in this fork since 2026-09-11). `Undo.finishSelection` cancels itself when nothing changed.
 - Erasing during a drag raycasts a snapshot of the geometry from stroke start, or it drills through the holes it just made.
 - In face selection mode `preview.raycast` can return vertex or edge hits in front of faces; use `hitFace`.
-- CDP tests: a world point can project off the canvas; log the screen point when a click seems to do nothing. Image loads are async; wait before reading a new texture.
+- CDP tests: a world point can project off the canvas; log the screen point when a click seems to do nothing. Image loads are async; wait before reading a new texture. After moving the preview camera, wait a frame before projecting world points: the matrix they project through only updates on render, so clicks land at the old view.
+- Faces render from both sides, so a click passes to whatever surface is nearest, including the back of a floor between the camera and the target.
 
 ## Current state (newest first)
 - 2026-09-11: Shave tool (outside corners only; undo is the only way back for now; the texture brush and bucket do not paint diagonal or triangle faces yet).

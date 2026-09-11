@@ -19,6 +19,7 @@ const BRUSH = {
 	ATLAS_PICK_COLOR: '#ffd24a',
 	SELECT_COLOR: 0x6fe38a,		// tile select ghost
 	SHAVE_COLOR: 0xff9e3d,		// shave preview, drawn on top since the cut lies behind the corner tiles
+	RAMP_COLOR: 0x8ad4ff,		// ramp preview, which sits in open space
 };
 
 const H = DEW.HALF_CELL;
@@ -42,7 +43,8 @@ let previous_selection_mode = null;
 const round3 = v => Math.round(v * 1000) / 1000;
 const snap = (v, step = H) => Math.round(v / step) * step;
 const isActive = () => Toolbox.selected && Toolbox.selected.id == 'dew_tile_brush';
-const isDewTool = () => Toolbox.selected && ['dew_tile_select', 'dew_tile_brush', 'dew_shave', 'dew_texture_brush', 'dew_paint_bucket'].includes(Toolbox.selected.id);
+const isDewTool = () => Toolbox.selected && ['dew_tile_select', 'dew_tile_brush', 'dew_shave', 'dew_ramp', 'dew_texture_brush', 'dew_paint_bucket'].includes(Toolbox.selected.id);
+const cutsInside = () => Toolbox.selected && Toolbox.selected.id == 'dew_ramp';
 
 function planePoint(axis, depth, u, v) {
 	let [ua, va] = PLANE_AXES[axis];
@@ -810,10 +812,12 @@ function quadsIn(tiles, axis, depth, sign, ranges, partial = false) {
 	return found;
 }
 
-// The corner a click would shave: the hovered tile's block edge nearest the cursor, when a complete block of the
-// perpendicular plane meets it there as an outside corner. a1 / d1 / s1 is the touched plane, n the axis across the
-// edge (the other plane's normal, e its position, s2 its facing), al the axis along the edge from lo to hi.
-function shaveTarget(preview, event, tiles) {
+// The corner a click would cut: the hovered tile's block edge nearest the cursor, when a complete block of the
+// perpendicular plane meets it there. a1 / d1 / s1 is the touched plane, n the axis across the edge (the other
+// plane's normal, e its position, s2 the edge's side), al the axis along the edge from lo to hi.
+// Shaving looks for an outside corner, where the other block sits behind the touched plane and faces the same way
+// as the edge side. A ramp looks for an inside corner, where it sits in front of it and faces the other way.
+function shaveTarget(preview, event, tiles, inside) {
 	let hit = hitFace(preview, event);
 	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
 	if (!tile) return null;
@@ -828,11 +832,12 @@ function shaveTarget(preview, event, tiles) {
 		{n: pv, e: cv, s2: -1, al: pu, lo: cu, dist: p[pv] - cv},
 		{n: pv, e: cv + S, s2: 1, al: pu, lo: cu, dist: cv + S - p[pv]},
 	].reduce((best, next) => next.dist < best.dist ? next : best);
-	let c = {a1, d1, s1, S, n: edge.n, e: edge.e, s2: edge.s2, al: edge.al, lo: edge.lo, hi: edge.lo + S,
+	let c = {a1, d1, s1, S, inside, n: edge.n, e: edge.e, s2: edge.s2, al: edge.al, lo: edge.lo, hi: edge.lo + S,
 		mesh: hit.element, texture: hit.element.faces[hit.face].texture || false};
 	let along = [c.lo, c.hi];
+	let side = inside ? 1 : -1;
 	c.touched = quadsIn(tiles, a1, d1, s1, {[c.n]: [c.e - c.s2 * S, c.e], [c.al]: along});
-	c.other = quadsIn(tiles, c.n, c.e, c.s2, {[a1]: [d1 - s1 * S, d1], [c.al]: along});
+	c.other = quadsIn(tiles, c.n, c.e, inside ? -c.s2 : c.s2, {[a1]: [d1, d1 + side * s1 * S], [c.al]: along});
 	return c.touched && c.other ? c : null;
 }
 function cornerPoint(c, a1_value, n_value, along) {
@@ -845,7 +850,7 @@ function cornerPoint(c, a1_value, n_value, along) {
 // E runs along the corner edge, F1 along the far edge of the touched block, F2 along the far edge of the other block
 const cornerE = (c, w) => cornerPoint(c, c.d1, c.e, w);
 const cornerF1 = (c, w) => cornerPoint(c, c.d1, c.e - c.s2 * c.S, w);
-const cornerF2 = (c, w) => cornerPoint(c, c.d1 - c.s1 * c.S, c.e, w);
+const cornerF2 = (c, w) => cornerPoint(c, c.d1 + (c.inside ? 1 : -1) * c.s1 * c.S, c.e, w);
 const chamferPoints = c => [cornerF1(c, c.lo), cornerF1(c, c.hi), cornerF2(c, c.hi), cornerF2(c, c.lo)];
 
 function strokeVertex(mesh, world) {
@@ -922,19 +927,25 @@ function closeEnd(c, w, dir, gap_uv) {
 		return;
 	}
 	let tiles = shave_stroke.tiles;
-	let square = {[c.a1]: [c.d1 - c.s1 * c.S, c.d1], [c.n]: [c.e - c.s2 * c.S, c.e]};
-	let caps = quadsIn(tiles, c.al, w, dir, square, true);
-	if (caps.length) {
-		caps.forEach(cap => trimCap(c, cap));
-		return;
-	}
-	// The corner stays square past this end: close the notch with a triangle facing back along the corner
-	let beyond = dir > 0 ? [w, w + H] : [w - H, w];
-	let continues = quadsIn(tiles, c.a1, c.d1, c.s1, {[c.n]: [c.e - c.s2 * H, c.e], [c.al]: beyond})
-		&& quadsIn(tiles, c.n, c.e, c.s2, {[c.a1]: [c.d1 - c.s1 * H, c.d1], [c.al]: beyond});
-	if (!continues) return;
+	let square = {[c.a1]: [c.d1, c.d1 + (c.inside ? 1 : -1) * c.s1 * c.S], [c.n]: [c.e - c.s2 * c.S, c.e]};
 	let normal = new THREE.Vector3();
-	normal[c.al] = -dir;
+	if (c.inside) {
+		// A wall across this end already closes the wedge
+		if (quadsIn(tiles, c.al, w, -dir, square)) return;
+		normal[c.al] = dir;
+	} else {
+		let caps = quadsIn(tiles, c.al, w, dir, square, true);
+		if (caps.length) {
+			caps.forEach(cap => trimCap(c, cap));
+			return;
+		}
+		// The corner stays square past this end: close the notch with a triangle facing back along the corner
+		let beyond = dir > 0 ? [w, w + H] : [w - H, w];
+		let continues = quadsIn(tiles, c.a1, c.d1, c.s1, {[c.n]: [c.e - c.s2 * H, c.e], [c.al]: beyond})
+			&& quadsIn(tiles, c.n, c.e, c.s2, {[c.a1]: [c.d1 - c.s1 * H, c.d1], [c.al]: beyond});
+		if (!continues) return;
+		normal[c.al] = -dir;
+	}
 	addShaveFace(c.mesh, triangle, triangle.map(gap_uv), c.texture, normal);
 }
 function shaveCorner(c) {
@@ -950,23 +961,24 @@ function shaveCorner(c) {
 	}
 	let normal = new THREE.Vector3();
 	normal[c.a1] = c.s1;
-	normal[c.n] = c.s2;
+	normal[c.n] = c.inside ? -c.s2 : c.s2;
 	// The diagonal stretches the touched block's texture across its width: F1 keeps its UVs, F2 takes the corner edge's
 	addShaveFace(c.mesh, chamferPoints(c), uvs, c.texture, normal);
-	// Gap triangles map the touched block's cell flat onto the end plane
+	// End triangles map the touched block's cell flat onto the end plane
 	let [qu, qv] = PLANE_AXES[c.al];
-	let corner = cornerE(c, 0), far = cornerPoint(c, c.d1 - c.s1 * c.S, c.e - c.s2 * c.S, 0);
+	let corner = cornerE(c, 0), far = cornerPoint(c, c.d1 + (c.inside ? 1 : -1) * c.s1 * c.S, c.e - c.s2 * c.S, 0);
 	let origin = [Math.min(corner[qu], far[qu]), Math.min(corner[qv], far[qv])];
 	let gapUV = sign => point => {
 		let [tu, tv] = tileUV(c.al, sign, Math.round(point[qu] - origin[0]), Math.round(point[qv] - origin[1]), c.S);
 		return [cell[0] + tu * fx, cell[1] + tv * fy];
 	};
-	closeEnd(c, c.lo, -1, gapUV(1));
-	closeEnd(c, c.hi, 1, gapUV(-1));
+	let facing = c.inside ? 1 : -1;
+	closeEnd(c, c.lo, -1, gapUV(-facing));
+	closeEnd(c, c.hi, 1, gapUV(facing));
 }
 
 function shaveStep(event) {
-	let corner = shaveTarget(shave_stroke.preview, event, shave_stroke.tiles);
+	let corner = shaveTarget(shave_stroke.preview, event, shave_stroke.tiles, shave_stroke.inside);
 	if (!corner) return;
 	shaveCorner(corner);
 	shave_stroke.changed = true;
@@ -975,7 +987,7 @@ function shaveStep(event) {
 }
 function startShaveStroke(preview, event) {
 	Undo.initEdit({elements: Mesh.all.filter(mesh => mesh.visibility !== false && !mesh.locked)});
-	shave_stroke = {preview, tiles: buildTileIndex(), vertex_maps: new Map(), touched: new Set(), changed: false};
+	shave_stroke = {preview, inside: cutsInside(), tiles: buildTileIndex(), vertex_maps: new Map(), touched: new Set(), changed: false};
 	shaveStep(event);
 	document.addEventListener('mousemove', moveShaveStroke);
 	document.addEventListener('mouseup', endShaveStroke);
@@ -991,7 +1003,7 @@ function endShaveStroke() {
 	shave_stroke = null;
 	if (!finished.changed) return Undo.cancelEdit();
 	finished.touched.forEach(removeLooseVertices);
-	Undo.finishEdit('Shave corners');
+	Undo.finishEdit(finished.inside ? 'Ramp corners' : 'Shave corners');
 	Canvas.updateView({elements: [...finished.touched], element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
 	if (last_paint_hover_event) onShaveHover(last_paint_hover_event);
 }
@@ -999,12 +1011,14 @@ function onShaveHover(event) {
 	last_paint_hover_event = event;
 	let preview = shave_stroke ? shave_stroke.preview : event.target && event.target.preview;
 	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
-	let corner = shaveTarget(preview, event, shave_stroke ? shave_stroke.tiles : buildTileIndex());
+	let inside = shave_stroke ? shave_stroke.inside : cutsInside();
+	let corner = shaveTarget(preview, event, shave_stroke ? shave_stroke.tiles : buildTileIndex(), inside);
 	if (!corner) return hideGhost();
 	let lift = new THREE.Vector3();
 	lift[corner.a1] = corner.s1 * BRUSH.LIFT;
-	lift[corner.n] = corner.s2 * BRUSH.LIFT;
-	showGhostQuad(chamferPoints(corner).map(point => point.add(lift)), BRUSH.SHAVE_COLOR, true);
+	lift[corner.n] = (inside ? -corner.s2 : corner.s2) * BRUSH.LIFT;
+	// The shave preview lies behind the tiles it replaces, so it draws through them; a ramp sits in the open
+	showGhostQuad(chamferPoints(corner).map(point => point.add(lift)), inside ? BRUSH.RAMP_COLOR : BRUSH.SHAVE_COLOR, !inside);
 }
 
 BARS.defineActions(function() {
@@ -1087,6 +1101,39 @@ BARS.defineActions(function() {
 		name: 'Shave',
 		description: 'Bevel outside corners: click or drag along a corner to cut it at 45 degrees, one block deep. C switches full / half tiles',
 		icon: 'change_history',
+		category: 'tools',
+		transformerMode: 'hidden',
+		selectElements: false,
+		cursor: 'crosshair',
+		modes: ['edit'],
+		condition: () => Modes.edit && Format.id == 'dew_scene',
+		onCanvasClick(data) {
+			let event = data && data.event;
+			if (!event || event.button !== 0 || event.altKey || shave_stroke) return;
+			startShaveStroke(Preview.selected, event);
+		},
+		onSelect() {
+			shave_previous_selection_mode = BarItems.selection_mode.value;
+			BarItems.selection_mode.set('object');
+			updateSelection();
+			active_hover = onShaveHover;
+			document.addEventListener('mousemove', onShaveHover);
+		},
+		onUnselect() {
+			document.removeEventListener('mousemove', onShaveHover);
+			active_hover = null;
+			hideGhost();
+			if (shave_previous_selection_mode && shave_previous_selection_mode != 'object') {
+				BarItems.selection_mode.set(shave_previous_selection_mode);
+				updateSelection();
+			}
+		},
+	});
+
+	new Tool('dew_ramp', {
+		name: 'Ramp',
+		description: 'Fill inside corners: click or drag along a corner to close it with a 45 degree slope, one block deep. C switches full / half tiles',
+		icon: 'trending_up',
 		category: 'tools',
 		transformerMode: 'hidden',
 		selectElements: false,
@@ -1251,4 +1298,5 @@ Blockbench.on('select_project', () => {
 	}
 });
 
-Object.assign(window, {DEWTileBrush: {state, texture_state, BRUSH}});
+// The internals the scripted tests poke at
+Object.assign(window, {DEWTileBrush: {state, texture_state, BRUSH, hitFace, describeTile, buildTileIndex, shaveTarget}});
