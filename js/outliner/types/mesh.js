@@ -1030,6 +1030,7 @@ export class Mesh extends OutlinerElement {
 		'extrude_mesh_selection',
 		'inset_mesh_selection',
 		'loop_cut',
+		'chamfer_edges',
 		'create_face',
 		'invert_face',
 		'switch_face_crease',

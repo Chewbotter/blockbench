@@ -14,10 +14,6 @@ function edgeKey(a: string, b: string) {
 	return a < b ? a + '|' + b : b + '|' + a;
 }
 
-/**
- * Finds every closed loop of open edges whose vertices are all in `candidates`.
- * Vertices that are not on exactly two such open edges are ignored.
- */
 /** Open edges (used by exactly one face) between candidate vertices: neighbour lists and the face each edge belongs to */
 function openEdges(mesh: Mesh, candidates: string[]) {
 	let edge_usage = new Map<string, {edge: [string, string], count: number, face: MeshFace}>();
@@ -51,6 +47,10 @@ function openEdges(mesh: Mesh, candidates: string[]) {
 	return {adjacency, edge_faces};
 }
 
+/**
+ * Finds every closed loop of open edges whose vertices are all in `candidates`.
+ * Vertices that are not on exactly two such open edges are ignored.
+ */
 export function findRimLoops(mesh: Mesh, candidates: string[]): RimLoop[] {
 	if (candidates.length < 3) return [];
 	let {adjacency, edge_faces} = openEdges(mesh, candidates);
@@ -121,6 +121,9 @@ const SCORE_PARITY = 0.05;
 const SCORE_SLIVER = 1;
 // A corner of a final face wider than this (degrees) counts as a sliver
 const SLIVER_ANGLE = 120;
+// A corner this straight (degrees) makes the piece effectively degenerate: rejected outright
+const STRAIGHT_ANGLE = 170;
+const STRAIGHT_PENALTY = 10;
 
 /**
  * Penalty for a piece that would become a face (3 or 4 vertices) with a near-straight corner,
@@ -140,11 +143,12 @@ function sliverPenalty(mesh: Mesh, piece: string[]): number {
 		let cos = Math.clamp((a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (la * lb), -1, 1);
 		widest = Math.max(widest, Math.acos(cos) * 180 / Math.PI);
 	}
+	if (widest >= STRAIGHT_ANGLE) return STRAIGHT_PENALTY;
 	return Math.max(0, (widest - SLIVER_ANGLE) / (180 - SLIVER_ANGLE));
 }
 
 /** Recursively splits a loop into pieces of at most 4 vertices. */
-function splitLoop(mesh: Mesh, loop: string[], scale: number, output: string[][]) {
+export function splitLoop(mesh: Mesh, loop: string[], scale: number, output: string[][]) {
 	if (loop.length <= 4) {
 		output.push(loop);
 		return;
@@ -187,7 +191,7 @@ function edgeDirection(face: MeshFace, a: string, b: string): number {
 }
 
 /** Orients the given new faces so that each shares every edge with its neighbour in opposite directions */
-function orientNewFaces(mesh: Mesh, new_faces: MeshFace[]) {
+export function orientNewFaces(mesh: Mesh, new_faces: MeshFace[]) {
 	let oriented = new Set<MeshFace>();
 	for (let fkey in mesh.faces) {
 		if (!new_faces.includes(mesh.faces[fkey])) oriented.add(mesh.faces[fkey]);

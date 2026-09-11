@@ -11,6 +11,7 @@ import { autoFixMeshEdit } from './mesh/auto_fix'
 import { sameMeshEdge } from './mesh/util';
 import { fillSelectedRim } from './mesh/fill_rim';
 import './mesh/smoothing_groups';
+import './mesh/chamfer';
 import { PointerTarget } from '../interface/pointer_target';
 
 export function uncorruptMesh() {
