@@ -826,19 +826,24 @@ function shaveTarget(preview, event, tiles, inside) {
 	let [pu, pv] = PLANE_AXES[a1];
 	let [cu, cv] = blockOf(tile, S);
 	let p = hit.point;
-	let edge = [
+	// Edges of the hovered block, nearest the cursor first: the nearest one that carries a corner wins, so a hover
+	// anywhere on a tile beside a corner works, not only the wedge of it pointing at that corner
+	let edges = [
 		{n: pu, e: cu, s2: -1, al: pv, lo: cv, dist: p[pu] - cu},
 		{n: pu, e: cu + S, s2: 1, al: pv, lo: cv, dist: cu + S - p[pu]},
 		{n: pv, e: cv, s2: -1, al: pu, lo: cu, dist: p[pv] - cv},
 		{n: pv, e: cv + S, s2: 1, al: pu, lo: cu, dist: cv + S - p[pv]},
-	].reduce((best, next) => next.dist < best.dist ? next : best);
-	let c = {a1, d1, s1, S, inside, n: edge.n, e: edge.e, s2: edge.s2, al: edge.al, lo: edge.lo, hi: edge.lo + S,
-		mesh: hit.element, texture: hit.element.faces[hit.face].texture || false};
-	let along = [c.lo, c.hi];
+	].sort((a, b) => a.dist - b.dist);
 	let side = inside ? 1 : -1;
-	c.touched = quadsIn(tiles, a1, d1, s1, {[c.n]: [c.e - c.s2 * S, c.e], [c.al]: along});
-	c.other = quadsIn(tiles, c.n, c.e, inside ? -c.s2 : c.s2, {[a1]: [d1, d1 + side * s1 * S], [c.al]: along});
-	return c.touched && c.other ? c : null;
+	for (let edge of edges) {
+		let c = {a1, d1, s1, S, inside, n: edge.n, e: edge.e, s2: edge.s2, al: edge.al, lo: edge.lo, hi: edge.lo + S,
+			mesh: hit.element, texture: hit.element.faces[hit.face].texture || false};
+		let along = [c.lo, c.hi];
+		c.touched = quadsIn(tiles, a1, d1, s1, {[c.n]: [c.e - c.s2 * S, c.e], [c.al]: along});
+		c.other = quadsIn(tiles, c.n, c.e, inside ? -c.s2 : c.s2, {[a1]: [d1, d1 + side * s1 * S], [c.al]: along});
+		if (c.touched && c.other) return c;
+	}
+	return null;
 }
 function cornerPoint(c, a1_value, n_value, along) {
 	let point = new THREE.Vector3();

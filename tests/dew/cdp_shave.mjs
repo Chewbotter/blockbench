@@ -73,8 +73,10 @@ console.log('start:', await ev(info('box')));
 
 await hover([30, 24, 32]);
 console.log('A. hover near the +z/+x corner:', await ev(`!!Canvas.scene.getObjectByName('dew_tile_ghost')`), ' expect true');
-await hover([17, 24, 32]);
-console.log('B. hover near an edge inside the +z side:', await ev(`!!Canvas.scene.getObjectByName('dew_tile_ghost')`), ' expect false');
+await camera(96, 0, 16, 96, 90, 120);
+await hover([88, 0, 17]);
+await camera(16, 24, 16, 16 + 90, 24 + 60, 16 + 110);
+console.log('B. hover on the flat floor, no corner anywhere on the block:', await ev(`!!Canvas.scene.getObjectByName('dew_tile_ghost')`), ' expect false');
 
 await click([30, 24, 32]);
 console.log('C. shave the middle stretch from the +z side:', await ev(info('box')));
