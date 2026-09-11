@@ -9,6 +9,9 @@ node_modules/
 workbox-*.js
 service_worker.js
 
+# screenshots written by the scripted tests
+/tests/dew/*.png
+
 # local portable build
 /Blockbench.exe
 /Blockbench.lnk

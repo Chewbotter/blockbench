@@ -145,7 +145,8 @@
 		"publish-types": "npm publish ./types",
 		"generate-docs": "npm run generate-types && npx typedoc --options typedoc.json",
 		"portable": "npm run build-electron && electron-builder --windows portable --x64 --publish=never && node ./scripts/copy_portable.js",
-		"app": "npm run build-electron && electron-builder --windows dir --x64 --publish=never && node ./scripts/make_shortcut.js"
+		"app": "npm run build-electron && electron-builder --windows dir --x64 --publish=never && node ./scripts/make_shortcut.js",
+		"test:dew": "node tests/dew/run_all.mjs"
 	},
 	"overrides": {
 		"three": "$three"
