@@ -81,12 +81,13 @@ new TransformerModule('edit', {
 	priority: 1,
 	condition: () => Modes.id === 'edit' || Modes.id === 'pose' || Toolbox.selected.id == 'pivot_tool',
 	onPointerDown(context) {
-		// Shift+drag on the move gizmo in edge mode extrudes the selected edges first, then drags the new edge
+		// Shift+drag on the move gizmo in edge or face mode extrudes the selection first, then drags the new geometry
 		let event = context.event;
+		let mode = Condition(BarItems.selection_mode.condition) ? BarItems.selection_mode.value : 'object';
 		this.extrude_on_start = !!(event && (event.shiftKey || Pressing.overrides.shift)
 			&& Modes.edit && Toolbox.selected.id == 'move_tool'
-			&& Condition(BarItems.selection_mode.condition) && BarItems.selection_mode.value == 'edge'
-			&& Mesh.selected.some(mesh => mesh.getSelectedEdges().length));
+			&& ((mode == 'edge' && Mesh.selected.some(mesh => mesh.getSelectedEdges().length))
+				|| (mode == 'face' && Mesh.selected.some(mesh => mesh.getSelectedFaces().length))));
 		this.extruded_faces = null;
 	},
 	updateGizmo() {
@@ -280,7 +281,7 @@ new TransformerModule('edit', {
 			this.extrude_on_start = false;
 			this.extruded_faces = [];
 			for (let mesh of Mesh.selected) {
-				if (!mesh.getSelectedEdges().length) continue;
+				if (!mesh.getSelectedEdges().length && !mesh.getSelectedFaces().length) continue;
 				let keys = extrudeMeshSelection(mesh, 0);
 				this.extruded_faces.push({mesh, keys});
 			}
@@ -463,7 +464,7 @@ new TransformerModule('edit', {
 						orientNewFaces(mesh, keys.map(key => mesh.faces[key]).filter(Boolean));
 					}
 					Canvas.updateView({elements: Mesh.selected, element_aspects: {geometry: true, faces: true}});
-					Undo.finishEdit('Extrude edge');
+					Undo.finishEdit('Extrude selection');
 				} else {
 					Undo.finishEdit('Move selection')
 				}
