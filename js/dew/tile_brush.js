@@ -32,6 +32,7 @@ const PLANE_AXES = {y: ['x', 'z'], x: ['z', 'y'], z: ['x', 'y']};
 
 const state = {
 	edge_flip: false,	// Tab takes the other side of the edge under the cursor
+	sign: null,			// Alt copies a tile's facing; null follows the camera
 	axis: 'y',
 	depth: 0,
 	size: DEW.TILE,
@@ -81,6 +82,10 @@ function intersectPlane(ray, axis, depth) {
 // Tiles face the side of the plane the camera is on
 function facingSign(preview, axis, depth) {
 	return preview.camera.position[axis] >= depth ? 1 : -1;
+}
+// ... unless Alt copied a facing off an existing tile, which holds until W turns the plane
+function planeSign(preview, axis, depth) {
+	return state.sign === null ? facingSign(preview, axis, depth) : state.sign;
 }
 function worldNormal(mesh, face) {
 	let n = face.getNormal(true);
@@ -318,7 +323,7 @@ function startStroke(preview, event) {
 			erase: false, preview, mesh, created,
 			axis: state.axis,
 			depth: target.depth,
-			sign: facingSign(preview, state.axis, target.depth),
+			sign: planeSign(preview, state.axis, target.depth),
 			occupied: buildOccupancy(),
 			vertex_map: buildVertexMap(mesh),
 			last_point: null,
@@ -450,7 +455,7 @@ function onHover(event, ctrl_held = event.ctrlKey) {
 			axis = state.axis;
 			depth = target.depth;
 			point = target.cell_point;
-			sign = facingSign(preview, axis, depth);
+			sign = planeSign(preview, axis, depth);
 		}
 	}
 	if (!point) return hideGhost();
@@ -687,6 +692,35 @@ Blockbench.on('select_texture', () => {
 // It is Blockbench's own mesh face selection, so the move gizmo and mesh actions work on it afterwards.
 let select_stroke = null;
 let active_hover = null;	// hover handler of the active select / texture / bucket tool, re-run when C changes the size
+
+// Alt on the tile brush: carry on from the tile under the cursor, in its plane and facing its way
+function pickTilePlane(preview, event) {
+	let hit = hitFace(preview, event);
+	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
+	if (!tile) return Blockbench.showQuickMessage('No tile to pick up', BRUSH.MESSAGE_TIME);
+	state.axis = tile.axis;
+	state.depth = tile.depth;
+	state.sign = tile.sign;
+	updatePlaneGrid();
+	Blockbench.showQuickMessage(`${AXIS_LABEL[tile.axis]} ${tile.depth}, facing ${tile.sign > 0 ? '+' : '-'}${tile.axis}`, BRUSH.MESSAGE_TIME);
+	if (last_hover_event) onHover(last_hover_event);
+}
+// Alt on the texture brush or bucket: take the atlas cell the tile under the cursor was painted with.
+// Its uv corners span that cell, so the lowest corner names it, the same texel a click in the UV editor would give.
+function pickAtlasFromTile(preview, event) {
+	let hit = hitFace(preview, event);
+	let face = hit && hit.element.faces[hit.face];
+	let texture = face && face.texture && Texture.all.find(tex => tex.uuid == face.texture);
+	let uvs = face ? face.vertices.map(vkey => face.uv[vkey]).filter(uv => uv) : [];
+	if (!texture || !uvs.length) return Blockbench.showQuickMessage('No texture to pick up', BRUSH.MESSAGE_TIME);
+	let x = Math.min(...uvs.map(uv => uv[0])), y = Math.min(...uvs.map(uv => uv[1]));
+	texture_state.atlas = {texture: texture.uuid, x0: x, y0: y, x1: x, y1: y};
+	if (Texture.selected != texture) texture.select();
+	refreshAtlasView();
+	let region = atlasRegion(state.size);
+	Blockbench.showQuickMessage(`Atlas cell ${region.x / state.size}, ${region.y / state.size}`, BRUSH.MESSAGE_TIME);
+	if (active_hover && last_paint_hover_event) active_hover(last_paint_hover_event);
+}
 
 // The face under the cursor. Face selection mode can put vertex points or edges in front, so this falls back to
 // the first element surface behind them (same triangle-to-face mapping as Preview.raycast)
@@ -1465,7 +1499,7 @@ function onRampHover(event) {
 BARS.defineActions(function() {
 	new Tool('dew_tile_brush', {
 		name: 'Tile Brush',
-		description: 'Paint tiles onto the work plane. Ctrl erases. W cycles the plane, A / D step it, C switches full / half tiles',
+		description: 'Paint tiles onto the work plane. Ctrl erases, Alt takes the plane and facing of the tile under the cursor. W cycles the plane, A / D step it, C switches full / half tiles',
 		icon: 'grid_on',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -1475,7 +1509,8 @@ BARS.defineActions(function() {
 		condition: () => Modes.edit && Format.id == 'dew_scene',
 		onCanvasClick(data) {
 			let event = data && data.event;
-			if (!event || event.button !== 0 || event.altKey || stroke) return;
+			if (!event || event.button !== 0 || stroke) return;
+			if (event.altKey) return pickTilePlane(Preview.selected, event);
 			startStroke(Preview.selected, event);
 		},
 		onSelect() {
@@ -1502,7 +1537,7 @@ BARS.defineActions(function() {
 
 	new Tool('dew_texture_brush', {
 		name: 'Texture Brush',
-		description: 'Pick a tile of the atlas in the UV editor (drag to pick several as one stamp), then click or drag over tiles to paint. C switches full / half tiles',
+		description: 'Pick a tile of the atlas in the UV editor (drag to pick several as one stamp), then click or drag over tiles to paint. Alt picks up the cell a tile already carries. C switches full / half tiles',
 		icon: 'format_paint',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -1512,7 +1547,8 @@ BARS.defineActions(function() {
 		condition: () => Modes.edit && Format.id == 'dew_scene',
 		onCanvasClick(data) {
 			let event = data && data.event;
-			if (!event || event.button !== 0 || event.altKey || paint_stroke) return;
+			if (!event || event.button !== 0 || paint_stroke) return;
+			if (event.altKey) return pickAtlasFromTile(Preview.selected, event);
 			startPaintStroke(Preview.selected, event);
 		},
 		atlas_picker: true,			// the UV editor shows the selected texture and hands clicks to onAtlasClick
@@ -1637,7 +1673,7 @@ BARS.defineActions(function() {
 
 	new Tool('dew_paint_bucket', {
 		name: 'Paint Bucket',
-		description: 'Fill the connected tiles of a plane with the picked atlas tiles. C switches full / half tiles',
+		description: 'Fill the connected tiles of a plane with the picked atlas tiles. Alt picks up the cell a tile already carries. C switches full / half tiles',
 		icon: 'format_color_fill',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -1647,7 +1683,8 @@ BARS.defineActions(function() {
 		condition: () => Modes.edit && Format.id == 'dew_scene',
 		onCanvasClick(data) {
 			let event = data && data.event;
-			if (!event || event.button !== 0 || event.altKey) return;
+			if (!event || event.button !== 0) return;
+			if (event.altKey) return pickAtlasFromTile(Preview.selected, event);
 			bucketClick(Preview.selected, event);
 		},
 		atlas_picker: true,
@@ -1710,6 +1747,7 @@ BARS.defineActions(function() {
 			let next = AXES[(AXES.indexOf(state.axis) + 1) % AXES.length];
 			state.depth = state.hover_point ? snap(state.hover_point[next]) : 0;
 			state.axis = next;
+			state.sign = null;
 			announce();
 		}
 	});
