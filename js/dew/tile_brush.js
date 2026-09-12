@@ -1143,7 +1143,9 @@ function blockTarget(preview, event, erase) {
 	return {origin, axis: state.axis, depth: state.depth, mesh: null};
 }
 // A stroke keeps the plane it started on, so dragging lays a run rather than climbing what it just placed
-function originAt(stroke, point) {
+function blockAlong(stroke, event) {
+	let point = intersectPlane(getRay(stroke.preview, event), stroke.axis, stroke.depth);
+	if (!point) return null;
 	let [ua, va] = PLANE_AXES[stroke.axis];
 	let [u0, v0] = cellAt(point, stroke.axis, stroke.size);
 	let origin = {};
@@ -1151,10 +1153,6 @@ function originAt(stroke, point) {
 	origin[ua] = u0;
 	origin[va] = v0;
 	return origin;
-}
-function blockAlong(stroke, event) {
-	let point = intersectPlane(getRay(stroke.preview, event), stroke.axis, stroke.depth);
-	return point && originAt(stroke, point);
 }
 function blockStep(origin) {
 	let id = [origin.x, origin.y, origin.z].join(',');
@@ -1187,7 +1185,6 @@ function startBlockStroke(preview, event) {
 		axis: target.axis, depth: target.depth, base: target.origin[target.axis], size: state.size,
 		index: buildTileIndex(), vertex_map: mesh ? buildVertexMap(mesh) : null,
 		touched: new Set(), placed: new Set(), changed: false,
-		last_point: intersectPlane(getRay(preview, event), target.axis, target.depth),
 	};
 	blockStep(target.origin);
 	document.addEventListener('mousemove', moveBlockStroke);
@@ -1195,13 +1192,8 @@ function startBlockStroke(preview, event) {
 }
 function moveBlockStroke(event) {
 	if (!block_stroke) return;
-	let point = intersectPlane(getRay(block_stroke.preview, event), block_stroke.axis, block_stroke.depth);
-	if (!point) return;
-	// Sampled between mouse events, or a quick drag leaves holes where the cursor flew over cells
-	let from = block_stroke.last_point || point;
-	let steps = Math.max(1, Math.ceil(from.distanceTo(point) / (H / 2)));
-	for (let i = 1; i <= steps; i++) blockStep(originAt(block_stroke, from.clone().lerp(point, i / steps)));
-	block_stroke.last_point = point.clone();
+	let origin = blockAlong(block_stroke, event);
+	if (origin) blockStep(origin);
 }
 function endBlockStroke() {
 	document.removeEventListener('mousemove', moveBlockStroke);
@@ -1223,11 +1215,9 @@ function onBlockHover(event, ctrl_held = event.ctrlKey) {
 	let preview = block_stroke ? block_stroke.preview : event.target && event.target.preview;
 	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
 	let erase = block_stroke ? block_stroke.erase : (ctrl_held || Pressing.ctrl);
-	// Mid stroke the ghost asks the stroke, not the surface under the cursor: a stroke keeps the plane it
-	// started on, and a fresh raycast here would preview against the block just laid instead
-	let origin = block_stroke ? blockAlong(block_stroke, event) : (blockTarget(preview, event, erase) || {}).origin;
-	if (!origin) return hideGhost();
-	showGhostBox(origin, block_stroke ? block_stroke.size : state.size, erase ? BRUSH.ERASE_COLOR : BRUSH.GHOST_COLOR);
+	let target = blockTarget(preview, event, erase);
+	if (!target) return hideGhost();
+	showGhostBox(target.origin, state.size, erase ? BRUSH.ERASE_COLOR : BRUSH.GHOST_COLOR);
 }
 
 // Shave: bevels an outside corner where two planes of square tiles meet. The cut is 45 degrees and exactly one block
@@ -2225,4 +2215,4 @@ Blockbench.on('select_project', () => {
 });
 
 // The internals the scripted tests poke at
-Object.assign(window, {DEWTileBrush: {state, texture_state, BRUSH, hitFace, describeTile, buildTileIndex, shaveTarget, tileUV, PLANE_AXES, blockStroke: () => block_stroke}});
+Object.assign(window, {DEWTileBrush: {state, texture_state, BRUSH, hitFace, describeTile, buildTileIndex, shaveTarget, tileUV, PLANE_AXES}});
