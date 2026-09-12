@@ -133,6 +133,26 @@ await click([8, 0, 8], 2);
 console.log('M. ctrl on one of them:', await ev(shape));
 console.log('   expect 3 faces, all still facing up: the tile under the cursor goes, and nothing is hung underneath');
 
+// Three blocks laid on a floor and then taken back off: the floor has to survive all of it
+await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
+	let m = new Mesh({name: 'floor', vertices: {}}); let map = {};
+	let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
+	for (let x = 0; x < 48; x += 16) for (let z = 0; z < 32; z += 16) {
+		let pt = (dx, dz) => [x + dx, 0, z + dz];
+		let f = new MeshFace(m, {vertices: [pt(0,0), pt(16,0), pt(16,16), pt(0,16)].map(vert), texture: false});
+		m.addFaces(f); if (f.getNormal(true)[1] < 0) f.invert(); }
+	m.init(); unselectAllElements(); updateSelection();
+	BarItems.dew_whole_block.select(); let s = DEWTileBrush.state; s.size = 16; s.axis = 'y'; s.depth = 0; return true; })()`);
+await sleep(400);
+await camera(24, 8, 8, 150, 110, 150);
+console.log('N. a floor of six tiles:', await ev(shape), ' expect 6 faces, all facing up');
+for (let x of [8, 24, 40]) { await hover([x, 0, 8]); await click([x, 0, 8]); }
+console.log('O. three blocks on it:', await ev(shape));
+console.log('   expect the six floor tiles plus the blocks, with one face between each pair and no undersides added');
+for (let x of [8, 24, 40]) { await hover([x, 16, 8], 2); await click([x, 16, 8], 2); }
+console.log('P. all three culled with ctrl:', await ev(shape));
+console.log('   expect the six floor tiles and nothing else: no holes in the floor, no walls left standing');
+
 console.log('page errors:', errors.length ? errors : 'none');
 await sleep(200);
 const shot = await send('Page.captureScreenshot', { format: 'png' });
