@@ -13,7 +13,8 @@ Personal fork of Blockbench 5.1.6 (JannisX11/blockbench). All work goes on branc
 
 ## Working rules
 - Commit each verified change on `custom` without asking; never push (the user pushes from GitHub Desktop).
-- Per change: build, run the test for the feature touched (not the whole suite), then close the app when done. Speed matters more than exhaustive testing right now.
+- Per change: build, run the test for the feature touched (not the whole suite), then `npm run app` and close the dev app (`npm run test:dew:stop`). Speed matters more than exhaustive testing right now.
+- The package is what the user tests, so it must never be behind the code: a build 39 minutes old once produced a bug report for something already fixed, and the screenshots matched the old behaviour exactly. If `npm run app` is skipped because Blockbench is open, say so in the reply rather than letting it pass quietly.
 - Simple heuristics over optimal ones. Every tunable is a named constant: `BRUSH` in `js/dew/tile_brush.js`, `DEW` in `js/dew/dew_scene.js`.
 - No em dashes anywhere (code, comments, commits, replies). Use Bash, not PowerShell.
 - The user builds all game content (rooms, clusters). Claude builds and tests tools only.
