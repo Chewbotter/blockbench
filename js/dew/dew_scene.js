@@ -210,4 +210,19 @@ BARS.defineActions(function() {
 	});
 });
 
+// Deselect all in a DEW scene clears everything, whatever is active. The stock handlers each own a slice:
+// mesh faces only while the selection mode is not object, elements otherwise, UV faces when that panel has
+// focus. So the key did different things depending on the tool, and tile selections could survive it.
+SharedActions.add('unselect_all', {
+	condition: () => Format.id == 'dew_scene',
+	priority: 10,
+	run() {
+		Undo.initSelection();
+		for (let mesh of Mesh.all) delete Project.mesh_selection[mesh.uuid];
+		unselectAllElements();
+		updateSelection();
+		Undo.finishSelection('Deselect all');
+	}
+});
+
 Object.assign(window, {DEW});

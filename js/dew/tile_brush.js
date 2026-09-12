@@ -1838,6 +1838,7 @@ function onRampHover(event) {
 
 BARS.defineActions(function() {
 	new Tool('dew_whole_block', {
+		keybind: new Keybind({key: '2'}),	// the number keys pick the tools in DEW scenes
 		name: 'Whole Block',
 		description: 'Drop a block into the cell under the cursor, full or half size per C. Drag to lay a run of them. Ctrl takes one out and seals the neighbours it opened. Faces that meet are dropped on both sides',
 		icon: 'view_in_ar',
@@ -1877,6 +1878,7 @@ BARS.defineActions(function() {
 	});
 
 	new Tool('dew_tile_brush', {
+		keybind: new Keybind({key: '3'}),	// the number keys pick the tools in DEW scenes
 		name: 'Tile Brush',
 		description: 'Paint tiles onto the work plane. Ctrl erases, Alt takes the plane and facing of the tile under the cursor. W cycles the plane, A / D step it, C switches full / half tiles',
 		icon: 'grid_on',
@@ -1915,6 +1917,7 @@ BARS.defineActions(function() {
 	});
 
 	new Tool('dew_texture_brush', {
+		keybind: new Keybind({key: '4'}),	// the number keys pick the tools in DEW scenes
 		name: 'Texture Brush',
 		description: 'Pick a tile of the atlas in the UV editor (drag to pick several as one stamp), then click or drag over tiles to paint. Alt picks up the cell a tile already carries. C switches full / half tiles',
 		icon: 'format_paint',
@@ -2022,6 +2025,7 @@ BARS.defineActions(function() {
 	});
 
 	new Tool('dew_tile_select', {
+		keybind: new Keybind({key: '1'}),	// the number keys pick the tools in DEW scenes
 		name: 'Tile Select',
 		description: 'Paint to select tiles. Shift adds, Ctrl removes, C switches full / half tiles',
 		icon: 'highlight_alt',
@@ -2057,6 +2061,7 @@ BARS.defineActions(function() {
 	});
 
 	new Tool('dew_paint_bucket', {
+		keybind: new Keybind({key: '5'}),	// the number keys pick the tools in DEW scenes
 		name: 'Paint Bucket',
 		description: 'Fill the connected tiles of a plane with the picked atlas tiles. Alt picks up the cell a tile already carries. C switches full / half tiles',
 		icon: 'format_color_fill',

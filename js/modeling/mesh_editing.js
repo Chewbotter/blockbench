@@ -278,7 +278,9 @@ BARS.defineActions(function() {
 			weld: new Keybind({key: '6'}),
 		},
 		icon_mode: true,
-		condition: () => Modes.edit && Mesh.selected.length && Toolbox.selected.id != 'knife_tool',
+		// Its sub keybinds are the number keys, which DEW scenes give to the tile tools, and both would fire.
+		// The tools set the selection mode they need themselves, so nothing there needs this.
+		condition: () => Modes.edit && Mesh.selected.length && Toolbox.selected.id != 'knife_tool' && Format.id != 'dew_scene',
 		onChange({value}) {
 			if (value == 'cluster') value = 'face';
 			// Welding mode is vertex mode with weld-on-drop, so it shares vertex mode's selection handling
