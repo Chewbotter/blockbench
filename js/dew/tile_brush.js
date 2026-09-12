@@ -20,6 +20,7 @@ const BRUSH = {
 	SELECT_COLOR: 0x6fe38a,		// tile select ghost
 	SHAVE_COLOR: 0xff9e3d,		// shave preview, drawn on top since the cut lies behind the corner tiles
 	RAMP_COLOR: 0x8ad4ff,		// ramp preview, which sits in open space
+	EDGE_NUDGE: 0.05,			// how far either side of a hit surface the two candidate cells are sampled
 	OVERLAP_AREA: 1,			// a gap this much of which is already filled is not capped, in square units (a tile is 256)
 };
 
@@ -30,6 +31,7 @@ const AXIS_LABEL = {y: 'Floor', x: 'Wall X', z: 'Wall Z'};
 const PLANE_AXES = {y: ['x', 'z'], x: ['z', 'y'], z: ['x', 'y']};
 
 const state = {
+	edge_flip: false,	// Tab takes the other side of the edge under the cursor
 	axis: 'y',
 	depth: 0,
 	size: DEW.TILE,
@@ -124,6 +126,39 @@ function buildOccupancy() {
 	}
 	return occupied;
 }
+// Two cells meet along an edge under the cursor. A candidate already filled is no use, so it scores -1;
+// otherwise it scores the tiles it would sit against in the same plane, so the side that closes a gap wins
+// and open space only wins when neither side touches anything.
+function fillScore(occupied, axis, depth, point, size) {
+	let [u0, v0] = cellAt(point, axis, size);
+	for (let du = 0; du < size; du += H) {
+		for (let dv = 0; dv < size; dv += H) {
+			if (occupied.has(tileKey(axis, depth, u0 + du, v0 + dv))) return -1;
+		}
+	}
+	let against = 0;
+	for (let d = 0; d < size; d += H) {
+		if (occupied.has(tileKey(axis, depth, u0 - H, v0 + d))) against++;
+		if (occupied.has(tileKey(axis, depth, u0 + size, v0 + d))) against++;
+		if (occupied.has(tileKey(axis, depth, u0 + d, v0 - H))) against++;
+		if (occupied.has(tileKey(axis, depth, u0 + d, v0 + size))) against++;
+	}
+	return against;
+}
+// Which side of the edge to paint. Only a face standing across the work plane offers a choice: a face lying
+// along it (a floor under a floor brush) leaves the cell where it is.
+function edgePoint(hit, axis, depth, size) {
+	let across = hit.normal.clone();
+	across[axis] = 0;
+	if (across.lengthSq() < 1e-6) return null;
+	across.normalize();
+	let outward = hit.point.clone().addScaledVector(across, BRUSH.EDGE_NUDGE);
+	let inward = hit.point.clone().addScaledVector(across, -BRUSH.EDGE_NUDGE);
+	let occupied = buildOccupancy();
+	let take_inward = fillScore(occupied, axis, depth, inward, size) > fillScore(occupied, axis, depth, outward, size);
+	if (state.edge_flip) take_inward = !take_inward;
+	return take_inward ? inward : outward;
+}
 function buildVertexMap(mesh) {
 	let map = new Map();
 	for (let vkey in mesh.vertices) {
@@ -139,10 +174,11 @@ function getTarget(preview, event) {
 	if (hit) {
 		// Nudged off the surface so a wall started on a floor lands above it
 		let point = hit.point.clone().addScaledVector(hit.normal, 0.01);
-		return {depth: snap(point[state.axis]), point, hit};
+		let depth = snap(point[state.axis]);
+		return {depth, point, cell_point: edgePoint(hit, state.axis, depth, state.size) || point, hit};
 	}
 	let point = intersectPlane(getRay(preview, event), state.axis, state.depth);
-	return point && {depth: state.depth, point, hit: null};
+	return point && {depth: state.depth, point, cell_point: point, hit: null};
 }
 
 function addTile(u, v) {
@@ -288,7 +324,7 @@ function startStroke(preview, event) {
 			last_point: null,
 			changed: created,
 		};
-		paintAt(target.point);
+		paintAt(target.cell_point);
 		updatePlaneGrid();
 	}
 	document.addEventListener('mousemove', moveStroke);
@@ -412,7 +448,8 @@ function onHover(event, ctrl_held = event.ctrlKey) {
 		let target = getTarget(preview, event);
 		if (target) {
 			axis = state.axis;
-			({depth, point} = target);
+			depth = target.depth;
+			point = target.cell_point;
 			sign = facingSign(preview, axis, depth);
 		}
 	}
@@ -1640,12 +1677,26 @@ BARS.defineActions(function() {
 		description: 'Cycle the four ways the next ramp piece can lean from the edge under the cursor',
 		icon: 'sync',
 		category: 'tools',
-		keybind: new Keybind({key: 9}),	// Tab, free while the ramp tool has it
-		condition: () => Toolbox.selected && Toolbox.selected.id == 'dew_ramp',
+		keybind: new Keybind({key: 9}),	// Tab, shared with the tile brush's flip: the conditions never both pass
+		condition: {tools: ['dew_ramp']},
 		click() {
 			ramp_variant = (ramp_variant + 1) % 4;
 			Blockbench.showQuickMessage(`Ramp direction ${ramp_variant + 1} of 4`, BRUSH.MESSAGE_TIME);
 			if (last_paint_hover_event) onRampHover(last_paint_hover_event);
+		}
+	});
+
+	new Action('dew_tile_edge_side', {
+		name: 'Tile Brush: Flip Edge Side',
+		description: 'Take the other of the two cells that meet along the edge under the cursor. The default is the one that closes a gap',
+		icon: 'flip',
+		category: 'tools',
+		keybind: new Keybind({key: 9}),	// Tab, shared with the ramp direction action, whose condition excludes this tool
+		condition: {tools: ['dew_tile_brush']},
+		click() {
+			state.edge_flip = !state.edge_flip;
+			Blockbench.showQuickMessage(state.edge_flip ? 'Edge side: the far one' : 'Edge side: closes a gap', BRUSH.MESSAGE_TIME);
+			if (last_hover_event) onHover(last_hover_event);
 		}
 	});
 
