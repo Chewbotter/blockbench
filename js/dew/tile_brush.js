@@ -47,8 +47,8 @@ let previous_selection_mode = null;
 
 const round3 = v => Math.round(v * 1000) / 1000;
 const snap = (v, step = H) => Math.round(v / step) * step;
-const isActive = () => Toolbox.selected && Toolbox.selected.id == 'dew_tile_brush';
-const isDewTool = () => Toolbox.selected && ['dew_tile_select', 'dew_tile_brush', 'dew_shave', 'dew_ramp', 'dew_texture_brush', 'dew_paint_bucket'].includes(Toolbox.selected.id);
+const isActive = () => Toolbox.selected && ['dew_tile_brush', 'dew_whole_block'].includes(Toolbox.selected.id);
+const isDewTool = () => Toolbox.selected && ['dew_tile_select', 'dew_whole_block', 'dew_tile_brush', 'dew_shave', 'dew_ramp', 'dew_texture_brush', 'dew_paint_bucket'].includes(Toolbox.selected.id);
 const cutsInside = () => Toolbox.selected && Toolbox.selected.id == 'dew_ramp';
 
 function planePoint(axis, depth, u, v) {
@@ -429,6 +429,24 @@ function showGhostQuad(c, color, on_top = false) {
 	ghost.name = 'dew_tile_ghost';
 	ghost.add(fill, outline);
 	Canvas.scene.add(ghost);
+}
+
+// A block ghost is the cube itself, so its depth reads before it lands
+function showGhostBox(origin, size, color) {
+	hideGhost();
+	let geometry = new THREE.BoxGeometry(size, size, size);
+	let fill = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({color, transparent: true, opacity: BRUSH.GHOST_OPACITY, depthWrite: false}));
+	let outline = new THREE.LineSegments(new THREE.EdgesGeometry(geometry), new THREE.LineBasicMaterial({color}));
+	ghost = new THREE.Group();
+	ghost.name = 'dew_tile_ghost';
+	ghost.position.set(origin.x + size / 2, origin.y + size / 2, origin.z + size / 2);
+	ghost.add(fill, outline);
+	Canvas.scene.add(ghost);
+}
+function onBlockModifier(event) {
+	if (event.key == 'Control' && last_hover_event && !block_stroke) {
+		onBlockHover(last_hover_event, event.type == 'keydown');
+	}
 }
 
 function removePlaneGrid() {
@@ -981,6 +999,225 @@ function onBucketHover(event) {
 	if (!tile) return looseGhost(hit);
 	let [cu, cv] = blockOf(tile, state.size);
 	showGhost(tile.axis, tile.depth, tile.sign, cu, cv, state.size, BRUSH.PAINT_COLOR);
+}
+
+// Whole Block: drops a cube into the cell under the cursor, on the side of the surface the camera is on. Its
+// sides are the same half cell tiles as everything else, so a full size block is four of them a side and the
+// texture tools treat it like any other wall. A side landing where a face already is cancels with that face,
+// both going, which is what packing blocks together should leave behind. Ctrl takes a block out again and
+// seals whatever it had opened up, so a neighbour does not end up with a hole where they met.
+const BLOCK_AXES = ['x', 'y', 'z'];
+const cellKey = side => `${side.axis}|${side.depth}|${side.sign}|${side.u}|${side.v}`;
+
+// Every half cell tile of the six sides of a block sitting at origin
+function blockSides(origin, size) {
+	let sides = [];
+	for (let axis of BLOCK_AXES) {
+		let [ua, va] = PLANE_AXES[axis];
+		for (let sign of [1, -1]) {
+			let depth = origin[axis] + (sign > 0 ? size : 0);
+			for (let du = 0; du < size; du += H) {
+				for (let dv = 0; dv < size; dv += H) {
+					sides.push({axis, depth, sign, u: round3(origin[ua] + du), v: round3(origin[va] + dv)});
+				}
+			}
+		}
+	}
+	return sides;
+}
+function blockNeighbour(origin, axis, sign, size) {
+	let neighbour = {x: origin.x, y: origin.y, z: origin.z};
+	neighbour[axis] = round3(neighbour[axis] + sign * size);
+	return neighbour;
+}
+// A face already at this cell, whichever way it faces
+function faceAtCell(index, side) {
+	for (let sign of [1, -1]) {
+		let entry = index.get(cellKey({...side, sign}));
+		if (entry && entry.mesh.faces[entry.fkey]) return {entry, sign};
+	}
+	return null;
+}
+function addBlockFace(mesh, side, vertex_map) {
+	let corners = [[0, 0], [H, 0], [H, H], [0, H]];
+	let vkeys = corners.map(([du, dv]) => {
+		let local = mesh.mesh.worldToLocal(planePoint(side.axis, side.depth, side.u + du, side.v + dv));
+		let position = [round3(local.x), round3(local.y), round3(local.z)];
+		let id = position.join(',');
+		let vkey = vertex_map.get(id);
+		if (!vkey) {
+			vkey = mesh.addVertices(position)[0];
+			vertex_map.set(id, vkey);
+		}
+		return vkey;
+	});
+	let uv = {};
+	corners.forEach(([du, dv], i) => uv[vkeys[i]] = tileUV(side.axis, side.sign, du, dv));
+	let face = new MeshFace(mesh, {vertices: vkeys, uv, texture: false});
+	let [fkey] = mesh.addFaces(face);
+	if (worldNormal(mesh, face)[side.axis] * side.sign < 0) face.invert();
+	return fkey;
+}
+function placeBlock(mesh, origin, size, index, vertex_map, touched) {
+	let added = 0, culled = 0;
+	for (let side of blockSides(origin, size)) {
+		let existing = faceAtCell(index, side);
+		if (existing) {
+			delete existing.entry.mesh.faces[existing.entry.fkey];
+			index.delete(cellKey({...side, sign: existing.sign}));
+			touched.add(existing.entry.mesh);
+			culled++;
+			continue;
+		}
+		index.set(cellKey(side), {mesh, fkey: addBlockFace(mesh, side, vertex_map)});
+		touched.add(mesh);
+		added++;
+	}
+	return {added, culled};
+}
+// Taking a block out: its own sides go, and any neighbour it had merged with gets its wall back
+function removeBlock(origin, size, index, touched) {
+	let removed = 0, sealed = 0;
+	for (let side of blockSides(origin, size)) {
+		let existing = faceAtCell(index, side);
+		if (!existing) continue;
+		delete existing.entry.mesh.faces[existing.entry.fkey];
+		index.delete(cellKey({...side, sign: existing.sign}));
+		touched.add(existing.entry.mesh);
+		removed++;
+	}
+	for (let axis of BLOCK_AXES) {
+		for (let sign of [1, -1]) {
+			let neighbour = blockNeighbour(origin, axis, sign, size);
+			let sides = blockSides(neighbour, size);
+			// Something is there if the neighbour still carries sides of its own
+			let holder = sides.map(side => faceAtCell(index, side)).find(found => found);
+			if (!holder) continue;
+			let depth = origin[axis] + (sign > 0 ? size : 0);
+			let [ua, va] = PLANE_AXES[axis];
+			let mesh = holder.entry.mesh;
+			let vertex_map = buildVertexMap(mesh);
+			for (let du = 0; du < size; du += H) {
+				for (let dv = 0; dv < size; dv += H) {
+					let side = {axis, depth, sign: -sign, u: round3(origin[ua] + du), v: round3(origin[va] + dv)};
+					if (faceAtCell(index, side)) continue;
+					// Facing back into the hole the block left
+					index.set(cellKey(side), {mesh, fkey: addBlockFace(mesh, side, vertex_map)});
+					touched.add(mesh);
+					sealed++;
+				}
+			}
+		}
+	}
+	return {removed, sealed};
+}
+
+let block_stroke = null;
+
+// The cell a click works on: the near side of the surface under the cursor, or the cell behind it when erasing.
+// With nothing under the cursor it falls back to the work plane, the way the tile brush does.
+function blockTarget(preview, event, erase) {
+	let size = state.size;
+	let snapTo = value => Math.floor(value / size + 1e-6) * size;
+	let hit = hitFace(preview, event);
+	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
+	if (tile) {
+		let [ua, va] = PLANE_AXES[tile.axis];
+		let origin = {};
+		let near = tile.sign > 0 ? tile.depth : tile.depth - size;
+		origin[tile.axis] = erase ? (tile.sign > 0 ? tile.depth - size : tile.depth) : near;
+		origin[ua] = snapTo(tile.u);
+		origin[va] = snapTo(tile.v);
+		return {origin, axis: tile.axis, depth: tile.depth, mesh: hit.element};
+	}
+	if (erase) return null;
+	let point = intersectPlane(getRay(preview, event), state.axis, state.depth);
+	if (!point) return null;
+	let sign = facingSign(preview, state.axis, state.depth);
+	let [ua, va] = PLANE_AXES[state.axis];
+	let [u0, v0] = cellAt(point, state.axis, size);
+	let origin = {};
+	origin[state.axis] = sign > 0 ? state.depth : state.depth - size;
+	origin[ua] = u0;
+	origin[va] = v0;
+	return {origin, axis: state.axis, depth: state.depth, mesh: null};
+}
+// A stroke keeps the plane it started on, so dragging lays a run rather than climbing what it just placed
+function blockAlong(stroke, event) {
+	let point = intersectPlane(getRay(stroke.preview, event), stroke.axis, stroke.depth);
+	if (!point) return null;
+	let [ua, va] = PLANE_AXES[stroke.axis];
+	let [u0, v0] = cellAt(point, stroke.axis, stroke.size);
+	let origin = {};
+	origin[stroke.axis] = stroke.base;
+	origin[ua] = u0;
+	origin[va] = v0;
+	return origin;
+}
+function blockStep(origin) {
+	let id = [origin.x, origin.y, origin.z].join(',');
+	if (block_stroke.placed.has(id)) return;
+	block_stroke.placed.add(id);
+	let counts = block_stroke.erase
+		? removeBlock(origin, block_stroke.size, block_stroke.index, block_stroke.touched)
+		: placeBlock(block_stroke.mesh, origin, block_stroke.size, block_stroke.index, block_stroke.vertex_map, block_stroke.touched);
+	if (counts.added || counts.removed) block_stroke.changed = true;
+	if (block_stroke.touched.size) {
+		Canvas.updateView({elements: [...block_stroke.touched], element_aspects: {geometry: true, faces: true, uv: true}});
+	}
+}
+function startBlockStroke(preview, event) {
+	let erase = event.ctrlKey;
+	let target = blockTarget(preview, event, erase);
+	if (!target) return;
+	let all = Mesh.all.filter(mesh => mesh.visibility !== false && !mesh.locked);
+	let mesh = erase ? null : (Mesh.selected[0] instanceof Mesh ? Mesh.selected[0] : target.mesh);
+	let created = !erase && !mesh;
+	Undo.initEdit(created ? {elements: all, outliner: true, selection: true} : {elements: all, selection: true});
+	if (created) {
+		mesh = new Mesh({name: BRUSH.NEW_MESH_NAME, vertices: {}}).init();
+		unselectAllElements();
+		mesh.select();
+	}
+	if (mesh) mesh.mesh.updateMatrixWorld(true);
+	block_stroke = {
+		preview, erase, created, mesh,
+		axis: target.axis, depth: target.depth, base: target.origin[target.axis], size: state.size,
+		index: buildTileIndex(), vertex_map: mesh ? buildVertexMap(mesh) : null,
+		touched: new Set(), placed: new Set(), changed: false,
+	};
+	blockStep(target.origin);
+	document.addEventListener('mousemove', moveBlockStroke);
+	document.addEventListener('mouseup', endBlockStroke);
+}
+function moveBlockStroke(event) {
+	if (!block_stroke) return;
+	let origin = blockAlong(block_stroke, event);
+	if (origin) blockStep(origin);
+}
+function endBlockStroke() {
+	document.removeEventListener('mousemove', moveBlockStroke);
+	document.removeEventListener('mouseup', endBlockStroke);
+	if (!block_stroke) return;
+	let finished = block_stroke;
+	block_stroke = null;
+	if (!finished.changed) return Undo.cancelEdit();
+	finished.touched.forEach(removeLooseVertices);
+	let emptied = [...finished.touched].filter(mesh => !Object.keys(mesh.faces).length);
+	emptied.forEach(mesh => mesh.remove());
+	Undo.finishEdit(finished.erase ? 'Remove block' : 'Place block',
+		finished.created || emptied.length ? {outliner: true, elements: [...finished.touched].filter(mesh => !emptied.includes(mesh)), selection: true} : undefined);
+	Canvas.updateView({elements: [...finished.touched].filter(mesh => !emptied.includes(mesh)), element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
+	if (last_hover_event) onBlockHover(last_hover_event);
+}
+function onBlockHover(event, ctrl_held = event.ctrlKey) {
+	last_hover_event = event;
+	let preview = block_stroke ? block_stroke.preview : event.target && event.target.preview;
+	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	let erase = block_stroke ? block_stroke.erase : (ctrl_held || Pressing.ctrl);
+	let target = blockTarget(preview, event, erase);
+	if (!target) return hideGhost();
+	showGhostBox(target.origin, state.size, erase ? BRUSH.ERASE_COLOR : BRUSH.GHOST_COLOR);
 }
 
 // Shave: bevels an outside corner where two planes of square tiles meet. The cut is 45 degrees and exactly one block
@@ -1621,6 +1858,45 @@ function onRampHover(event) {
 }
 
 BARS.defineActions(function() {
+	new Tool('dew_whole_block', {
+		name: 'Whole Block',
+		description: 'Drop a block into the cell under the cursor, full or half size per C. Drag to lay a run of them. Ctrl takes one out and seals the neighbours it opened. Faces that meet are dropped on both sides',
+		icon: 'view_in_ar',
+		category: 'tools',
+		transformerMode: 'hidden',
+		selectElements: false,
+		cursor: 'crosshair',
+		modes: ['edit'],
+		condition: () => Modes.edit && Format.id == 'dew_scene',
+		onCanvasClick(data) {
+			let event = data && data.event;
+			if (!event || event.button !== 0 || event.altKey || block_stroke) return;
+			startBlockStroke(Preview.selected, event);
+		},
+		onSelect() {
+			previous_selection_mode = BarItems.selection_mode.value;
+			BarItems.selection_mode.set('object');
+			updateSelection();
+			active_hover = onBlockHover;
+			document.addEventListener('mousemove', onBlockHover);
+			document.addEventListener('keydown', onBlockModifier);
+			document.addEventListener('keyup', onBlockModifier);
+			updatePlaneGrid();
+		},
+		onUnselect() {
+			document.removeEventListener('mousemove', onBlockHover);
+			document.removeEventListener('keydown', onBlockModifier);
+			document.removeEventListener('keyup', onBlockModifier);
+			active_hover = null;
+			hideGhost();
+			removePlaneGrid();
+			if (previous_selection_mode && previous_selection_mode != 'object') {
+				BarItems.selection_mode.set(previous_selection_mode);
+				updateSelection();
+			}
+		},
+	});
+
 	new Tool('dew_tile_brush', {
 		name: 'Tile Brush',
 		description: 'Paint tiles onto the work plane. Ctrl erases, Alt takes the plane and facing of the tile under the cursor. W cycles the plane, A / D step it, C switches full / half tiles',
@@ -1916,7 +2192,8 @@ BARS.defineActions(function() {
 			} else {
 				Blockbench.showQuickMessage(state.size == DEW.TILE ? 'Full tile' : 'Half tile', BRUSH.MESSAGE_TIME);
 				updateAtlasOverlay();
-				if (active_hover && last_paint_hover_event) active_hover(last_paint_hover_event);
+				let hovered = Toolbox.selected.id == 'dew_whole_block' ? last_hover_event : last_paint_hover_event;
+				if (active_hover && hovered) active_hover(hovered);
 			}
 		}
 	});

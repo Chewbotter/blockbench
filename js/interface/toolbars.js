@@ -766,6 +766,7 @@ export const BARS = {
 				'vertex_snap_tool',
 				'stretch_tool',
 				'dew_tile_select',
+				'dew_whole_block',
 				'dew_tile_brush',
 				'dew_shave',
 				'dew_ramp',
