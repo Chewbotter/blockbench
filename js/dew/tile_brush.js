@@ -1059,57 +1059,36 @@ function addBlockFace(mesh, side, vertex_map) {
 	return fkey;
 }
 function placeBlock(mesh, origin, size, index, vertex_map, touched) {
-	let added = 0, culled = 0;
+	let added = 0, kept = 0;
 	for (let side of blockSides(origin, size)) {
-		let existing = faceAtCell(index, side);
-		if (existing) {
-			delete existing.entry.mesh.faces[existing.entry.fkey];
-			index.delete(cellKey({...side, sign: existing.sign}));
-			touched.add(existing.entry.mesh);
-			culled++;
+		// A face already standing there stays, and the block goes without its own. Nothing another surface
+		// owns is destroyed, so a floor the block lands on is still a floor once the block goes again, and
+		// packed blocks have one face between them rather than two.
+		if (faceAtCell(index, side)) {
+			kept++;
 			continue;
 		}
 		index.set(cellKey(side), {mesh, fkey: addBlockFace(mesh, side, vertex_map)});
 		touched.add(mesh);
 		added++;
 	}
-	return {added, culled};
+	return {added, kept};
 }
-// Taking a block out: its own sides go, and any neighbour it had merged with gets its wall back
+// Taking a block out: only what faces out of the cell is the block's own. A face pointing into it belongs to
+// whatever stands on the other side, a floor under it or a block beside it, and that keeps its wall. Nothing
+// has to be put back, which is what the old seal got wrong: it could not tell a floor from a solid neighbour
+// and hung walls under flat ground.
 function removeBlock(origin, size, index, touched) {
-	let removed = 0, sealed = 0;
+	let removed = 0;
 	for (let side of blockSides(origin, size)) {
-		let existing = faceAtCell(index, side);
-		if (!existing) continue;
-		delete existing.entry.mesh.faces[existing.entry.fkey];
-		index.delete(cellKey({...side, sign: existing.sign}));
-		touched.add(existing.entry.mesh);
+		let entry = index.get(cellKey(side));
+		if (!entry || !entry.mesh.faces[entry.fkey]) continue;
+		delete entry.mesh.faces[entry.fkey];
+		index.delete(cellKey(side));
+		touched.add(entry.mesh);
 		removed++;
 	}
-	for (let axis of BLOCK_AXES) {
-		for (let sign of [1, -1]) {
-			let neighbour = blockNeighbour(origin, axis, sign, size);
-			let sides = blockSides(neighbour, size);
-			// Something is there if the neighbour still carries sides of its own
-			let holder = sides.map(side => faceAtCell(index, side)).find(found => found);
-			if (!holder) continue;
-			let depth = origin[axis] + (sign > 0 ? size : 0);
-			let [ua, va] = PLANE_AXES[axis];
-			let mesh = holder.entry.mesh;
-			let vertex_map = buildVertexMap(mesh);
-			for (let du = 0; du < size; du += H) {
-				for (let dv = 0; dv < size; dv += H) {
-					let side = {axis, depth, sign: -sign, u: round3(origin[ua] + du), v: round3(origin[va] + dv)};
-					if (faceAtCell(index, side)) continue;
-					// Facing back into the hole the block left
-					index.set(cellKey(side), {mesh, fkey: addBlockFace(mesh, side, vertex_map)});
-					touched.add(mesh);
-					sealed++;
-				}
-			}
-		}
-	}
-	return {removed, sealed};
+	return {removed};
 }
 
 let block_stroke = null;

@@ -62,16 +62,17 @@ console.log('   expect 6 faces, one each way, box 0,0,0 to 16,16,16: it sits on 
 await hover([16, 8, 8]);
 await click([16, 8, 8]);
 console.log('C. a second block against it:', await ev(shape));
-console.log('   expect 10 faces, not 12: the pair on x 16 cancelled, and the box now runs to x 32');
+console.log('   expect 11 faces: the first block keeps its wall on x 16 and the second goes without its own,');
+console.log('   so there is one face between them rather than two, and the box runs to x 32');
 
 // Ctrl takes the second one out and gives the first its wall back
 await hover([32, 8, 8], 2);
 await click([32, 8, 8], 2);
 console.log('D. ctrl removes it again:', await ev(shape));
-console.log('   expect 6 faces and the box back to 16 across: the wall between them was sealed on the way out');
+console.log('   expect 6 faces and the box back to 16 across: the first block still has the wall it always had');
 
 await ev(`Undo.undo(); true`);
-console.log('E. undo brings it back:', await ev(shape), ' expect 10 faces again');
+console.log('E. undo brings it back:', await ev(shape), ' expect 11 faces again');
 await ev(`Undo.undo(); true`);
 
 // A drag lays a run along the plane it started on
@@ -83,7 +84,7 @@ await sleep(300);
 await hover([8, 0, 8]);
 await dragWorld([8, 0, 8], [104, 0, 8]);
 console.log('F. a drag along the plane:', await ev(shape));
-console.log('   expect a row of blocks, x running 0 to over 96, and far fewer faces than 6 a block: the walls between them are gone');
+console.log('   expect a row of blocks, x running 0 to over 96, one face between each pair rather than two');
 
 // Full size blocks are four half cell tiles a side
 await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); unselectAllElements(); updateSelection();
@@ -108,12 +109,29 @@ await camera(8, 8, 8, 90, 70, 90);
 await hover([8, 0, 8]);
 await click([8, 0, 8]);
 console.log('H. a block dropped onto a single floor tile:', await ev(shape));
-console.log('   expect 5 faces: the tile and the block underside met and both went, so the block has no floor');
+console.log('   expect 6 faces: the tile stays and stands in for the block underside, which is not added');
 await hover([8, 16, 8], 2);
 await click([8, 16, 8], 2);
 console.log('I. ctrl removes that block again:', await ev(shape));
-console.log('   expect nothing left: the tile was on its own, so there was no neighbour to seal against and it');
-console.log('   does not come back. Undo is the way back from that one');
+console.log('   expect the tile still there, 1 face: only what faced out of the cell belonged to the block');
+
+// Ctrl on flat ground takes what is in the cursor's cell and builds nothing under it
+await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
+	let m = new Mesh({name: 'floor', vertices: {}}); let map = {};
+	let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
+	for (let x = 0; x < 32; x += 16) for (let z = 0; z < 32; z += 16) {
+		let pt = (dx, dz) => [x + dx, 0, z + dz];
+		let f = new MeshFace(m, {vertices: [pt(0,0), pt(16,0), pt(16,16), pt(0,16)].map(vert), texture: false});
+		m.addFaces(f); if (f.getNormal(true)[1] < 0) f.invert(); }
+	m.init(); unselectAllElements(); updateSelection();
+	BarItems.dew_whole_block.select(); let s = DEWTileBrush.state; s.size = 16; s.axis = 'y'; s.depth = 0; return true; })()`);
+await sleep(400);
+await camera(16, 0, 16, 110, 90, 110);
+console.log('L. a floor of four tiles:', await ev(shape), ' expect 4 faces, all facing up');
+await hover([8, 0, 8], 2);
+await click([8, 0, 8], 2);
+console.log('M. ctrl on one of them:', await ev(shape));
+console.log('   expect 3 faces, all still facing up: the tile under the cursor goes, and nothing is hung underneath');
 
 console.log('page errors:', errors.length ? errors : 'none');
 await sleep(200);
