@@ -28,7 +28,7 @@ const H = DEW.HALF_CELL;
 const AXES = ['y', 'x', 'z'];
 const AXIS_LABEL = {y: 'Floor', x: 'Wall X', z: 'Wall Z'};
 // In-plane axes of each work plane: u runs along the first, v along the second
-const PLANE_AXES = {y: ['x', 'z'], x: ['z', 'y'], z: ['x', 'y']};
+export const PLANE_AXES = {y: ['x', 'z'], x: ['z', 'y'], z: ['x', 'y']};
 
 const state = {
 	edge_flip: false,	// Tab takes the other side of the edge under the cursor
@@ -95,7 +95,7 @@ function worldNormal(mesh, face) {
 
 // Texture coordinates inside a tile block of the given size, oriented so textures read upright and
 // unmirrored from the facing side
-function tileUV(axis, sign, du, dv, size = H) {
+export function tileUV(axis, sign, du, dv, size = H) {
 	if (axis == 'y') return [sign > 0 ? du : size - du, dv];
 	let u = (axis == 'x') == (sign > 0) ? size - du : du;
 	return [u, size - dv];
@@ -1694,6 +1694,12 @@ BARS.defineActions(function() {
 			let event = data && data.event;
 			if (!event || event.button !== 0 || event.altKey || select_stroke) return;
 			startSelectStroke(Preview.selected, event);
+		},
+		onCanvasRightClick(data) {
+			// Blockbench opens an element's own menu only for tools that select elements, and this one does not,
+			// so the tile actions are offered here instead of the preview's camera menu
+			new Menu('dew_tile_actions', ['dew_group_tiles', 'dew_extrude_tiles']).open(data && data.event ? data.event : data);
+			return false;
 		},
 		onSelect() {
 			// Face mode shows the selection and leaves it ready for the move gizmo and mesh actions
