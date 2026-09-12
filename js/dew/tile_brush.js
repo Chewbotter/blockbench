@@ -232,10 +232,10 @@ function disposeSnapshot(snapshot) {
 	snapshot.proxies.forEach(proxy => proxy.geometry.dispose());
 	snapshot.material.dispose();
 }
-function snapshotHit(event) {
+function snapshotHit(event, active = stroke) {
 	let raycaster = new THREE.Raycaster();
-	raycaster.ray.copy(getRay(stroke.preview, event));
-	let intersect = raycaster.intersectObjects(stroke.snapshot.proxies, false)[0];
+	raycaster.ray.copy(getRay(active.preview, event));
+	let intersect = raycaster.intersectObjects(active.snapshot.proxies, false)[0];
 	if (!intersect) return null;
 	return {element: intersect.object.element, face: intersect.object.triangle_faces[intersect.faceIndex]};
 }
@@ -1314,6 +1314,40 @@ function startRampStroke(preview, event) {
 	document.addEventListener('mousemove', moveRampStroke);
 	document.addEventListener('mouseup', endRampStroke);
 }
+// Ctrl with the ramp tool removes what it draws: diagonals, and the triangles that close gaps. Tiles are left to
+// the tile brush. Like erasing tiles, it works off a snapshot taken at stroke start, so it cannot drill through.
+function rampEraseStep(event) {
+	let hit = snapshotHit(event, shave_stroke);
+	let face = hit && hit.element.faces[hit.face];
+	if (!face || describeTile(hit.element, face)) return;
+	delete hit.element.faces[hit.face];
+	shave_stroke.touched.add(hit.element);
+	shave_stroke.changed = true;
+	Canvas.updateView({elements: [hit.element], element_aspects: {geometry: true, faces: true, uv: true}});
+}
+function startRampErase(preview, event) {
+	Undo.initEdit({elements: Mesh.all.filter(mesh => mesh.visibility !== false && !mesh.locked)});
+	shave_stroke = {preview, erase: true, touched: new Set(), changed: false, snapshot: snapshotMeshes()};
+	rampEraseStep(event);
+	document.addEventListener('mousemove', moveRampErase);
+	document.addEventListener('mouseup', endRampErase);
+}
+function moveRampErase(event) {
+	if (shave_stroke && shave_stroke.erase) rampEraseStep(event);
+}
+function endRampErase() {
+	document.removeEventListener('mousemove', moveRampErase);
+	document.removeEventListener('mouseup', endRampErase);
+	if (!shave_stroke) return;
+	let finished = shave_stroke;
+	shave_stroke = null;
+	disposeSnapshot(finished.snapshot);
+	if (!finished.changed) return Undo.cancelEdit();
+	finished.touched.forEach(removeLooseVertices);
+	Undo.finishEdit('Erase ramp');
+	Canvas.updateView({elements: [...finished.touched], element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
+}
+
 function moveRampStroke(event) {
 	if (!shave_stroke || !shave_stroke.run) return;
 	extendRamp(Math.max(shave_stroke.run.min_pieces, rampReach(shave_stroke.run, event)));
@@ -1334,6 +1368,13 @@ function onRampHover(event) {
 	last_paint_hover_event = event;
 	let preview = shave_stroke ? shave_stroke.preview : event.target && event.target.preview;
 	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	if (shave_stroke ? shave_stroke.erase : (event.ctrlKey || Pressing.ctrl)) {
+		let hit = hitFace(preview, event);
+		let face = hit && hit.element.faces[hit.face];
+		if (!face || describeTile(hit.element, face)) return hideGhost();
+		let points = facePoints(hit.element, face);
+		return showGhostQuad(points.length == 4 ? points : [points[0], points[1], points[2], points[2]], BRUSH.ERASE_COLOR, true);
+	}
 	if (shave_stroke && shave_stroke.run) {
 		let run = shave_stroke.run;
 		let offset = run.step.clone().multiplyScalar(rampReach(run, event) - 1);
@@ -1470,6 +1511,7 @@ BARS.defineActions(function() {
 		onCanvasClick(data) {
 			let event = data && data.event;
 			if (!event || event.button !== 0 || event.altKey || shave_stroke) return;
+			if (event.ctrlKey) return startRampErase(Preview.selected, event);
 			startRampStroke(Preview.selected, event);
 		},
 		onSelect() {

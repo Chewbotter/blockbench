@@ -79,6 +79,25 @@ await camera(40, 12, 60, 120, 60, 120);
 await hover([24, 8, 38]);
 console.log('E. hover the diagonal:', await ev(`!!Canvas.scene.getObjectByName('dew_tile_ghost')`), ' expect true');
 
+// Ctrl removes what the ramp draws, and leaves tiles to the tile brush
+const faceCounts = `(() => { let m = Mesh.all[0]; let diagonals = 0, tiles = 0;
+	for (let fkey in m.faces) { let f = m.faces[fkey]; let n = f.getNormal(true);
+		if (n.filter(v => Math.abs(v) > 0.01).length > 1) diagonals++; else tiles++; }
+	return JSON.stringify({diagonals, tiles}); })()`;
+await camera(32, 16, 48, 32, 90, 190);
+await dragWorld([24, 0, 30], [24, 32, 62]);
+console.log('F. a run of two:', await ev(faceCounts), ' expect 2 diagonals, 8 tiles');
+const ctrlClick = async world => { let at = await screen(...world);
+	await mouse('mouseMoved', at, { button: 'none', modifiers: 2 }); await sleep(50);
+	await mouse('mousePressed', at, { buttons: 1, modifiers: 2 }); await sleep(50);
+	await mouse('mouseReleased', at, { modifiers: 2 }); await sleep(140); };
+await ctrlClick([24, 8, 40]);
+console.log('G. ctrl+click a diagonal:', await ev(faceCounts), ' expect 1 diagonal left');
+await ctrlClick([24, 0, 8]);
+console.log('H. ctrl+click a tile:', await ev(faceCounts), ' expect unchanged: erasing tiles is the tile brush job');
+await ev(`Undo.undo(); true`);
+console.log('I. undo the erase:', await ev(faceCounts), ' expect 2 diagonals again');
+
 console.log('page errors:', errors.length ? errors : 'none');
 await sleep(200);
 const shot = await send('Page.captureScreenshot', { format: 'png' });

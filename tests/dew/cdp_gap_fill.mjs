@@ -80,6 +80,24 @@ console.log('   expect 3 diagonals, and the gaps against the steps filled with t
 await ev(`Undo.undo(); true`);
 console.log('B. undo takes the caps with it:', await ev(shapes), ' expect back to the start');
 
+// The other order, the way the user works: draw the ramp first, then paint the steps beside it
+await ev(`(() => { let wall = Mesh.all.find(m => m.name == 'wall'); wall.remove(); return true; })()`);
+await ev(`(() => { BarItems.dew_ramp.select(); DEWTileBrush.state.size = 16; return true; })()`);
+await sleep(150);
+await hover([24, 0, 30]);
+await hover([24, 0, 30]);
+await dragWorld([24, 0, 30], [24, 48, 78]);
+console.log('C. ramp alone, no wall yet:', await ev(shapes), ' expect 3 diagonals, no triangles');
+
+await ev(`(() => { BarItems.dew_tile_brush.select(); let s = DEWTileBrush.state; s.size = 16; s.axis = 'x'; s.depth = 32; return true; })()`);
+await sleep(150);
+for (let point of [[32, 8, 56], [32, 8, 72], [32, 24, 72]]) {
+	await hover(point);
+	await dragWorld(point, point, 1);
+}
+console.log('D. steps painted beside the ramp:', await ev(shapes));
+console.log('   expect the gap at z 48..64 closed by a triangle, plain because brush-painted tiles carry no texture yet, open_triangular_holes 0');
+
 await sleep(200);
 const shot = await send('Page.captureScreenshot', { format: 'png' });
 fs.writeFileSync('shot_gap_fill.png', Buffer.from(shot.result.data, 'base64'));
