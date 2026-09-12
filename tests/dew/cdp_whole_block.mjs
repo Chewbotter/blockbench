@@ -115,6 +115,27 @@ console.log('I. ctrl removes that block again:', await ev(shape));
 console.log('   expect nothing left: the tile was on its own, so there was no neighbour to seal against and it');
 console.log('   does not come back. Undo is the way back from that one');
 
+// Mid drag the ghost has to agree with where the block actually goes
+await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
+	unselectAllElements(); updateSelection();
+	BarItems.dew_whole_block.select(); let s = DEWTileBrush.state; s.size = 16; s.axis = 'y'; s.depth = 0; return true; })()`);
+await sleep(400);
+await camera(32, 8, 8, 130, 90, 130);
+const ghostAt = `(() => { let g = Canvas.scene.getObjectByName('dew_tile_ghost'); if (!g) return 'none';
+	let r = v => Math.round(v * 100) / 100;
+	return JSON.stringify([r(g.position.x), r(g.position.y), r(g.position.z)]); })()`;
+const start = await screen(8, 0, 8), along = await screen(40, 0, 8);
+await mouse('mouseMoved', start, { button: 'none' }); await sleep(90);
+console.log('J. ghost before the drag starts:', await ev(ghostAt), ' expect 8,8,8: the cell under the cursor, sitting on the plane');
+await mouse('mousePressed', start, { buttons: 1 }); await sleep(120);
+await mouse('mouseMoved', along, { buttons: 1 }); await sleep(160);
+console.log('K. ghost part way along the drag:', await ev(ghostAt));
+console.log('   expect 40,8,8: the cell the cursor is over on the plane the stroke started on, not on top of the block just laid');
+await mouse('mouseReleased', along); await sleep(250);
+console.log('   where the run actually went:', await ev(shape));
+console.log('   expect 14 faces, three blocks in a row reaching x 48 with the walls between them gone: one jump of the');
+console.log('   cursor still fills the cells it crossed');
+
 console.log('page errors:', errors.length ? errors : 'none');
 await sleep(200);
 const shot = await send('Page.captureScreenshot', { format: 'png' });

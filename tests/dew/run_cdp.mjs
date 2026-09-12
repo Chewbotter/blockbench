@@ -74,20 +74,19 @@ async function evaluate(expression) {
 	return answer.result;
 }
 
-const booted = async () => await evaluate('typeof Blockbench != "undefined" && !!window.Preview && Preview.all.length > 0').then(r => r?.result?.value).catch(() => false);
-// A running app keeps the bundle it started with, so a build since then has to be loaded before the test runs
-async function reloadIfStale() {
+// A running app keeps the bundle it started with. Reloading the page to pick up a new one takes Blockbench
+// down with it, so a rebuild since the app started means starting it again: about 10 s, and only after a build.
+async function restartIfStale() {
 	let bundle = path.join(root, 'dist/bundle.js');
 	let built = fs.existsSync(bundle) ? fs.statSync(bundle).mtimeMs : 0;
 	// The page knows when it loaded, which beats bookkeeping in a file that can drift out of step
-	let loaded = await evaluate('performance.timeOrigin').then(r => r?.result?.value).catch(() => 0);
+	let loaded = await evaluate('performance.timeOrigin').then(answer => answer?.result?.value).catch(() => 0);
 	if (!built || !loaded || built <= loaded) return;
-	console.log('note: the bundle was rebuilt since this app loaded it, reloading');
-	// Ignoring the cache, or the reload hands back the same file:// bundle the app already had
-	await cdp('Page.reload', { ignoreCache: true }).catch(() => {});
-	await sleep(1500);
-	for (let i = 0; i < 60; i++) { if (await booted()) break; await sleep(500); }
-	await sleep(1500);  // the renderer finishes setting itself up after that flag goes true
+	console.log('note: the bundle was rebuilt since this app started, starting it again');
+	kill();
+	await sleep(1200);
+	await start();
+	fs.writeFileSync(mode_file, mode);
 }
 
 // Whatever the last test left behind, so a shared app starts one looking like a fresh one
@@ -152,7 +151,7 @@ if (fresh) {
 		fs.writeFileSync(mode_file, mode);
 		console.log(`dev app started on the ${mode} profile, left running (npm run test:dew:stop closes it)`);
 	}
-	await reloadIfStale();
+	await restartIfStale();
 	await reset();
 	await sleep(400); // settle before the test starts listening for page errors
 }
