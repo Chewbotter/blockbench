@@ -43,7 +43,7 @@ const holes = `(() => { let r = v => Math.round(v * 100) / 100; let key = p => p
 	let sub = (p, q) => [0,1,2].map(i => p[i] - q[i]);
 	let cross = (u, v) => [u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0]];
 	let dot = (u, v) => u[0]*v[0] + u[1]*v[1] + u[2]*v[2];
-	let coveredBy = tri => {                                     // the faceCovers rule, replicated
+	let coveredBy = tri => {                                     // the capper's coverage rule, replicated
 		let n = cross(sub(tri[1], tri[0]), sub(tri[2], tri[0])); let len = Math.hypot(...n); n = n.map(v => v / len);
 		let centre = [0,1,2].map(i => (tri[0][i] + tri[1][i] + tri[2][i]) / 3);
 		let dominant = [0,1,2].reduce((best, i) => Math.abs(n[i]) > Math.abs(n[best]) ? i : best, 0);
@@ -79,13 +79,45 @@ const triangles = `(() => { let r = v => Math.round(v * 100) / 100; let out = []
 		if (vs.length != 3) continue;
 		out.push(m.name + ': ' + vs.map(k => m.vertices[k].map(r).join(',')).sort().join(' | ') + (f.texture ? ' textured' : ' PLAIN')); }
 	return JSON.stringify(out.sort(), null, 1); })()`;
+// Faces sitting on top of each other: an exact repeat, or a coplanar pair where one's centre is inside the other.
+// Either one z-fights in the preview.
+const overlaps = `(() => { let r = v => Math.round(v * 100) / 100; let key = p => p.map(r).join(',');
+	let faces = [];
+	for (let m of Mesh.all) { if (m.visibility === false || m.export === false) continue;
+		for (let fkey in m.faces) { let f = m.faces[fkey]; let vs = f.getSortedVertices(); if (vs.length < 3) continue;
+			faces.push({name: m.name, n: f.getNormal(true).map(r).join(','), pts: vs.map(k => m.vertices[k].slice()), keys: vs.map(k => key(m.vertices[k]))}); } }
+	let sub = (p, q) => [0,1,2].map(i => p[i] - q[i]);
+	let cross = (u, v) => [u[1]*v[2]-u[2]*v[1], u[2]*v[0]-u[0]*v[2], u[0]*v[1]-u[1]*v[0]];
+	let dot = (u, v) => u[0]*v[0] + u[1]*v[1] + u[2]*v[2];
+	let inside = (f, centre) => {
+		let n = cross(sub(f.pts[1], f.pts[0]), sub(f.pts[2], f.pts[0])); let len = Math.hypot(...n); n = n.map(v => v / len);
+		let dominant = [0,1,2].reduce((best, i) => Math.abs(n[i]) > Math.abs(n[best]) ? i : best, 0);
+		let [across, down] = [0,1,2].filter(i => i != dominant);
+		let hit = false;
+		for (let i = 0, j = f.pts.length - 1; i < f.pts.length; j = i++) {
+			let a = f.pts[i], b = f.pts[j];
+			if ((a[down] > centre[down]) == (b[down] > centre[down])) continue;
+			let crossing = a[across] + (centre[down] - a[down]) / (b[down] - a[down]) * (b[across] - a[across]);
+			if (centre[across] < crossing) hit = !hit; }
+		return hit; };
+	let out = [];
+	for (let i = 0; i < faces.length; i++) for (let j = i + 1; j < faces.length; j++) {
+		let a = faces[i], b = faces[j];
+		if (a.keys.slice().sort().join('|') == b.keys.slice().sort().join('|')) { out.push('exact repeat: ' + a.name + ' n' + a.n + ' and ' + b.name + ' n' + b.n + ' at ' + a.keys.slice().sort().join(' | ')); continue; }
+		let n = cross(sub(a.pts[1], a.pts[0]), sub(a.pts[2], a.pts[0])); let len = Math.hypot(...n); n = n.map(v => v / len);
+		if (b.pts.some(p => Math.abs(dot(sub(p, a.pts[0]), n)) > 1e-3)) continue;        // not coplanar
+		let ca = [0,1,2].map(k => a.pts.reduce((s, p) => s + p[k], 0) / a.pts.length);
+		let cb = [0,1,2].map(k => b.pts.reduce((s, p) => s + p[k], 0) / b.pts.length);
+		if (inside(b, ca) || inside(a, cb)) out.push('coplanar overlap: ' + a.name + ' n' + a.n + ' [' + a.keys.join(' | ') + '] over ' + b.name + ' n' + b.n + ' [' + b.keys.join(' | ') + ']'); }
+	return JSON.stringify(out, null, 1); })()`;
 const wallTiles = `(() => { let out = [];
 	for (let m of Mesh.all) for (let fkey in m.faces) { let f = m.faces[fkey]; let vs = f.getSortedVertices();
 		if (vs.length != 4) continue; let n = f.getNormal(true); if (Math.abs(n[0]) < 0.99) continue;
 		out.push('x ' + m.vertices[vs[0]][0]); }
 	return JSON.stringify(out.sort()); })()`;
 
-// Floor over the whole area, so it carries on underneath the ramp
+// Floor over the whole area, so it carries on underneath the ramp. `extra` adds more hand-built planes.
+const buildScene = async (extra = '') => {
 await ev(`(() => {
 	newProject(Formats.dew_scene);
 	window.__build = (name, list) => { let m = new Mesh({name, vertices: {}}); let map = {};
@@ -98,12 +130,15 @@ await ev(`(() => {
 				m.addFaces(f); if (f.getNormal(true)[{x: 0, y: 1, z: 2}[axis]] * sign < 0) f.invert(); } }
 		m.init(); return m; };
 	__build('floor', [['y', 0, 1, 0, 0, 4, 6]]);   // x 0..64, z 0..96: under the ramp too
+	${extra}
 	unselectAllElements(); return true; })()`);
 await ev(`(() => { BarItems.create_dew_atlas.click(); Dialog.open.confirm(); return true; })()`);
 await sleep(400);
 await ev(`(() => { let t = Texture.all[0];
 	for (let m of Mesh.all) for (let f of Object.values(m.faces)) { f.texture = t.uuid; f.vertices.forEach(k => f.uv[k] = [0, 0]); }
 	return true; })()`);
+};
+await buildScene();
 await camera(32, 20, 48, 150, 80, 150);
 await ev(`(() => { BarItems.dew_ramp.select(); DEWTileBrush.state.size = 16; return true; })()`);
 await sleep(150);
@@ -119,7 +154,8 @@ console.log('B. holes before any wall:', await ev(holes), ' expect none: nothing
 await camera(32, 20, 56, 220, 20, 56);
 await ev(`(() => { BarItems.dew_tile_brush.select(); let s = DEWTileBrush.state; s.size = 16; s.axis = 'x'; s.depth = 32; return true; })()`);
 await sleep(150);
-for (let point of [[32, 8, 56], [32, 8, 72], [32, 24, 72]]) {
+// The whole staircase under the slope, one cell per stroke, so every step gets its own cap
+for (let point of [[32, 8, 56], [32, 8, 72], [32, 24, 72], [32, 8, 88], [32, 24, 88], [32, 40, 88]]) {
 	await hover(point);
 	await hover(point);
 	await dragWorld(point, point, 1);
@@ -128,10 +164,49 @@ console.log('C. wall tiles painted at:', await ev(wallTiles), ' expect every one
 console.log('D. holes after painting:', await ev(holes));
 console.log('   expect none: the gap at the ramp foot closes even though its bottom edge is shared by two floor tiles');
 console.log('E. triangles:', await ev(triangles));
-console.log('   expect 2 caps in the x 32 plane, including 32,0,32 | 32,0,48 | 32,16,48 at the foot');
+console.log('   expect one cap per step in the x 32 plane, including 32,0,32 | 32,0,48 | 32,16,48 at the foot');
+console.log('F. faces on top of each other:', await ev(overlaps), ' expect none: a capped gap must not be capped again');
 
 await ev(`Undo.undo(); true`);
-console.log('F. undo takes the last cap with it:', await ev(triangles), ' expect 1 cap left');
+console.log('G. undo takes the last cap with it:', await ev(triangles), ' expect one fewer cap');
+
+// One drag across several cells, so a single pass caps several gaps at once
+await buildScene();
+await camera(32, 20, 48, 150, 80, 150);
+await ev(`(() => { BarItems.dew_ramp.select(); DEWTileBrush.state.size = 16; return true; })()`);
+await sleep(150);
+await hover([24, 0, 30]);
+await hover([24, 0, 30]);
+await dragWorld([24, 0, 30], [24, 48, 78]);
+await camera(32, 20, 56, 220, 20, 56);
+await ev(`(() => { BarItems.dew_tile_brush.select(); let s = DEWTileBrush.state; s.size = 16; s.axis = 'x'; s.depth = 32; return true; })()`);
+await sleep(150);
+await hover([32, 8, 56]);
+await hover([32, 8, 56]);
+await dragWorld([32, 8, 56], [32, 40, 88]);
+console.log('H. one drag up the staircase:', await ev(triangles));
+console.log('   overlaps:', await ev(overlaps), ' expect none');
+console.log('   holes:', await ev(holes), ' expect none');
+
+// The wall first, the ramp drawn against it, then one more tile: a second pass over gaps already capped
+await buildScene(`__build('wall', [['x', 32, 1, 48, 0, 1, 1], ['x', 32, 1, 64, 0, 1, 2], ['x', 32, 1, 80, 0, 1, 3]]);`);
+await camera(32, 20, 48, 150, 80, 150);
+await ev(`(() => { BarItems.dew_ramp.select(); DEWTileBrush.state.size = 16; return true; })()`);
+await sleep(150);
+await hover([24, 0, 30]);
+await hover([24, 0, 30]);
+await dragWorld([24, 0, 30], [24, 48, 78]);
+console.log('I. ramp drawn against a wall standing on the floor:', await ev(triangles));
+console.log('   overlaps:', await ev(overlaps), ' expect none');
+
+await camera(32, 20, 56, 220, 20, 56);
+await ev(`(() => { BarItems.dew_tile_brush.select(); let s = DEWTileBrush.state; s.size = 16; s.axis = 'x'; s.depth = 32; return true; })()`);
+await sleep(150);
+await hover([32, 40, 88]);
+await hover([32, 40, 88]);
+await dragWorld([32, 40, 88], [32, 40, 88], 1);
+console.log('J. one more tile painted beside it:', await ev(triangles));
+console.log('   overlaps:', await ev(overlaps), ' expect none: a gap the ramp already capped must not cap again');
 
 console.log('page errors:', errors.length ? errors : 'none');
 await sleep(200);

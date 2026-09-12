@@ -20,6 +20,7 @@ const BRUSH = {
 	SELECT_COLOR: 0x6fe38a,		// tile select ghost
 	SHAVE_COLOR: 0xff9e3d,		// shave preview, drawn on top since the cut lies behind the corner tiles
 	RAMP_COLOR: 0x8ad4ff,		// ramp preview, which sits in open space
+	OVERLAP_AREA: 1,			// a gap this much of which is already filled is not capped, in square units (a tile is 256)
 };
 
 const H = DEW.HALF_CELL;
@@ -924,30 +925,62 @@ function vertexAt(mesh, point, maps) {
 	}
 	return vkey;
 }
-// A candidate that lies inside an existing coplanar face is not a hole: its edges are only that face's boundary,
-// as when a square wall tile already closes the end of a wedge. Capping it would lay a face on top of another.
-function faceCovers(points) {
+// A candidate that shares area with an existing coplanar face is not a hole, as when a square wall tile already
+// closes the end of a wedge. Capping it would lay a face on top of another, which z-fights in the preview.
+// The test is the shared area rather than the candidate's centre: a face covering only part of a candidate,
+// which a differently shaped loop over an existing cap produces, leaves that centre clear and slipped through.
+function faceOverlaps(points) {
 	let normal = new THREE.Vector3().subVectors(points[1], points[0]).cross(new THREE.Vector3().subVectors(points[2], points[0])).normalize();
-	let centre = points[0].clone().add(points[1]).add(points[2]).multiplyScalar(1 / 3);
 	let dominant = ['x', 'y', 'z'].reduce((best, axis) => Math.abs(normal[axis]) > Math.abs(normal[best]) ? axis : best, 'x');
 	let [across, down] = ['x', 'y', 'z'].filter(axis => axis != dominant);
+	let flatten = point => [point[across], point[down]];
+	let triangle = counterClockwise(points.map(flatten));
 	for (let mesh of Mesh.all) {
 		if (mesh.visibility === false) continue;
 		for (let fkey in mesh.faces) {
 			let corners = mesh.faces[fkey].getSortedVertices().map(vkey => worldVertex(mesh, vkey));
 			if (corners.length < 3) continue;
 			if (corners.some(corner => Math.abs(corner.clone().sub(points[0]).dot(normal)) > 1e-3)) continue;
-			let inside = false;
-			for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
-				let a = corners[i], b = corners[j];
-				if ((a[down] > centre[down]) == (b[down] > centre[down])) continue;
-				let crossing = a[across] + (centre[down] - a[down]) / (b[down] - a[down]) * (b[across] - a[across]);
-				if (centre[across] < crossing) inside = !inside;
-			}
-			if (inside) return true;
+			let face = counterClockwise(corners.map(flatten));
+			if (Math.abs(polygonArea(face)) < 1e-3) continue;   // nothing to hide behind
+			if (sharedArea(triangle, face) > BRUSH.OVERLAP_AREA) return true;
 		}
 	}
 	return false;
+}
+function polygonArea(polygon) {
+	let area = 0;
+	for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+		area += polygon[j][0] * polygon[i][1] - polygon[i][0] * polygon[j][1];
+	}
+	return area / 2;
+}
+function counterClockwise(polygon) {
+	return polygonArea(polygon) < 0 ? polygon.slice().reverse() : polygon;
+}
+// Sutherland-Hodgman: how much of the subject lies inside the clip polygon. Tiles and their cuts are convex.
+function sharedArea(subject, clip) {
+	let output = subject;
+	for (let i = 0, j = clip.length - 1; i < clip.length && output.length; j = i++) {
+		let a = clip[j], b = clip[i];
+		let side = point => (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]);
+		let input = output;
+		output = [];
+		for (let k = 0, l = input.length - 1; k < input.length; l = k++) {
+			let from = input[l], to = input[k], from_side = side(from), to_side = side(to);
+			if (to_side >= 0) {
+				if (from_side < 0) output.push(edgeCrossing(from, to, from_side, to_side));
+				output.push(to);
+			} else if (from_side >= 0) {
+				output.push(edgeCrossing(from, to, from_side, to_side));
+			}
+		}
+	}
+	return Math.abs(polygonArea(output));
+}
+function edgeCrossing(from, to, from_side, to_side) {
+	let along = from_side / (from_side - to_side);
+	return [from[0] + (to[0] - from[0]) * along, from[1] + (to[1] - from[1]) * along];
 }
 // Triangular gaps close themselves: a three-edge hole around a stroke gets a triangle, wound to match its
 // neighbours and textured from them. This is the gap left where a ramp meets flat tiles, or where cuts meet.
@@ -995,7 +1028,7 @@ function capTriangularHoles(touched) {
 			let points = [entry.points[a], entry.points[b], second.points[c]];
 			let area = new THREE.Vector3().subVectors(points[1], points[0]).cross(new THREE.Vector3().subVectors(points[2], points[0])).length();
 			if (area < 1e-3) continue;
-			if (faceCovers(points)) continue;
+			if (faceOverlaps(points)) continue;
 			capped.add(id);
 
 			// Wind against the face on the other side of the first edge so the cap faces outward
