@@ -1650,9 +1650,10 @@ new NodePreviewController(Mesh, {
 
 		if (Mesh.isVertexSelectionMode()) {
 			let colors = [];
+			let selected_vertex_set = new Set(selected_vertices);
 			for (let key in element.vertices) {
 				let color;
-				if (selected_vertices.includes(key)) {
+				if (selected_vertex_set.has(key)) {
 					color = white;
 				} else {
 					color = gizmo_colors.grid;
@@ -1680,6 +1681,9 @@ new NodePreviewController(Mesh, {
 		let is_seam_tool = Toolbox.selected.id === 'seam_tool';
 		let selection_mode = BarItems.selection_mode.value;
 		if (!Modes.edit) selection_mode = 'object';
+		// Looked up once per outline vertex, so a scan of the selection here is quadratic too.
+		// sameMeshEdge is unordered equality, which a sorted pair of keys stands in for.
+		let selected_edge_set = new Set(selected_edges.map(edge => edge.slice().sort().join('_')));
 		mesh.outline.vertex_order.forEach((key, i) => {
 			let key_b = Modes.edit && mesh.outline.vertex_order[i + ((i%2) ? -1 : 1) ];
 			let color = gizmo_colors.grid;
@@ -1690,7 +1694,7 @@ new NodePreviewController(Mesh, {
 					break;
 				}
 				case 'edge': {
-					if (selected_edges.find(edge => sameMeshEdge([key, key_b], edge))) {
+					if (key_b && selected_edge_set.has([key, key_b].sort().join('_'))) {
 						color = white;
 						selected = true;
 					}
@@ -1739,7 +1743,8 @@ new NodePreviewController(Mesh, {
 
 		let array = new Array(mesh.geometry.attributes.highlight.count).fill(highlighted);
 		let selection_mode = BarItems.selection_mode.value;
-		let selected_faces = element.getSelectedFaces();
+		// A Set, not the array: this is looked up once per face, so a scan per face is quadratic in a big mesh
+		let selected_faces = new Set(element.getSelectedFaces());
 		
 		if (!force_off && element.selected && Modes.edit) {
 			let i = 0;
@@ -1747,7 +1752,7 @@ new NodePreviewController(Mesh, {
 			for (let fkey in faces) {
 				let face = faces[fkey];
 				if (face.vertices.length < 3) continue;
-				if (selected_faces.indexOf(fkey) != -1 && (selection_mode == 'face' || selection_mode == 'cluster')) {
+				if (selected_faces.has(fkey) && (selection_mode == 'face' || selection_mode == 'cluster')) {
 					for (let j = 0; j < face.vertices.length; j++) {
 						array[i] = 2;
 						i++;

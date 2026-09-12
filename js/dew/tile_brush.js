@@ -119,7 +119,37 @@ export function describeTile(mesh, face) {
 }
 const tileKey = (axis, depth, u, v) => `${axis}|${round3(depth)}|${round3(u)}|${round3(v)}`;
 
+// Both scans below walk every face in the scene, which costs milliseconds once a cluster is large, and the
+// hover path runs one on every mouse move. The last scan is kept until an edit lands: every tool here goes
+// through Undo, so those three events cover it. Callers must not mutate what they get back.
+let scan_cache = {occupancy: null, index: null};
+function clearScanCache() {
+	scan_cache.occupancy = null;
+	scan_cache.index = null;
+}
+['finished_edit', 'undo', 'redo', 'select_project'].forEach(event => Blockbench.on(event, clearScanCache));
+
+// A rebuild costs milliseconds per face of the mesh, so a drag crossing several tiles in one frame rebuilds once
+let pending_rebuild = null;
+function scheduleRebuild(meshes) {
+	if (!pending_rebuild) pending_rebuild = {meshes: new Set(), frame: requestAnimationFrame(flushRebuild)};
+	meshes.forEach(mesh => pending_rebuild.meshes.add(mesh));
+}
+function flushRebuild() {
+	if (!pending_rebuild) return;
+	let meshes = [...pending_rebuild.meshes];
+	cancelAnimationFrame(pending_rebuild.frame);
+	pending_rebuild = null;
+	if (meshes.length) Canvas.updateView({elements: meshes, element_aspects: {geometry: true, faces: true, uv: true}});
+}
+// The end of a stroke updates the view itself, so the frame that is still waiting has nothing left to do
+function cancelRebuild() {
+	if (!pending_rebuild) return;
+	cancelAnimationFrame(pending_rebuild.frame);
+	pending_rebuild = null;
+}
 function buildOccupancy() {
+	if (scan_cache.occupancy) return scan_cache.occupancy;
 	let occupied = new Set();
 	for (let mesh of Mesh.all) {
 		if (mesh.visibility === false) continue;
@@ -129,6 +159,7 @@ function buildOccupancy() {
 			if (tile) occupied.add(tileKey(tile.axis, tile.depth, tile.u, tile.v));
 		}
 	}
+	scan_cache.occupancy = occupied;
 	return occupied;
 }
 // Two cells meet along an edge under the cursor. A candidate already filled is no use, so it scores -1;
@@ -229,7 +260,7 @@ function paintAt(point) {
 	stroke.last_point = point.clone();
 	if (changed) {
 		stroke.changed = true;
-		Canvas.updateView({elements: [stroke.mesh], element_aspects: {geometry: true, faces: true, uv: true}});
+		scheduleRebuild([stroke.mesh]);
 	}
 }
 
@@ -289,7 +320,7 @@ function eraseStep(event) {
 		delete mesh.faces[fkey];
 	}
 	stroke.touched.add(mesh);
-	Canvas.updateView({elements: [mesh], element_aspects: {geometry: true, faces: true, uv: true}});
+	scheduleRebuild([mesh]);
 }
 function removeLooseVertices(mesh) {
 	let used = new Set();
@@ -324,7 +355,7 @@ function startStroke(preview, event) {
 			axis: state.axis,
 			depth: target.depth,
 			sign: planeSign(preview, state.axis, target.depth),
-			occupied: buildOccupancy(),
+			occupied: new Set(buildOccupancy()),
 			vertex_map: buildVertexMap(mesh),
 			last_point: null,
 			changed: created,
@@ -350,6 +381,7 @@ function endStroke() {
 	if (!stroke) return;
 	let finished = stroke;
 	stroke = null;
+	cancelRebuild();
 	if (finished.erase) {
 		disposeSnapshot(finished.snapshot);
 		if (!finished.touched.size) return Undo.cancelEdit();
@@ -533,6 +565,12 @@ function buildTileIndex() {
 		}
 	}
 	return index;
+}
+// Hover runs on every mouse move, so it reuses the last scan. Strokes keep building their own, because
+// shaveStep refreshes the index after each cut, while the edit it belongs to has not landed yet.
+function hoverTileIndex() {
+	if (!scan_cache.index) scan_cache.index = buildTileIndex();
+	return scan_cache.index;
 }
 function paintFace(mesh, face, axis, sign, block_u, block_v, size, cell_x, cell_y, texture) {
 	let [ua, va] = PLANE_AXES[axis];
@@ -1251,7 +1289,7 @@ function onShaveHover(event) {
 	let preview = shave_stroke ? shave_stroke.preview : event.target && event.target.preview;
 	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
 	let inside = shave_stroke ? shave_stroke.inside : cutsInside();
-	let corner = shaveTarget(preview, event, shave_stroke ? shave_stroke.tiles : buildTileIndex(), inside);
+	let corner = shaveTarget(preview, event, shave_stroke ? shave_stroke.tiles : hoverTileIndex(), inside);
 	if (!corner) return hideGhost();
 	let lift = new THREE.Vector3();
 	lift[corner.a1] = corner.s1 * BRUSH.LIFT;
@@ -1488,7 +1526,7 @@ function onRampHover(event) {
 		let a = run.a.clone().add(offset), b = run.b.clone().add(offset);
 		return showGhostQuad([a, b, b.clone().add(run.step), a.clone().add(run.step)], BRUSH.RAMP_COLOR);
 	}
-	let corner = shaveTarget(preview, event, buildTileIndex(), true);
+	let corner = shaveTarget(preview, event, hoverTileIndex(), true);
 	if (corner) return showGhostQuad(chamferPoints(corner), BRUSH.RAMP_COLOR);
 	let hit = hitFace(preview, event);
 	let start = hit && rampStart(hit.element, hit.element.faces[hit.face], hit.point, state.size);
