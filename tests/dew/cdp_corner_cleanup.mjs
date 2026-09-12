@@ -77,7 +77,7 @@ const health = `(() => {
 
 // A room: floor x 0..128 z 0..64, wall_z at z 0, wall_x at x 0, both 32 tall, all textured
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	window.__build = (name, list) => { let m = new Mesh({name, vertices: {}}); let map = {};
 		let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 		let axes = {x: ['z', 'y'], y: ['x', 'z'], z: ['x', 'y']};

@@ -30,7 +30,7 @@ const compare = `(() => { let m = Mesh.all.find(m => m.name == 'group') || Mesh.
 
 // One +z wall tile and one floor tile, both painted by the convention for their starting facing
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	let m = new Mesh({name: 'group', vertices: {}}); let map = {};
 	let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 	let wall = new MeshFace(m, {vertices: [[0,0,0],[16,0,0],[16,16,0],[0,16,0]].map(vert), texture: false});

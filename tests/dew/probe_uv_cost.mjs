@@ -13,7 +13,7 @@ for (let i = 0; i < 40; i++) { if (await ev('typeof Blockbench != "undefined" &&
 await send('Runtime.enable');
 
 await ev(`(() => {
-	window.__mesh = side => { newProject(Formats.dew_scene);
+	window.__mesh = side => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 		let m = new Mesh({name: 'floor', vertices: {}}); let map = {};
 		let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 		for (let x = 0; x < side * 16; x += 16) for (let z = 0; z < side * 16; z += 16) {

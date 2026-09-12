@@ -15,7 +15,7 @@ const gridInfo = `(() => three_grid.children.map(c => c.name + ':' + (c.geometry
 
 console.log('A. format:', await ev(`JSON.stringify({exists: !!Formats.dew_scene, name: Formats.dew_scene?.name, category: Formats.dew_scene?.category, on_start: Formats.dew_scene?.show_on_start_screen, has_grid_hook: typeof Formats.dew_scene?.buildGrid, free_has_hook: typeof Formats.free.buildGrid})`));
 
-console.log('B. new DEW project:', await ev(`(() => { newProject(Formats.dew_scene);
+console.log('B. new DEW project:', await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	let p = Preview.selected;
 	return JSON.stringify({format: Format.id, export_options: Project.export_options.gltf, target: p.controls.target.toArray(), camera: p.camera.position.toArray().map(v => Math.round(v)), side_grids: !!Canvas.side_grids?.x}); })()`));
 console.log('   grid children:', await ev(gridInfo));
@@ -25,6 +25,18 @@ console.log('   expected: thin 40 verts, bold 44 verts, storeys 3*8 + 4*2 = 32 v
 await sleep(600);
 const shot = await send('Page.captureScreenshot', { format: 'png' });
 fs.writeFileSync('shot_dew_grid.png', Buffer.from(shot.result.data, 'base64'));
+
+console.log('B2. the starter tile of a fresh scene:', await ev(`(() => { newProject(Formats.dew_scene);
+	let r = v => Math.round(v * 100) / 100;
+	let m = Mesh.all.find(mesh => mesh.name == 'tiles');
+	if (!m) return JSON.stringify({mesh: null});
+	let faces = Object.values(m.faces);
+	let ps = faces.flatMap(f => f.vertices.map(k => m.vertices[k]));
+	return JSON.stringify({faces: faces.length, up: faces.every(f => f.getNormal(true)[1] > 0.99),
+		box: [Math.min(...ps.map(p => r(p[0]))), Math.min(...ps.map(p => r(p[2]))), Math.max(...ps.map(p => r(p[0]))), Math.max(...ps.map(p => r(p[2])))],
+		y: r(ps[0][1]), selected: Mesh.selected.length}); })()`));
+console.log('   expect 4 faces facing up, 160,160 to 192,192 on y 0, nothing selected: a full tile at the middle of the grid');
+console.log('   a generic model has none:', await ev(`(() => { newProject(Formats.free); return Mesh.all.length; })()`), ' expect 0');
 
 console.log('C. 16-unit cube export:', await ev(`(async () => {
 	let m = new Mesh({name: 'cube16', vertices: {}});

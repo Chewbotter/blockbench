@@ -44,7 +44,7 @@ const shape = `(() => { let r = v => Math.round(v * 100) / 100; let per = {}; le
 			for (let i = 0; i < 3; i++) { box.min[i] = Math.min(box.min[i], p[i]); box.max[i] = Math.max(box.max[i], p[i]); } } }
 	return JSON.stringify({faces: total, per, box}); })()`;
 
-await ev(`(() => { newProject(Formats.dew_scene); unselectAllElements(); updateSelection(); return true; })()`);
+await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); unselectAllElements(); updateSelection(); return true; })()`);
 await sleep(400);
 await camera(16, 8, 8, 96, 70, 96);
 await ev(`(() => { BarItems.dew_whole_block.select(); let s = DEWTileBrush.state; s.size = 16; s.axis = 'y'; s.depth = 0; s.sign = null; return true; })()`);
@@ -75,7 +75,7 @@ console.log('E. undo brings it back:', await ev(shape), ' expect 10 faces again'
 await ev(`Undo.undo(); true`);
 
 // A drag lays a run along the plane it started on
-await ev(`(() => { newProject(Formats.dew_scene); unselectAllElements(); updateSelection(); return true; })()`);
+await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); unselectAllElements(); updateSelection(); return true; })()`);
 await sleep(400);
 await camera(48, 8, 8, 150, 90, 150);
 await ev(`(() => { BarItems.dew_whole_block.select(); let s = DEWTileBrush.state; s.size = 16; s.axis = 'y'; s.depth = 0; return true; })()`);
@@ -86,7 +86,7 @@ console.log('F. a drag along the plane:', await ev(shape));
 console.log('   expect a row of blocks, x running 0 to over 96, and far fewer faces than 6 a block: the walls between them are gone');
 
 // Full size blocks are four half cell tiles a side
-await ev(`(() => { newProject(Formats.dew_scene); unselectAllElements(); updateSelection();
+await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); unselectAllElements(); updateSelection();
 	BarItems.dew_whole_block.select(); let s = DEWTileBrush.state; s.size = 32; s.axis = 'y'; s.depth = 0; return true; })()`);
 await sleep(400);
 await camera(16, 16, 16, 120, 90, 120);
@@ -96,7 +96,7 @@ console.log('G. a full size block:', await ev(shape));
 console.log('   expect 24 faces, four a side, box 0,0,0 to 32,32,32');
 
 // A block landing on a lone tile eats it, and there is nothing left to seal against on the way out
-await ev(`(() => { newProject(Formats.dew_scene);
+await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	let m = new Mesh({name: 'floor', vertices: {}});
 	let k = [[0,0,0],[16,0,0],[16,0,16],[0,0,16]].map(v => m.addVertices(v)[0]);
 	let f = new MeshFace(m, {vertices: k, texture: false}); m.addFaces(f);

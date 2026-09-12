@@ -45,7 +45,7 @@ const shapes = name => `(() => { let m = Mesh.all.find(m => m.name == '${name}')
 
 // floor y 0 (4x4 tiles), wall_z at z 0 facing +z (4x3 tall), wall_x at x 0 facing +x (4x2), ceiling y 48 facing down
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	window.__build = (name, list) => { let m = new Mesh({name, vertices: {}}); let map = {};
 		let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 		let axes = {x: ['z', 'y'], y: ['x', 'z'], z: ['x', 'y']};

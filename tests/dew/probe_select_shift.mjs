@@ -32,7 +32,7 @@ const selected = `(() => { let n = 0, per = [];
 	return JSON.stringify({total: n, per, rect: !!document.querySelector('#selection_rectangle, .selection_rectangle')}); })()`;
 
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	let m = new Mesh({name: 'floor', vertices: {}}); let map = {};
 	let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 	for (let x = 0; x < 64; x += 16) for (let z = 0; z < 64; z += 16) {

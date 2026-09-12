@@ -14,7 +14,7 @@ const figure = `(() => { let c = Cube.all.find(c => c.name == DEW.FIGURE_NAME); 
 	return JSON.stringify({from: c.from, to: c.to, size: [c.to[0] - c.from[0], c.to[1] - c.from[1], c.to[2] - c.from[2]],
 		exports: c.export, visible: c.visibility, locked: c.locked}); })()`;
 
-console.log('A. new DEW scene:', await ev(`(() => { newProject(Formats.dew_scene); return true; })()`) && await ev(figure), ' expect 32 x 48 x 32, export false');
+console.log('A. new DEW scene:', await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); return true; })()`) && await ev(figure), ' expect 32 x 48 x 32, export false');
 console.log('   toggle exists and is on:', await ev(`JSON.stringify({exists: !!BarItems.dew_scale_figure, on: BarItems.dew_scale_figure.value, in_view_menu: MenuBar.menus.view.structure.includes('dew_scale_figure')})`));
 
 console.log('B. toggle off:', await ev(`(() => { BarItems.dew_scale_figure.click(); return true; })()`) && await ev(figure), ' expect visible false');

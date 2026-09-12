@@ -30,7 +30,7 @@ async function drag(from, to, steps = 16) {
 
 // A 32-unit cube, each side 2x2 half-tile quads facing outward; camera sees the +x, +y and +z sides
 const build = `(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	let m = new Mesh({name: 'box', vertices: {}}); let map = {};
 	let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 	let axes = {x: ['z', 'y'], y: ['x', 'z'], z: ['x', 'y']};

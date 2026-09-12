@@ -41,7 +41,7 @@ const textured = `(() => { let n = 0, plain = 0;
 
 // A 3 x 3 floor, with the 2 x 2 corner selected
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	let m = new Mesh({name: 'floor', vertices: {}}); let map = {};
 	let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 	for (let x = 0; x < 48; x += 16) for (let z = 0; z < 48; z += 16) {

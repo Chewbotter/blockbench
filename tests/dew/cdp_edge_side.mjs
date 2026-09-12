@@ -48,7 +48,7 @@ const ghostCell = `(() => { let g = Canvas.scene.getObjectByName('dew_tile_ghost
 // Ground, a wall standing on it at x 32 facing +x, and a strip of upper floor on the -x side:
 // the gap to close is x 16..32 at y 32, the open air is x 32..48
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	window.__build = (name, list) => { let m = new Mesh({name, vertices: {}}); let map = {};
 		let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 		let axes = {x: ['z', 'y'], y: ['x', 'z'], z: ['x', 'y']};

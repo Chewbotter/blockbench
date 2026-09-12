@@ -16,6 +16,7 @@ export const DEW = {
 	CAMERA_OFFSET: [220, 260, 380],	// new scenes look at the cluster center from here
 	BACKFACE_TINT: 0.85,		// how far back faces are pulled toward BACKFACE_COLOR in the viewport, 0 to 1
 	BACKFACE_COLOR: '#2a3348',
+	STARTER_NAME: 'tiles',			// matches the name the tile brush gives a mesh it starts, so painting carries on in it
 	FIGURE_NAME: 'scale_figure',
 	FIGURE_SIZE: [32, 48, 32],		// a soldier: 2 x 2 half cells on the ground, 3 half cells tall
 	FIGURE_POSITION: [-48, 0, 0],	// parked outside the cluster so it never sits in the way
@@ -77,6 +78,33 @@ export function createScaleFigure() {
 	}).init();
 	figure.export = false;
 	return figure;
+}
+
+// One full tile at the middle of the grid, so a new scene has something to aim the first click at. It is four
+// half cell faces, the shape the brush paints a full tile as, sitting on the tile grid, so whatever goes next
+// to it lines up. The middle of the cluster is a corner of four tile cells, and this is the one past it.
+export function createStarterTile() {
+	let mesh = new Mesh({name: DEW.STARTER_NAME, vertices: {}});
+	let start = DEW.CLUSTER_SIZE / 2;
+	let known = {};
+	let vertex = point => {
+		let id = point.join(',');
+		return known[id] || (known[id] = mesh.addVertices(point)[0]);
+	};
+	for (let du = 0; du < DEW.TILE; du += DEW.HALF_CELL) {
+		for (let dv = 0; dv < DEW.TILE; dv += DEW.HALF_CELL) {
+			let corners = [[0, 0], [DEW.HALF_CELL, 0], [DEW.HALF_CELL, DEW.HALF_CELL], [0, DEW.HALF_CELL]];
+			let vkeys = corners.map(([cu, cv]) => vertex([start + du + cu, 0, start + dv + cv]));
+			let uv = {};
+			// What tileUV gives for a floor seen from above, which is what the brush would have laid down
+			corners.forEach(([cu, cv], index) => uv[vkeys[index]] = [cu, cv]);
+			let face = new MeshFace(mesh, {vertices: vkeys, uv, texture: false});
+			mesh.addFaces(face);
+			if (face.getNormal(true)[1] < 0) face.invert();
+		}
+	}
+	mesh.init();
+	return mesh;
 }
 
 export function frameCluster(preview = Preview.selected) {
@@ -142,6 +170,8 @@ new ModelFormat('dew_scene', {
 		};
 		frameCluster();
 		createScaleFigure();
+		createStarterTile();
+		unselectAllElements();
 	},
 });
 

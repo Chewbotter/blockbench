@@ -40,7 +40,7 @@ const report = `(() => { let m = Mesh.all[0]; let r = v => Math.round(v * 100) /
 	return JSON.stringify({faces_touching_x32: at_junction, open_edges: open.sort()}, null, 1); })()`;
 
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	let m = new Mesh({name: 'tiles', vertices: {}}); let map = {};
 	let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 	let axes = {x: ['z', 'y'], y: ['x', 'z'], z: ['x', 'y']};

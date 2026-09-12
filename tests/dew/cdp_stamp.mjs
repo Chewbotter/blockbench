@@ -44,7 +44,7 @@ const region = s => `JSON.stringify({atlas: DEWTileBrush.texture_state.atlas && 
 
 // Floor of 8 x 4 half tiles (x 0..128, z 0..64) facing up, and a wall of 4 x 2 half tiles (x 0..64, y 0..32) at z = 0 facing +z
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	let build = (name, axis, depth, sign, nu, nv) => { let m = new Mesh({name, vertices: {}}); let map = {};
 		let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 		let axes = {x: ['z', 'y'], y: ['x', 'z'], z: ['x', 'y']}; let [ua, va] = axes[axis];

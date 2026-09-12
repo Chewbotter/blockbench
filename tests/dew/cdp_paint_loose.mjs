@@ -37,7 +37,7 @@ const loose = `(() => { let r = v => Math.round(v * 100) / 100; let out = [];
 
 // The room from the ramp test: a corner ramp leaves a slope and two cap triangles
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	window.__build = (name, list) => { let m = new Mesh({name, vertices: {}}); let map = {};
 		let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 		let axes = {x: ['z', 'y'], y: ['x', 'z'], z: ['x', 'y']};

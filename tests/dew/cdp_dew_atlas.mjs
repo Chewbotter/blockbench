@@ -18,7 +18,7 @@ const inspect = (tile) => `(() => { let t = Texture.all.at(-1); if (!t) return '
 	let d0 = ctx.getImageData(0, 0, 1, 1).data, d1 = ctx.getImageData(${tile} - 1, ${tile} - 1, 1, 1).data;
 	return JSON.stringify({name: t.name, size: [t.width, t.height], uv_size: [t.getUVWidth(), t.getUVHeight()], cells: colors.length, distinct: new Set(colors).size, same_neighbor, opaque: colors.every(c => c.endsWith(',255')), cell0_flat: [...d0].join() == [...d1].join(), saved_in_project: Texture.all.length}); })()`;
 
-console.log('A. condition:', await ev(`(() => { newProject(Formats.free); let generic = Condition(BarItems.create_dew_atlas.condition); newProject(Formats.dew_scene); let dew = Condition(BarItems.create_dew_atlas.condition);
+console.log('A. condition:', await ev(`(() => { newProject(Formats.free); let generic = Condition(BarItems.create_dew_atlas.condition); newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); let dew = Condition(BarItems.create_dew_atlas.condition);
 	let toolbar = Panels.textures.toolbars.find(t => t.id == 'texturelist'); let ids = toolbar.children.map(c => c.id);
 	return JSON.stringify({generic, dew, right_of_simple: ids.indexOf('create_dew_atlas') == ids.indexOf('create_simple_texture') + 1, name: BarItems.create_dew_atlas.name}); })()`));
 

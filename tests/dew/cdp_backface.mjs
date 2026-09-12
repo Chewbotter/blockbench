@@ -37,7 +37,7 @@ const setup = `(() => { let a = __quad('plain', 0); let b = __quad('textured', 4
 	let t = new Texture({name: 'probe'}).add(false); Object.values(b.faces).forEach(f => f.texture = t.uuid);
 	Canvas.updateView({elements: [a, b], element_aspects: {faces: true}}); unselectAllElements(); return t.uuid; })()`;
 
-console.log('A. DEW scene:', await ev(`(() => { newProject(Formats.dew_scene); ${setup}; let u = Canvas.backfaceUniforms;
+console.log('A. DEW scene:', await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); ${setup}; let u = Canvas.backfaceUniforms;
 	let t = Texture.all[0];
 	return JSON.stringify({tint: u.BACKFACE_TINT.value, color: '#' + u.BACKFACE_COLOR.value.getHexString(),
 		shared: {texture: t.material.uniforms.BACKFACE_TINT === u.BACKFACE_TINT, marker: Canvas.emptyMaterials[0].uniforms.BACKFACE_TINT === u.BACKFACE_TINT,

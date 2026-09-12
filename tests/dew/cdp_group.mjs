@@ -22,7 +22,7 @@ const tileCount = `(() => { let tiles = DEWTileBrush.buildTileIndex(); let g = M
 
 // A building: walls in one mesh, its floor in another, plus a separate floor that stays behind
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	window.__build = (name, list) => { let m = new Mesh({name, vertices: {}}); let map = {};
 		let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 		let axes = {x: ['z', 'y'], y: ['x', 'z'], z: ['x', 'y']};

@@ -43,7 +43,7 @@ const info = name => `(() => { let m = Mesh.all.find(m => m.name == '${name}'); 
 // box: x 0..32, z 0..32, y 0..48, half tiles on four sides and the top, no bottom; +z side textured with atlas cell (16,0)
 // floor: a flat plane; box2: 64 cube of half tiles for the full-size cut
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	window.__build = (name, list) => { let m = new Mesh({name, vertices: {}}); let map = {};
 		let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 		let axes = {x: ['z', 'y'], y: ['x', 'z'], z: ['x', 'y']};

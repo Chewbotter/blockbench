@@ -53,7 +53,7 @@ const tiles = `(() => { let out = {}; for (let m of Mesh.all) { for (let fkey in
 	let key = t.axis + ' ' + t.depth + ' facing ' + t.sign; (out[key] = out[key] || []).push(t.u + ',' + t.v); } }
 	for (let k in out) out[k] = out[k].sort().join(' | '); return JSON.stringify(out, null, 1); })()`;
 
-await ev(`(() => { newProject(Formats.dew_scene); return true; })()`);
+await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); return true; })()`);
 await camera(64, 16, 64, 64 + 130, 16 + 120, 64 + 170);
 await ev(`(() => { BarItems.dew_tile_brush.select(); return true; })()`);
 await key('c');   // half tiles

@@ -18,7 +18,7 @@ const counts = `(() => { let out = {}; for (let m of Mesh.all) out[m.name] = Obj
 
 // ground: 4 x 4 floor tiles. group: a 2 x 2 floor patch sitting on the same cells, plus a wall tile that overlaps nothing.
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	window.__build = (name, list) => { let m = new Mesh({name, vertices: {}}); let map = {};
 		let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 		let axes = {x: ['z', 'y'], y: ['x', 'z'], z: ['x', 'y']};

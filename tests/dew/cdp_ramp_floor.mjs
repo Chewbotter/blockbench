@@ -119,7 +119,7 @@ const wallTiles = `(() => { let out = [];
 // Floor over the whole area, so it carries on underneath the ramp. `extra` adds more hand-built planes.
 const buildScene = async (extra = '') => {
 await ev(`(() => {
-	newProject(Formats.dew_scene);
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	window.__build = (name, list) => { let m = new Mesh({name, vertices: {}}); let map = {};
 		let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 		let axes = {x: ['z', 'y'], y: ['x', 'z'], z: ['x', 'y']};
