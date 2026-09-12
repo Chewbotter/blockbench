@@ -935,7 +935,8 @@ GLTFExporter.prototype = {
 					color: base ? new THREE.Color(base).convertSRGBToLinear() : 0xffffff,
 					map: original.map,
 					transparent: true,
-					side: Canvas.getRenderSide(),
+					// A format can keep exporting double-sided while its viewport culls back faces (DEW scenes)
+					side: (typeof Format != 'undefined' && Format && Format.export_render_sides == 'double') ? DoubleSide : Canvas.getRenderSide(),
 					alphaTest: 0.05
 				});
 				cachedMaterials[original.uuid] = material;

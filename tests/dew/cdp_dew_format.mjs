@@ -38,8 +38,10 @@ console.log('C. 16-unit cube export:', await ev(`(async () => {
 	let json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, json_len)));
 	let acc = json.accessors[json.meshes[0].primitives[0].attributes.POSITION];
 	let node = json.nodes.find(n => n.mesh !== undefined);
-	return JSON.stringify({is_arraybuffer: buf instanceof ArrayBuffer, magic, pos_min: acc.min, pos_max: acc.max, node_name: node.name, node_translation: node.translation || null});
+	return JSON.stringify({is_arraybuffer: buf instanceof ArrayBuffer, magic, pos_min: acc.min, pos_max: acc.max, node_name: node.name, node_translation: node.translation || null,
+		double_sided: (json.materials || []).map(m => !!m.doubleSided)});
 })()`));
+console.log('   expect double_sided [true]: the viewport culls back faces, the glb keeps them, which is what the game reads');
 
 console.log('D. save keeps options:', await ev(`(() => { let model = JSON.parse(Codecs.project.compile()); return JSON.stringify({model_format: model.meta.model_format, export_options: model.export_options}); })()`));
 

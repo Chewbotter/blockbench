@@ -88,6 +88,8 @@ export function frameCluster(preview = Preview.selected) {
 	if (preview.controls.update) preview.controls.update();
 }
 
+let hide_back_faces = true;
+
 new ModelFormat('dew_scene', {
 	name: 'DEW Scene',
 	description: 'Distant Early Warning cluster: game grid, tile brush, glTF export at scale 16',
@@ -111,8 +113,14 @@ new ModelFormat('dew_scene', {
 	locators: true,
 	pbr: true,
 	buildGrid: buildDewGrid,	// Canvas.buildGrid uses this instead of the default grid
+	// Tiles are drawn only from the side they face, so a click, the gizmo and the tile tools all reach through
+	// a wall seen from behind. The raycaster honours material.side, so hidden also means unselectable.
+	render_sides: () => hide_back_faces ? 'front' : 'double',
+	export_render_sides: 'double',	// the glb stays double-sided: the handoff calls that correct
 	// Viewport only: the exporter never sees the shader tint
 	onActivation() {
+		// The toggle keeps its value across sessions, the flag does not
+		if (BarItems.dew_hide_back_faces) hide_back_faces = BarItems.dew_hide_back_faces.value;
 		Canvas.backfaceUniforms.BACKFACE_TINT.value = DEW.BACKFACE_TINT;
 		Canvas.backfaceUniforms.BACKFACE_COLOR.value.set(DEW.BACKFACE_COLOR);
 		// Moves and nudges step by a half cell here: canvasGridSize is 16 / edit_size
@@ -159,6 +167,19 @@ BARS.defineActions(function() {
 			figures.forEach(figure => figure.visibility = value);
 			if (Canvas.updateVisibility) Canvas.updateVisibility();
 			updateSelection();
+		}
+	});
+
+	new Toggle('dew_hide_back_faces', {
+		name: 'Hide Back Faces',
+		description: 'Draw a tile only from the side it faces, so clicks and the gizmo reach through a wall seen from behind. The export stays double-sided',
+		icon: 'flip_to_front',
+		category: 'view',
+		default: true,
+		condition: () => Format.id == 'dew_scene',
+		onChange(value) {
+			hide_back_faces = value;
+			Canvas.updateRenderSides();
 		}
 	});
 });

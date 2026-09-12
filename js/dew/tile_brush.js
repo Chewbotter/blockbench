@@ -208,7 +208,7 @@ function blockTiles(mesh, fkey, size = state.size) {
 // Erase strokes raycast against the geometry as it was when the stroke started, so planes revealed
 // by erasing (the far side of a box seen through the new hole) can never be hit
 function snapshotMeshes() {
-	let material = new THREE.MeshBasicMaterial({side: THREE.DoubleSide});
+	let material = new THREE.MeshBasicMaterial({side: Canvas.getRenderSide()});
 	let proxies = [];
 	for (let mesh of Mesh.all) {
 		if (mesh.visibility === false || mesh.locked || !mesh.mesh.geometry) continue;

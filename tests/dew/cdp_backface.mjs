@@ -25,6 +25,14 @@ await ev(`(() => {
 		return Array.from(px.slice(0, 3)); };
 	return true; })()`);
 
+// Does a click reach a face whose back is toward the camera?
+const hitFromBelow = `(() => { let p = Preview.selected; p.controls.target.set(16, 0, 16); p.camera.position.set(16, -60, 70); p.controls.update();
+	if (p.render) p.render();
+	let v = new THREE.Vector3(16, 0, 16).project(p.camera); let r = p.canvas.getBoundingClientRect();
+	let e = {clientX: r.left + (v.x + 1) / 2 * r.width, clientY: r.top + (1 - v.y) / 2 * r.height, target: p.canvas};
+	let hit = DEWTileBrush.hitFace(p, e);
+	return JSON.stringify({hit: hit ? hit.element.name : null}); })()`;
+
 const setup = `(() => { let a = __quad('plain', 0); let b = __quad('textured', 48);
 	let t = new Texture({name: 'probe'}).add(false); Object.values(b.faces).forEach(f => f.texture = t.uuid);
 	Canvas.updateView({elements: [a, b], element_aspects: {faces: true}}); unselectAllElements(); return t.uuid; })()`;
@@ -38,15 +46,33 @@ console.log('A. DEW scene:', await ev(`(() => { newProject(Formats.dew_scene); $
 await sleep(300);
 console.log('   plain quad from above / below:', JSON.stringify(await ev('__sample(60, 16)')), JSON.stringify(await ev('__sample(-60, 16)')));
 console.log('   textured quad from above / below:', JSON.stringify(await ev('__sample(60, 64)')), JSON.stringify(await ev('__sample(-60, 64)')));
-console.log('   target color #2a3348 = [42, 51, 72]; below should sit near it (85% tint)');
+console.log('   with backs hidden the below samples are the background; the tint itself is checked in C');
+
+// Back faces hidden, the default in DEW scenes
+console.log('B. hiding on:', await ev(`JSON.stringify({front: Canvas.getRenderSide() === THREE.FrontSide, toggle: BarItems.dew_hide_back_faces.value, export_side: Format.export_render_sides})`));
+console.log('   expect front true, toggle true, export_side double: the glb keeps double-sided faces');
+console.log('   plain quad from below:', JSON.stringify(await ev('__sample(-60, 16)')), ' expect the background, no face drawn');
+console.log('   textured quad from below:', JSON.stringify(await ev('__sample(-60, 64)')), ' expect the background too');
+console.log('   click from below:', await ev(hitFromBelow), ' expect hit null: back faces are unselectable');
+
+await ev(`(() => { BarItems.dew_hide_back_faces.click(); return true; })()`);
+await sleep(250);
+console.log('C. toggled off:', await ev(`JSON.stringify({front: Canvas.getRenderSide() === THREE.FrontSide, toggle: BarItems.dew_hide_back_faces.value})`), ' expect front false, toggle false');
+console.log('   plain quad from below:', JSON.stringify(await ev('__sample(-60, 16)')), ' expect the tinted back again');
+console.log('   click from below:', await ev(hitFromBelow), ' expect the mesh name back');
+
+await ev(`(() => { BarItems.dew_hide_back_faces.click(); return true; })()`);
+await sleep(250);
+console.log('D. toggled back on:', await ev(`JSON.stringify({front: Canvas.getRenderSide() === THREE.FrontSide, toggle: BarItems.dew_hide_back_faces.value})`), ' expect front true, toggle true');
 await ev('__sample(-60, 40)');
 const shot = await send('Page.captureScreenshot', { format: 'png' });
 fs.writeFileSync('shot_backface.png', Buffer.from(shot.result.data, 'base64'));
 
-console.log('B. Generic scene:', await ev(`(() => { newProject(Formats.free); ${setup}; return JSON.stringify({tint: Canvas.backfaceUniforms.BACKFACE_TINT.value}); })()`));
+console.log('E. Generic scene:', await ev(`(() => { newProject(Formats.free); ${setup}; return JSON.stringify({tint: Canvas.backfaceUniforms.BACKFACE_TINT.value}); })()`));
 await sleep(300);
 console.log('   plain quad from above / below:', JSON.stringify(await ev('__sample(60, 16)')), JSON.stringify(await ev('__sample(-60, 16)')), ' expect below ~ above (no tint)');
+console.log('   render side there:', await ev(`JSON.stringify({front: Canvas.getRenderSide() === THREE.FrontSide})`), ' expect front false: other formats keep both sides');
 
-console.log('C. back to DEW tab:', await ev(`(() => { ModelProject.all.find(p => p.format.id == 'dew_scene').select(); return Canvas.backfaceUniforms.BACKFACE_TINT.value; })()`));
+console.log('F. back to DEW tab:', await ev(`(() => { ModelProject.all.find(p => p.format.id == 'dew_scene').select(); return Canvas.backfaceUniforms.BACKFACE_TINT.value; })()`));
 console.log('page errors/warnings:', errors.length ? errors : 'none');
 ws.close();
