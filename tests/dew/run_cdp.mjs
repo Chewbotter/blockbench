@@ -57,9 +57,6 @@ async function start() {
 	process.exit(1);
 }
 
-// Settings live in the profile and survive a kill. The DEW format sets edit_size to 1 for half cell snapping
-// and puts it back on deactivation, which never runs when the harness force-quits the app, so the next run
-// boots with the DEW value and a test that checks the generic snap fails. Put the default back at startup.
 async function evaluate(expression) {
 	const targets = await (await fetch(endpoint)).json();
 	const page = targets.find(t => t.type == 'page' && t.url.includes('index.html')) ?? targets.find(t => t.type == 'page');
@@ -71,16 +68,6 @@ async function evaluate(expression) {
 	});
 	ws.close();
 	return answer.result;
-}
-async function normalizeSettings() {
-	let result = await evaluate(`(() => {
-		if (typeof settings == 'undefined' || !settings.edit_size) return 'no settings';
-		let dew_open = typeof Format != 'undefined' && Format && Format.id == 'dew_scene';
-		if (!dew_open && settings.edit_size.value != 16) { settings.edit_size.value = 16; if (typeof Settings != 'undefined' && Settings.save) Settings.save(); return 'edit_size put back to 16'; }
-		return 'ok';
-	})()`);
-	let note = result?.result?.value;
-	if (note && note != 'ok') console.log('note:', note);
 }
 
 // Whatever the last test left behind, so a shared app starts one looking like a fresh one
@@ -119,7 +106,6 @@ if (fresh) {
 	kill();
 	await sleep(800);
 	await start();
-	await normalizeSettings();
 } else {
 	let running = await alive();
 	if (running) {
@@ -137,7 +123,6 @@ if (fresh) {
 		fs.writeFileSync(mode_file, mode);
 		console.log(`dev app started on the ${mode} profile, left running (npm run test:dew:stop closes it)`);
 	}
-	await normalizeSettings();
 	await reset();
 	await sleep(400); // settle before the test starts listening for page errors
 }

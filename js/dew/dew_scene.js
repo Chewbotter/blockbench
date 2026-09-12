@@ -22,7 +22,6 @@ export const DEW = {
 	FIGURE_COLOR: 4,				// marker color index
 };
 
-let previous_edit_size = null;	// the user's move snap, restored when another format takes over
 
 function lineSegments(points, material) {
 	let geometry = new THREE.BufferGeometry();
@@ -118,21 +117,18 @@ new ModelFormat('dew_scene', {
 	render_sides: () => hide_back_faces ? 'front' : 'double',
 	export_render_sides: 'double',	// the glb stays double-sided: the handoff calls that correct
 	// Viewport only: the exporter never sees the shader tint
+	// Moves, nudges and UV drags step by a half cell here. canvasGridSize reads this instead of the user's
+	// edit_size setting, which the format used to write and put back on deactivation: a crash or a force-quit
+	// skipped the putting back and left every other project snapping by half cells.
+	edit_size: 16 / DEW.HALF_CELL,
 	onActivation() {
 		// The toggle keeps its value across sessions, the flag does not
 		if (BarItems.dew_hide_back_faces) hide_back_faces = BarItems.dew_hide_back_faces.value;
 		Canvas.backfaceUniforms.BACKFACE_TINT.value = DEW.BACKFACE_TINT;
 		Canvas.backfaceUniforms.BACKFACE_COLOR.value.set(DEW.BACKFACE_COLOR);
-		// Moves and nudges step by a half cell here: canvasGridSize is 16 / edit_size
-		if (previous_edit_size === null) previous_edit_size = settings.edit_size.value;
-		settings.edit_size.value = 16 / DEW.HALF_CELL;
 	},
 	onDeactivation() {
 		Canvas.backfaceUniforms.BACKFACE_TINT.value = 0;
-		if (previous_edit_size !== null) {
-			settings.edit_size.value = previous_edit_size;
-			previous_edit_size = null;
-		}
 	},
 	onSetup(project, new_model) {
 		if (!new_model) return;

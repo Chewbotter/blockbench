@@ -43,7 +43,7 @@ await ev(`(() => { let t = Texture.all[0];
 	for (let m of Mesh.all) for (let f of Object.values(m.faces)) { f.texture = t.uuid; f.vertices.forEach(k => f.uv[k] = [0, 0]); }
 	return true; })()`);
 console.log('start:', await ev(state));
-console.log('   move snap in a DEW scene:', await ev(`JSON.stringify({edit_size: settings.edit_size.value, snap: canvasGridSize()})`), ' expect 1 and 16');
+console.log('   move snap in a DEW scene:', await ev(`JSON.stringify({format_step: Format.edit_size, user_setting: settings.edit_size.value, snap: canvasGridSize()})`), ' expect step 1, the setting left at 16, snap 16');
 
 console.log('A. select the building (walls + inner floor):', await ev(`(() => {
 	for (let name of ['walls', 'inner_floor']) { let m = Mesh.all.find(m => m.name == name);
@@ -73,6 +73,6 @@ console.log('F. duplicate and move by a half cell:', await ev(`(() => { let g = 
 	Canvas.updateView({elements: [copy], element_aspects: {geometry: true}});
 	let ps = Object.values(copy.vertices); return JSON.stringify({faces: Object.keys(copy.faces).length, on_grid: ps.every(p => p.every(v => Math.abs(v % 16) < 0.001))}); })()`));
 
-console.log('G. generic model restores the snap:', await ev(`(() => { newProject(Formats.free); return JSON.stringify({edit_size: settings.edit_size.value, snap: canvasGridSize()}); })()`), ' expect 16 and 1');
+console.log('G. a generic model snaps its own way:', await ev(`(() => { newProject(Formats.free); return JSON.stringify({format_step: Format.edit_size || null, user_setting: settings.edit_size.value, snap: canvasGridSize()}); })()`), ' expect no step, setting 16, snap 1');
 console.log('page errors:', errors.length ? errors : 'none');
 ws.close();

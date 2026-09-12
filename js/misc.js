@@ -45,7 +45,12 @@ export const sort_collator = new Intl.Collator(undefined, {numeric: true, sensit
 
 export function canvasGridSize(shift, ctrl) {
 	if (!shift && !ctrl) {
-		return 16 / Math.clamp(settings.edit_size.value, 1, 512)
+		// A format may set the step it works in. It reads the setting rather than writing it: a format that
+		// wrote the setting would leave its own value behind for every other project after a crash or a kill.
+		// Holding shift or ctrl still gives the user's own steps.
+		let format_size = typeof Format != 'undefined' && Format ? Format.edit_size : null;
+		if (typeof format_size == 'function') format_size = format_size();
+		return 16 / Math.clamp(format_size || settings.edit_size.value, 1, 512)
 	} else if (ctrl && shift) {
 		return 16 / Math.clamp(settings.ctrl_shift_size.value, 1, 4096)
 	} else if (ctrl) {
