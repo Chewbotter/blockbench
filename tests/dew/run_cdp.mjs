@@ -17,6 +17,7 @@ import { pathToFileURL, fileURLToPath } from 'url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
 const mode_file = path.join(here, '.dev_app_mode');
+const loaded_file = path.join(here, '.dev_app_loaded');
 const args = process.argv.slice(2);
 const test = args.find(arg => !arg.startsWith('--'));
 const mode = args.includes('--isolated') ? 'isolated' : 'profile';
@@ -28,6 +29,7 @@ const alive = async () => { try { await (await fetch(endpoint)).json(); return t
 const kill = () => {
 	try { execSync('taskkill /F /IM electron.exe /T', { stdio: 'ignore' }); } catch {}
 	try { fs.unlinkSync(mode_file); } catch {}
+	try { fs.unlinkSync(loaded_file); } catch {}
 };
 
 if (args.includes('--stop')) {
@@ -57,17 +59,37 @@ async function start() {
 	process.exit(1);
 }
 
-async function evaluate(expression) {
+async function cdp(method, params = {}) {
 	const targets = await (await fetch(endpoint)).json();
 	const page = targets.find(t => t.type == 'page' && t.url.includes('index.html')) ?? targets.find(t => t.type == 'page');
 	const ws = new WebSocket(page.webSocketDebuggerUrl);
 	await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
 	const answer = await new Promise(resolve => {
 		ws.onmessage = e => { const message = JSON.parse(e.data); if (message.id == 1) resolve(message); };
-		ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }));
+		ws.send(JSON.stringify({ id: 1, method, params }));
 	});
 	ws.close();
+	return answer;
+}
+async function evaluate(expression) {
+	let answer = await cdp('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
 	return answer.result;
+}
+
+const booted = async () => await evaluate('typeof Blockbench != "undefined" && !!window.Preview && Preview.all.length > 0').then(r => r?.result?.value).catch(() => false);
+// A running app keeps the bundle it started with, so a build since then has to be loaded before the test runs
+async function reloadIfStale() {
+	let bundle = path.join(root, 'dist/bundle.js');
+	let built = fs.existsSync(bundle) ? fs.statSync(bundle).mtimeMs : 0;
+	let loaded = fs.existsSync(loaded_file) ? Number(fs.readFileSync(loaded_file, 'utf8')) : 0;
+	if (!built || built <= loaded) return;
+	console.log('note: the bundle was rebuilt since this app loaded it, reloading');
+	// Ignoring the cache, or the reload hands back the same file:// bundle the app already had
+	await cdp('Page.reload', { ignoreCache: true }).catch(() => {});
+	await sleep(1500);
+	for (let i = 0; i < 60; i++) { if (await booted()) break; await sleep(500); }
+	await sleep(1500);  // the renderer finishes setting itself up after that flag goes true
+	fs.writeFileSync(loaded_file, String(Date.now()));
 }
 
 // Whatever the last test left behind, so a shared app starts one looking like a fresh one
@@ -82,6 +104,15 @@ async function reset() {
 			expression: `(async () => {
 				if (typeof Dialog != 'undefined' && Dialog.open) Dialog.open.cancel();
 				if (typeof Project != 'undefined' && Project && BarItems.move_tool) BarItems.move_tool.select();
+				// The view carries over as well, and a test that drags across the screen picks whatever is under
+				// the path, so every run starts from the same camera
+				let preview = typeof Preview != 'undefined' && Preview.selected;
+				if (preview && preview.controls) {
+					preview.controls.target.set(0, 0, 0);
+					preview.camera.position.set(-40, 40, 80);
+					preview.controls.update();
+					if (preview.render) preview.render();
+				}
 				if (typeof DEWTileBrush != 'undefined') {
 					Object.assign(DEWTileBrush.state, {axis: 'y', depth: 0, size: (typeof DEW != 'undefined' ? DEW.TILE : 32), sign: null, edge_flip: false, hover_point: null});
 					DEWTileBrush.texture_state.atlas = null;
@@ -121,8 +152,10 @@ if (fresh) {
 	if (!running) {
 		await start();
 		fs.writeFileSync(mode_file, mode);
+	fs.writeFileSync(loaded_file, String(Date.now()));
 		console.log(`dev app started on the ${mode} profile, left running (npm run test:dew:stop closes it)`);
 	}
+	await reloadIfStale();
 	await reset();
 	await sleep(400); // settle before the test starts listening for page errors
 }

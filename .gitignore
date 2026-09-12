@@ -16,3 +16,4 @@ service_worker.js
 /Blockbench.exe
 /Blockbench.lnk
 tests/dew/.dev_app_mode
+tests/dew/.dev_app_loaded

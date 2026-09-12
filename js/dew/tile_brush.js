@@ -17,6 +17,7 @@ const BRUSH = {
 	ATLAS_HALF_LINE: 'rgba(255, 255, 255, 0.25)',
 	ATLAS_TILE_LINE: 'rgba(255, 255, 255, 0.6)',
 	ATLAS_PICK_COLOR: '#ffd24a',
+	ATLAS_HALF_FILL: 'rgba(255, 210, 74, 0.3)',	// the half of a cell a triangle would take
 	SELECT_COLOR: 0x6fe38a,		// tile select ghost
 	SHAVE_COLOR: 0xff9e3d,		// shave preview, drawn on top since the cut lies behind the corner tiles
 	RAMP_COLOR: 0x8ad4ff,		// ramp preview, which sits in open space
@@ -512,7 +513,9 @@ function announce() {
 // Texture brush: pick a cell of the atlas in the UV editor, then click or drag over tiles to paint it.
 // Faces keep 1 texel per unit: each corner takes its texel from its offset inside the tile block.
 const texture_state = {
-	atlas: null,	// {texture: uuid, x0, y0, x1, y1}: texels where the atlas pick started and ended, snapped to the brush size when used
+	atlas: null,	// {texture: uuid, x0, y0, x1, y1, shape}: texels where the atlas pick started and ended, snapped to the
+				// brush size when used. shape is 'square', or 'ul' / 'lr' for one half of a single cell, which a
+				// triangle takes: two triangles can then share one cell of art.
 };
 let paint_stroke = null;
 let last_paint_hover_event = null;
@@ -590,6 +593,69 @@ function paintFace(mesh, face, axis, sign, block_u, block_v, size, cell_x, cell_
 	}
 	return changed;
 }
+// A face that is not an axis-aligned tile: a ramp diagonal, or a triangle capping one. It gets its own frame
+// rather than a plane's, with the cell stretched across the face's own box, so a ramp takes the art of the
+// tiles around it and only reads longer. Upright for anything standing up, like a floor when it lies flat,
+// which is what tileUV does for tiles.
+function faceFrame(mesh, face) {
+	let points = face.vertices.map(vkey => mesh.mesh.localToWorld(new THREE.Vector3().fromArray(mesh.vertices[vkey])));
+	let normal = worldNormal(mesh, face).normalize();
+	let down = Math.abs(normal.y) > 0.99
+		? new THREE.Vector3(0, 0, 1)
+		: new THREE.Vector3(0, 1, 0).projectOnPlane(normal).normalize().multiplyScalar(-1);
+	let right = new THREE.Vector3().crossVectors(normal, down).normalize();
+	let across = points.map(point => point.dot(right));
+	let downward = points.map(point => point.dot(down));
+	let a0 = Math.min(...across), a1 = Math.max(...across);
+	let b0 = Math.min(...downward), b1 = Math.max(...downward);
+	if (a1 - a0 < 1e-3 || b1 - b0 < 1e-3) return null;	// seen edge on, nothing to lay a cell across
+	return {across, downward, a0, a1, b0, b1};
+}
+// Lays one cell of the pick over such a face
+function paintLooseFace(mesh, face, size, cell_x, cell_y, texture) {
+	let frame = faceFrame(mesh, face);
+	if (!frame) return false;
+	let factor_x = texture.getUVWidth() / texture.width;
+	let factor_y = texture.getUVHeight() / texture.height;
+	let changed = false;
+	// Which half of the cell the face already lands on, and which half the pick asks for
+	let shape = (texture_state.atlas && texture_state.atlas.shape) || 'square';
+	let coords = face.vertices.map((vkey, index) => [
+		(frame.across[index] - frame.a0) / (frame.a1 - frame.a0) * size,
+		(frame.downward[index] - frame.b0) / (frame.b1 - frame.b0) * size,
+	]);
+	let middle = coords.reduce((sum, [du, dv]) => sum + du + dv, 0) / coords.length;
+	let lands_on = middle < size ? 'ul' : 'lr';
+	// Turning it about the centre of the cell swaps the halves without mirroring the art
+	let turn = face.vertices.length == 3 && shape != 'square' && shape != lands_on;
+	face.vertices.forEach((vkey, index) => {
+		let [du, dv] = coords[index];
+		if (turn) { du = size - du; dv = size - dv; }
+		let uv = [(cell_x + du) * factor_x, (cell_y + dv) * factor_y];
+		if (!face.uv[vkey] || face.uv[vkey][0] != uv[0] || face.uv[vkey][1] != uv[1]) changed = true;
+		face.uv[vkey] = uv;
+	});
+	if (face.texture != texture.uuid) {
+		face.texture = texture.uuid;
+		changed = true;
+	}
+	return changed;
+}
+// A loose face is its own preview: there is no cell to outline, so the face itself lights up
+function looseGhost(hit) {
+	let face = hit && hit.element.faces[hit.face];
+	let points = face && facePoints(hit.element, face);
+	if (!points || points.length < 3) return hideGhost();
+	return showGhostQuad(points.length == 4 ? points : [points[0], points[1], points[2], points[2]], BRUSH.PAINT_COLOR, true);
+}
+// The cell a loose face takes: the first of the pick, since a stamp has no grid to run along here
+function paintLoose(mesh, face) {
+	let texture = getAtlasTexture();
+	if (!texture) return false;
+	let region = atlasRegion(state.size);
+	return paintLooseFace(mesh, face, state.size, region.x, region.y, texture);
+}
+
 // Paints the whole stamp around a touched tile and returns the meshes that changed
 function paintStamp(tile) {
 	let texture = getAtlasTexture();
@@ -616,9 +682,11 @@ function paintStamp(tile) {
 function paintStep(event) {
 	let hit = hitFace(paint_stroke.preview, event);
 	if (!hit) return;
-	let tile = describeTile(hit.element, hit.element.faces[hit.face]);
-	if (!tile) return;
-	let changed = paintStamp(tile);
+	let face = hit.element.faces[hit.face];
+	if (!face) return;
+	let tile = describeTile(hit.element, face);
+	let changed = tile ? paintStamp(tile) : new Set();
+	if (!tile && paintLoose(hit.element, face)) changed.add(hit.element);
 	if (changed.size) {
 		paint_stroke.changed = true;
 		Canvas.updateView({elements: [...changed], element_aspects: {uv: true, faces: true}});
@@ -657,7 +725,7 @@ function onPaintHover(event) {
 	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
 	let hit = hitFace(preview, event);
 	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
-	if (!tile) return hideGhost();
+	if (!tile) return looseGhost(hit);
 	// The ghost covers the whole stamp a click (or the current stroke) would paint
 	let size = state.size;
 	let block = blockOf(tile, size);
@@ -696,17 +764,33 @@ function updateAtlasOverlay() {
 			width: region.cols * state.size / w * 100 + '%', height: region.rows * state.size / h * 100 + '%',
 			border: `2px solid ${BRUSH.ATLAS_PICK_COLOR}`, boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.6)',
 		};
+		let shape = texture_state.atlas.shape || 'square';
+		if (shape != 'square') {
+			cell.clipPath = shape == 'ul' ? 'polygon(0 0, 100% 0, 0 100%)' : 'polygon(100% 0, 100% 100%, 0 100%)';
+			cell.background = BRUSH.ATLAS_HALF_FILL;
+		}
 	}
 	vue.atlas_overlay = {grid, cell};
 }
 // A click picks one cell; dragging selects a rectangle of adjacent cells that paints as one stamp
+const ATLAS_SHAPES = ['square', 'ul', 'lr'];
 function pickAtlasCell(texture, coords) {
 	let texel = c => [Math.clamp(Math.floor(c.x), 0, texture.width - 1), Math.clamp(Math.floor(c.y), 0, texture.height - 1)];
 	let [x, y] = texel(coords);
-	texture_state.atlas = {texture: texture.uuid, x0: x, y0: y, x1: x, y1: y};
+	let size = state.size;
+	let cell = value => Math.floor(value / size);
+	// Clicking the cell that is already picked walks on: the square, then the half a triangle would take
+	let last = texture_state.atlas;
+	let again = last && last.texture == texture.uuid && [last.x0, last.x1].every(v => cell(v) == cell(x))
+		&& [last.y0, last.y1].every(v => cell(v) == cell(y));
+	let shape = again ? ATLAS_SHAPES[(ATLAS_SHAPES.indexOf(last.shape || 'square') + 1) % ATLAS_SHAPES.length] : 'square';
+	texture_state.atlas = {texture: texture.uuid, x0: x, y0: y, x1: x, y1: y, shape};
 	updateAtlasOverlay();
 	let move = event => {
 		[texture_state.atlas.x1, texture_state.atlas.y1] = texel(UVEditor.getBrushCoordinates(event, texture));
+		// Dragging is for whole squares, so reaching past this cell drops the half
+		let region = atlasRegion(state.size);
+		if (region.cols > 1 || region.rows > 1) texture_state.atlas.shape = 'square';
 		updateAtlasOverlay();
 	};
 	let stop = () => {
@@ -878,10 +962,12 @@ function bucketClick(preview, event) {
 		return;
 	}
 	let hit = hitFace(preview, event);
-	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
-	if (!tile) return;
+	let face = hit && hit.element.faces[hit.face];
+	if (!face) return;
+	let tile = describeTile(hit.element, face);
 	Undo.initEdit({elements: Mesh.all.filter(mesh => mesh.visibility !== false && !mesh.locked), uv_only: true});
-	let changed = bucketFill(tile);
+	let changed = tile ? bucketFill(tile) : new Set();
+	if (!tile && paintLoose(hit.element, face)) changed.add(hit.element);
 	if (!changed.size) return Undo.cancelEdit();
 	Undo.finishEdit('Fill tiles');
 	Canvas.updateView({elements: [...changed], element_aspects: {uv: true, faces: true}});
@@ -892,7 +978,7 @@ function onBucketHover(event) {
 	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
 	let hit = hitFace(preview, event);
 	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
-	if (!tile) return hideGhost();
+	if (!tile) return looseGhost(hit);
 	let [cu, cv] = blockOf(tile, state.size);
 	showGhost(tile.axis, tile.depth, tile.sign, cu, cv, state.size, BRUSH.PAINT_COLOR);
 }
