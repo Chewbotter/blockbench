@@ -952,6 +952,9 @@ function faceCovers(points) {
 // Triangular gaps close themselves: a three-edge hole around a stroke gets a triangle, wound to match its
 // neighbours and textured from them. This is the gap left where a ramp meets flat tiles, or where cuts meet.
 // Edges are matched by position, so a ramp in one element and a wall in another still close against each other.
+// The search starts at an open edge of the stroke, but any edge can close the loop, open or not: a floor that
+// carries on underneath a ramp shares that edge with the next floor tile, and that must not stop the gap above
+// it from closing. Whether the loop is really a hole is settled by the area and coverage tests below.
 // Collinear loops are T-junctions between a long edge and two short ones, not holes.
 function capTriangularHoles(touched) {
 	let edges = new Map();
@@ -974,7 +977,7 @@ function capTriangularHoles(touched) {
 	}
 	let all_open = [...edges.values()].filter(entry => entry.faces.length == 1);
 	let by_point = new Map();
-	for (let entry of all_open) {
+	for (let entry of edges.values()) {
 		for (let key in entry.points) by_point.set(key, (by_point.get(key) || []).concat([entry]));
 	}
 	let maps = new Map();
