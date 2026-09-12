@@ -232,6 +232,11 @@ var codec = new Codec('project', {
 				mesh_selection: JSON.parse(JSON.stringify(Project.mesh_selection)),
 				selected_texture: Project.selected_texture?.uuid,
 			};
+		} else {
+			// The view the scene was left in, written on every save so opening the file again picks it up.
+			// editor_state carries the same thing for session restore, so this is the other branch of that.
+			Project.saveEditorState();
+			model.view = {previews: JSON.parse(JSON.stringify(Project.previews))};
 		}
 
 		if (!(Format.id == 'skin' && model.skin_model)) {
@@ -607,6 +612,11 @@ var codec = new Codec('project', {
 			}
 			(state.selected_texture && Texture.all.find(t => t.uuid == state.selected_texture))?.select();
 
+			Project.loadEditorState();
+		} else if (model.view && model.view.previews) {
+			for (let id in model.view.previews) {
+				Project.previews[id] = model.view.previews[id];
+			}
 			Project.loadEditorState();
 		}
 	},
