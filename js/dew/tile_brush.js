@@ -316,6 +316,10 @@ function endStroke() {
 		Canvas.updateView({elements: [...finished.touched], element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
 	} else {
 		if (!finished.changed) return Undo.cancelEdit();
+		// Tiles painted beside a ramp leave triangular gaps, which close themselves
+		let touched = new Set([finished.mesh]);
+		capTriangularHoles(touched);
+		Canvas.updateView({elements: [...touched], element_aspects: {geometry: true, faces: true, uv: true}});
 		Undo.finishEdit('Paint tiles', finished.created ? {outliner: true, elements: [finished.mesh], selection: true} : undefined);
 		updateSelection();
 	}
@@ -905,59 +909,104 @@ function cornerTrianglesAt(c, w) {
 	}
 	return found;
 }
-// Cuts that meet can leave a triangular gap, for instance where a ramp runs into a corner that was shaved
-// afterwards: the tile that closed the ramp's end is gone. Any three-edge hole gets a triangle, wound to match
-// its neighbours and textured from them.
-function capTriangularHoles(stroke) {
-	for (let mesh of stroke.touched) {
-		if (!mesh.faces) continue;
-		let edges = new Map();
+const positionKey = point => [point.x, point.y, point.z].map(round3).join(',');
+// Finds or adds a vertex of a mesh at a world position, keeping a map per call
+function vertexAt(mesh, point, maps) {
+	let map = maps.get(mesh);
+	if (!map) maps.set(mesh, map = buildVertexMap(mesh));
+	let local = mesh.mesh.worldToLocal(point.clone());
+	let position = [round3(local.x), round3(local.y), round3(local.z)];
+	let id = position.join(',');
+	let vkey = map.get(id);
+	if (!vkey || !mesh.vertices[vkey]) {
+		vkey = mesh.addVertices(position)[0];
+		map.set(id, vkey);
+	}
+	return vkey;
+}
+// A candidate that lies inside an existing coplanar face is not a hole: its edges are only that face's boundary,
+// as when a square wall tile already closes the end of a wedge. Capping it would lay a face on top of another.
+function faceCovers(points) {
+	let normal = new THREE.Vector3().subVectors(points[1], points[0]).cross(new THREE.Vector3().subVectors(points[2], points[0])).normalize();
+	let centre = points[0].clone().add(points[1]).add(points[2]).multiplyScalar(1 / 3);
+	let dominant = ['x', 'y', 'z'].reduce((best, axis) => Math.abs(normal[axis]) > Math.abs(normal[best]) ? axis : best, 'x');
+	let [across, down] = ['x', 'y', 'z'].filter(axis => axis != dominant);
+	for (let mesh of Mesh.all) {
+		if (mesh.visibility === false) continue;
+		for (let fkey in mesh.faces) {
+			let corners = mesh.faces[fkey].getSortedVertices().map(vkey => worldVertex(mesh, vkey));
+			if (corners.length < 3) continue;
+			if (corners.some(corner => Math.abs(corner.clone().sub(points[0]).dot(normal)) > 1e-3)) continue;
+			let inside = false;
+			for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
+				let a = corners[i], b = corners[j];
+				if ((a[down] > centre[down]) == (b[down] > centre[down])) continue;
+				let crossing = a[across] + (centre[down] - a[down]) / (b[down] - a[down]) * (b[across] - a[across]);
+				if (centre[across] < crossing) inside = !inside;
+			}
+			if (inside) return true;
+		}
+	}
+	return false;
+}
+// Triangular gaps close themselves: a three-edge hole around a stroke gets a triangle, wound to match its
+// neighbours and textured from them. This is the gap left where a ramp meets flat tiles, or where cuts meet.
+// Edges are matched by position, so a ramp in one element and a wall in another still close against each other.
+// Collinear loops are T-junctions between a long edge and two short ones, not holes.
+function capTriangularHoles(touched) {
+	let edges = new Map();
+	for (let mesh of Mesh.all) {
+		if (mesh.visibility === false) continue;
+		mesh.mesh.updateMatrixWorld(true);
 		for (let fkey in mesh.faces) {
 			let vertices = mesh.faces[fkey].getSortedVertices();
 			if (vertices.length < 3) continue;
-			vertices.forEach((vkey, i) => {
-				let next = vertices[(i + 1) % vertices.length];
-				let key = [vkey, next].slice().sort().join('|');
-				let entry = edges.get(key) || {vertices: [vkey, next], faces: []};
-				entry.faces.push(fkey);
-				edges.set(key, entry);
+			vertices.forEach((vkey, index) => {
+				let from = worldVertex(mesh, vkey), to = worldVertex(mesh, vertices[(index + 1) % vertices.length]);
+				let a = positionKey(from), b = positionKey(to);
+				let entry = edges.get([a, b].slice().sort().join('>')) || {points: {}, faces: []};
+				entry.points[a] = from;
+				entry.points[b] = to;
+				entry.faces.push({mesh, fkey, from: a});
+				edges.set([a, b].slice().sort().join('>'), entry);
 			});
 		}
-		let open = [...edges.values()].filter(entry => entry.faces.length == 1);
-		let by_vertex = new Map();
-		for (let entry of open) {
-			for (let vkey of entry.vertices) {
-				by_vertex.set(vkey, (by_vertex.get(vkey) || []).concat([entry]));
-			}
-		}
-		let capped = new Set();
-		for (let entry of open) {
-			let [a, b] = entry.vertices;
-			for (let second of by_vertex.get(b) || []) {
-				let c = second.vertices.find(vkey => vkey != b);
-				if (second == entry || !c || c == a) continue;
-				if (!(by_vertex.get(c) || []).find(other => other != second && other.vertices.includes(a))) continue;
-				let id = [a, b, c].slice().sort().join('|');
-				if (capped.has(id)) continue;
-				// Collinear "loops" are T-junctions, where one long edge runs along two short ones, not holes
-				let points = [a, b, c].map(vkey => worldVertex(mesh, vkey));
-				let area = new THREE.Vector3().subVectors(points[1], points[0]).cross(new THREE.Vector3().subVectors(points[2], points[0])).length();
-				if (area < 1e-3) continue;
-				capped.add(id);
+	}
+	let all_open = [...edges.values()].filter(entry => entry.faces.length == 1);
+	let by_point = new Map();
+	for (let entry of all_open) {
+		for (let key in entry.points) by_point.set(key, (by_point.get(key) || []).concat([entry]));
+	}
+	let maps = new Map();
+	let capped = new Set();
+	// Only holes that a face of this stroke borders, so untouched openings elsewhere are left alone
+	for (let entry of all_open.filter(open => touched.has(open.faces[0].mesh))) {
+		let [a, b] = Object.keys(entry.points);
+		for (let second of by_point.get(b) || []) {
+			if (second == entry) continue;
+			let c = Object.keys(second.points).find(key => key != b);
+			if (!c || c == a) continue;
+			if (!(by_point.get(c) || []).find(other => other != second && other.points[a])) continue;
+			let id = [a, b, c].slice().sort().join('|');
+			if (capped.has(id)) continue;
+			let points = [entry.points[a], entry.points[b], second.points[c]];
+			let area = new THREE.Vector3().subVectors(points[1], points[0]).cross(new THREE.Vector3().subVectors(points[2], points[0])).length();
+			if (area < 1e-3) continue;
+			if (faceCovers(points)) continue;
+			capped.add(id);
 
-				// Wind against the face on the other side of the first edge so the cap faces outward
-				let neighbour = mesh.faces[entry.faces[0]];
-				let order = neighbour.getSortedVertices();
-				let forward = order[(order.indexOf(a) + 1) % order.length] == b;
-				let vkeys = forward ? [b, a, c] : [a, b, c];
-				let texture = neighbour.texture;
-				let uv = {};
-				for (let vkey of vkeys) {
-					let source = neighbour.uv[vkey] ? neighbour : Object.values(mesh.faces).find(face => face.texture == texture && face.uv[vkey]);
-					uv[vkey] = source ? source.uv[vkey].slice() : [0, 0];
-				}
-				mesh.addFaces(new MeshFace(mesh, {vertices: vkeys, uv, texture}));
+			// Wind against the face on the other side of the first edge so the cap faces outward
+			let {mesh, fkey, from} = entry.faces[0];
+			let neighbour = mesh.faces[fkey];
+			let ordered = from == a ? [points[1], points[0], points[2]] : points;
+			let vkeys = ordered.map(point => vertexAt(mesh, point, maps));
+			let uv = {};
+			for (let vkey of vkeys) {
+				let source = Object.values(mesh.faces).find(face => face.uv[vkey] && face.texture == neighbour.texture);
+				uv[vkey] = source ? source.uv[vkey].slice() : [0, 0];
 			}
+			mesh.addFaces(new MeshFace(mesh, {vertices: vkeys, uv, texture: neighbour.texture}));
+			touched.add(mesh);
 		}
 	}
 }
@@ -1084,7 +1133,7 @@ function endShaveStroke() {
 	let finished = shave_stroke;
 	shave_stroke = null;
 	if (!finished.changed) return Undo.cancelEdit();
-	capTriangularHoles(finished);
+	capTriangularHoles(finished.touched);
 	finished.touched.forEach(removeLooseVertices);
 	Undo.finishEdit(finished.inside ? 'Ramp corners' : 'Shave corners');
 	Canvas.updateView({elements: [...finished.touched], element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
@@ -1112,6 +1161,16 @@ function onShaveHover(event) {
 const RAMP = {
 	MAX_PIECES: 64,
 };
+let ramp_variant = 0;	// Tab cycles the four ways a piece can lean from an edge
+
+// A piece spans two axes; the variant flips their signs, so up-and-away becomes up-and-toward, down-and-away, and so on
+function applyRampVariant(step) {
+	let axes = ['x', 'y', 'z'].filter(axis => Math.abs(step[axis]) > 1e-6);
+	if (axes.length != 2) return step;
+	if (ramp_variant & 1) step[axes[0]] *= -1;
+	if (ramp_variant & 2) step[axes[1]] *= -1;
+	return step;
+}
 
 const facePoints = (mesh, face) => face.getSortedVertices().map(vkey => worldVertex(mesh, vkey));
 function nearestFaceEdge(points, cursor) {
@@ -1147,6 +1206,7 @@ function rampStart(mesh, face, cursor, size) {
 		let step = new THREE.Vector3();
 		step[edge.n] = edge.sign * size;
 		step[tile.axis] = tile.sign * size;
+		applyRampVariant(step);
 		// The far corners of the block are where the piece takes its far UVs from
 		let opposite = along => {
 			let point = at(along);
@@ -1159,7 +1219,7 @@ function rampStart(mesh, face, cursor, size) {
 	if (points.length != 4) return null;
 	let edge = nearestFaceEdge(points, cursor);
 	let far_a = points[(edge.index + 3) % 4], far_b = points[(edge.index + 2) % 4];
-	let step = edge.a.clone().add(edge.b).sub(far_a).sub(far_b).multiplyScalar(0.5);
+	let step = applyRampVariant(edge.a.clone().add(edge.b).sub(far_a).sub(far_b).multiplyScalar(0.5));
 	return {a: edge.a.clone(), b: edge.b.clone(), step, uv_far: [far_a, far_b]};
 }
 function uvAtPoint(mesh, face, point) {
@@ -1265,6 +1325,7 @@ function endRampStroke() {
 	let finished = shave_stroke;
 	shave_stroke = null;
 	if (!finished.changed) return Undo.cancelEdit();
+	capTriangularHoles(finished.touched);
 	finished.touched.forEach(removeLooseVertices);
 	Undo.finishEdit('Draw ramp');
 	Canvas.updateView({elements: [...finished.touched], element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
@@ -1415,6 +1476,7 @@ BARS.defineActions(function() {
 			shave_previous_selection_mode = BarItems.selection_mode.value;
 			BarItems.selection_mode.set('object');
 			updateSelection();
+			ramp_variant = 0;
 			active_hover = onRampHover;
 			document.addEventListener('mousemove', onRampHover);
 		},
@@ -1493,6 +1555,20 @@ BARS.defineActions(function() {
 			}
 			setTimeout(refreshAtlasView, 0);
 		},
+	});
+
+	new Action('dew_ramp_direction', {
+		name: 'Ramp: Cycle Direction',
+		description: 'Cycle the four ways the next ramp piece can lean from the edge under the cursor',
+		icon: 'sync',
+		category: 'tools',
+		keybind: new Keybind({key: 9}),	// Tab, free while the ramp tool has it
+		condition: () => Toolbox.selected && Toolbox.selected.id == 'dew_ramp',
+		click() {
+			ramp_variant = (ramp_variant + 1) % 4;
+			Blockbench.showQuickMessage(`Ramp direction ${ramp_variant + 1} of 4`, BRUSH.MESSAGE_TIME);
+			if (last_paint_hover_event) onRampHover(last_paint_hover_event);
+		}
 	});
 
 	new Action('dew_tile_plane_axis', {

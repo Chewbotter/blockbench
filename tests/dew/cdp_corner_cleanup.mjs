@@ -53,6 +53,24 @@ const health = `(() => {
 			let ab = [0, 1, 2].map(i => p[1][i] - p[0][i]), ac = [0, 1, 2].map(i => p[2][i] - p[0][i]);
 			let cross = [ab[1] * ac[2] - ab[2] * ac[1], ab[2] * ac[0] - ab[0] * ac[2], ab[0] * ac[1] - ab[1] * ac[0]];
 			if (Math.hypot(...cross) < 0.001) continue;   // collinear: a T-junction, not a hole
+			// A loop already covered by a face in the same plane is closed, not a hole
+			let normal = cross.map(v => v / Math.hypot(...cross));
+			let centre = [0, 1, 2].map(i => (p[0][i] + p[1][i] + p[2][i]) / 3);
+			let dominant = [0, 1, 2].reduce((best, i) => Math.abs(normal[i]) > Math.abs(normal[best]) ? i : best, 0);
+			let plane = [0, 1, 2].filter(i => i != dominant);
+			let covered = false;
+			for (let other of Mesh.all) { for (let fkey in other.faces) {
+				let corners = other.faces[fkey].getSortedVertices().map(k => other.vertices[k]);
+				if (corners.length < 3) continue;
+				if (corners.some(q => Math.abs([0, 1, 2].reduce((sum, i) => sum + (q[i] - p[0][i]) * normal[i], 0)) > 0.001)) continue;
+				let inside = false;
+				for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) { let q = corners[i], r = corners[j];
+					if ((q[plane[1]] > centre[plane[1]]) == (r[plane[1]] > centre[plane[1]])) continue;
+					let crossing = q[plane[0]] + (centre[plane[1]] - q[plane[1]]) / (r[plane[1]] - q[plane[1]]) * (r[plane[0]] - q[plane[0]]);
+					if (centre[plane[0]] < crossing) inside = !inside; }
+				if (inside) { covered = true; break; } }
+				if (covered) break; }
+			if (covered) continue;
 			loops++; }
 	}
 	return JSON.stringify({triangular_holes: loops, duplicate_faces: duplicates, triangles: caps, untextured_triangles: untextured}); })()`;
