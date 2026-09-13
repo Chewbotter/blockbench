@@ -1287,8 +1287,7 @@ function onBlockHover(event, ctrl_held = event.ctrlKey) {
 // is a height field: lifting a tile's corners tilts the tiles beside it into ramps, and a tile left with one
 // corner up splits into a flat and a sloped triangle. Nothing is added between heights, so nothing can leave a
 // gap. The ground around follows so no two corners a half cell apart differ by more than a step, which grows a
-// hill (or a trench) with repeated clicks. Corners on the cluster border, and corners a wall or anything else
-// that is not ground stands on, never move.
+// hill (or a trench) with repeated clicks. Corners a wall or anything else that is not ground stands on never move.
 let terrain_stroke = null;
 let terrain_previous_selection_mode = null;
 const groundKey = (x, z) => `${round3(x)},${round3(z)}`;
@@ -1328,12 +1327,8 @@ function buildGround(mesh, start_fkey) {
 		for (let vkey of face.vertices) {
 			let p = pos(vkey);
 			grid.set(groundKey(p.x, p.z), vkey);
-			// Only corners on the edge lines of the cluster square are pinned. Scenes run past it (the Warehouse floor
-			// spans x -312 to 408), and ground out there moves like any other.
-			let C = DEW.CLUSTER_SIZE;
-			let on_line = (a, b) => (Math.abs(a) < 1e-3 || Math.abs(a - C) < 1e-3) && b > -1e-3 && b < C + 1e-3;
-			let on_border = on_line(p.x, p.z) || on_line(p.z, p.x);
-			if (on_border || faces_of.get(vkey).some(other => !ground.has(other))) pinned.add(vkey);
+			// No cluster border is pinned: scenes have no fixed size and stay adjustable
+			if (faces_of.get(vkey).some(other => !ground.has(other))) pinned.add(vkey);
 		}
 		let cell = groundKey(Math.floor(Math.min(...face.vertices.map(vkey => pos(vkey).x)) / H + 1e-6) * H, Math.floor(Math.min(...face.vertices.map(vkey => pos(vkey).z)) / H + 1e-6) * H);
 		if (!cells.has(cell)) cells.set(cell, []);
@@ -2226,7 +2221,7 @@ BARS.defineActions(function() {
 
 	new Tool('dew_terrain', {
 		name: 'Terrain Brush',
-		description: 'Raise ground a step, or lower it with Ctrl. The ground around follows as ramps and triangles, no steeper than a step per half cell, and the cluster border and anything standing on the ground stay put. Drag for a ridge or a trench. C switches full / half tiles',
+		description: 'Raise ground a step, or lower it with Ctrl. The ground around follows as ramps and triangles, no steeper than a step per half cell, and anything standing on the ground stays put. Drag for a ridge or a trench. C switches full / half tiles',
 		icon: 'landscape',
 		category: 'tools',
 		transformerMode: 'hidden',

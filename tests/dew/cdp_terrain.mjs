@@ -96,12 +96,12 @@ console.log('   expect 224,96 and 224,112 still [0,16] (floor and wall top), 208
 const border = [[0, 112], [0, 128], [16, 112], [16, 128]];
 await camera(24, 0, 120, 24, 200, 300);
 await click([8, 0, 120]);
-console.log('G. raise the tile on the cluster border:', await ev(ground('edge', border)));
-console.log('   expect x 0 corners still 0, x 16 corners at 16; steepest 16');
+console.log('G. raise the tile at x 0, where a cluster border would be:', await ev(ground('edge', border)));
+console.log('   expect all four corners at 16: no cluster size is baked in, so nothing there is pinned; steepest 16');
 const history = await ev(`Undo.history.length`);
-await click([8, 8, 120]);
-console.log('H. raise it again:', await ev(ground('edge', border)), ' undo steps added:', (await ev(`Undo.history.length`)) - history);
-console.log('   expect no change and 0 undo steps: a second step would be too steep against the pinned border');
+await click([8, 16, 120]);
+console.log('H. raise it again:', await ev(ground('edge', [...border, [32, 112]])), ' undo steps added:', (await ev(`Undo.history.length`)) - history);
+console.log('   expect the four corners at 32, 32,112 at 16 (the hill spread), 1 undo step; steepest 16');
 
 // Ground beyond the cluster square is not border: a 3 x 3 floor at x 352..400 raises like any other
 await ev(`(() => { let m = new Mesh({name: 'outside', vertices: {}}); let map = {};
