@@ -170,6 +170,31 @@ for (let x of [8, 24, 40]) { await hover([x, 16, 8], 2); await click([x, 16, 8],
 console.log('P. all three culled with ctrl:', await ev(shape));
 console.log('   expect the six floor tiles and nothing else: no holes in the floor, no walls left standing');
 
+// An atlas pick textures every side of a new block, and a two cell pick alternates along a row
+await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); unselectAllElements(); updateSelection();
+	BarItems.create_dew_atlas.click(); Dialog.open.confirm(); return true; })()`);
+await sleep(800);
+await camera(8, 8, 8, 90, 70, 90);
+await ev(`(() => { BarItems.dew_whole_block.select(); let s = DEWTileBrush.state; s.size = 16; s.axis = 'y'; s.depth = 0;
+	DEWTileBrush.texture_state.atlas = {texture: Texture.all[0].uuid, x0: 16, y0: 0, x1: 16, y1: 0, shape: 'square'}; return true; })()`);
+await sleep(300);
+const painted = `(() => { let t = Texture.all[0]; let textured = 0, total = 0, corners = {};
+	for (let m of Mesh.all) for (let k in m.faces) { let f = m.faces[k]; total++; if (f.texture == t.uuid) textured++;
+		let uvs = f.vertices.map(v => f.uv[v] || [NaN, NaN]); let c = Math.min(...uvs.map(u => u[0])) + ',' + Math.min(...uvs.map(u => u[1]));
+		let spans = Math.max(...uvs.map(u => u[0])) - Math.min(...uvs.map(u => u[0]));
+		let key = f.getNormal(true).map(Math.round).join(',') + ' @' + c + ' w' + spans; corners[key] = (corners[key] || 0) + 1; }
+	return JSON.stringify({picker: !!BarItems.dew_whole_block.atlas_picker, textured, total, corners}); })()`;
+await hover([8, 0, 8]);
+await click([8, 0, 8]);
+console.log('Q. a block with cell 1,0 picked:', await ev(painted));
+console.log('   expect picker true, 6 of 6 textured, every face @16,0 w16');
+await ev(`(() => { Mesh.all.slice().forEach(m => m.remove()); DEWTileBrush.texture_state.atlas.x0 = 0; return true; })()`);
+await camera(48, 8, 8, 150, 90, 150);
+await hover([8, 0, 8]);
+await dragWorld([8, 0, 8], [72, 0, 8], 8);
+console.log('R. a row with a two cell pick:', await ev(painted));
+console.log('   expect all textured, and the faces facing up split between @0,0 and @16,0, alternating block by block');
+
 console.log('page errors:', errors.length ? errors : 'none');
 await sleep(200);
 const shot = await send('Page.captureScreenshot', { format: 'png' });

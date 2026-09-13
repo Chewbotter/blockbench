@@ -1074,7 +1074,17 @@ function blockOwner(origin, size, index, skip_axis, skip_depth, mesh) {
 	}
 	return planes.size >= BRUSH.BLOCK_SIDES;
 }
-function placeBlock(mesh, origin, size, index, vertex_map, touched) {
+// With an atlas pick, a new side takes its cell the way the bucket lays one: tiled from the plane origin, so a
+// pick of several cells runs on unbroken across a row of blocks
+function paintBlockSide(mesh, fkey, side, origin, size, paint) {
+	let [ua, va] = PLANE_AXES[side.axis];
+	let bu = origin[ua], bv = origin[va];
+	let [ru, rv] = textureDirections(side.axis, side.sign);
+	let a = posMod(Math.round(ru * bu / size), paint.region.cols);
+	let b = posMod(Math.round(rv * bv / size), paint.region.rows);
+	paintFace(mesh, mesh.faces[fkey], side.axis, side.sign, bu, bv, size, paint.region.x + a * size, paint.region.y + b * size, paint.texture);
+}
+function placeBlock(mesh, origin, size, index, vertex_map, touched, paint) {
 	let added = 0, kept = 0, removed = 0;
 	for (let side of blockSides(origin, size)) {
 		// A face of this element already standing there means the block goes without its own. If that face is
@@ -1096,7 +1106,9 @@ function placeBlock(mesh, origin, size, index, vertex_map, touched) {
 			}
 			continue;
 		}
-		index.set(cellKey(side), {mesh, fkey: addBlockFace(mesh, side, vertex_map)});
+		let fkey = addBlockFace(mesh, side, vertex_map);
+		if (paint) paintBlockSide(mesh, fkey, side, origin, size, paint);
+		index.set(cellKey(side), {mesh, fkey});
 		touched.add(mesh);
 		added++;
 	}
@@ -1205,7 +1217,7 @@ function blockStep(origin) {
 			if (!block_stroke.vertex_maps.has(mesh)) block_stroke.vertex_maps.set(mesh, buildVertexMap(mesh));
 			return block_stroke.vertex_maps.get(mesh);
 		})
-		: placeBlock(block_stroke.mesh, origin, block_stroke.size, block_stroke.index, block_stroke.vertex_map, block_stroke.touched);
+		: placeBlock(block_stroke.mesh, origin, block_stroke.size, block_stroke.index, block_stroke.vertex_map, block_stroke.touched, block_stroke.paint);
 	if (counts.added || counts.removed) block_stroke.changed = true;
 	if (block_stroke.touched.size) {
 		Canvas.updateView({elements: [...block_stroke.touched], element_aspects: {geometry: true, faces: true, uv: true}});
@@ -1230,6 +1242,7 @@ function startBlockStroke(preview, event) {
 		axis: target.axis, depth: target.depth, base: target.origin[target.axis], size: state.size,
 		index: buildTileIndex(), vertex_map: mesh ? buildVertexMap(mesh) : null,
 		touched: new Set(), placed: new Set(), changed: false, vertex_maps: new Map(),
+		paint: !erase && getAtlasTexture() ? {texture: getAtlasTexture(), region: atlasRegion(state.size)} : null,
 	};
 	blockStep(target.origin);
 	document.addEventListener('mousemove', moveBlockStroke);
@@ -1921,7 +1934,7 @@ BARS.defineActions(function() {
 	new Tool('dew_whole_block', {
 		keybind: new Keybind({key: '2'}),	// the number keys pick the tools in DEW scenes
 		name: 'Whole Block',
-		description: 'Drop a block into the cell under the cursor, full or half size per C. Drag to lay a run of them. Ctrl takes one out and seals the neighbours it opened. Faces that meet are dropped on both sides',
+		description: 'Drop a block into the cell under the cursor, full or half size per C. Drag to lay a run of them. Ctrl takes one out and seals the neighbours it opened. Faces that meet are dropped on both sides. Pick atlas cells in the UV editor to texture every side of new blocks, Alt picks up the cell a tile carries',
 		icon: 'view_in_ar',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -1931,15 +1944,19 @@ BARS.defineActions(function() {
 		condition: () => Modes.edit && Format.id == 'dew_scene',
 		onCanvasClick(data) {
 			let event = data && data.event;
-			if (!event || event.button !== 0 || event.altKey || block_stroke) return;
+			if (!event || event.button !== 0 || block_stroke) return;
+			if (event.altKey) return pickAtlasFromTile(Preview.selected, event);
 			startBlockStroke(Preview.selected, event);
 		},
+		atlas_picker: true,			// the UV editor shows the selected texture, and a pick textures new blocks
+		onAtlasClick: pickAtlasCell,
 		onSelect() {
 			previous_selection_mode = BarItems.selection_mode.value;
 			BarItems.selection_mode.set('object');
 			updateSelection();
 			active_hover = onBlockHover;
 			document.addEventListener('mousemove', onBlockHover);
+			refreshAtlasView();
 			document.addEventListener('keydown', onBlockModifier);
 			document.addEventListener('keyup', onBlockModifier);
 			updatePlaneGrid();
@@ -1951,6 +1968,8 @@ BARS.defineActions(function() {
 			active_hover = null;
 			hideGhost();
 			removePlaneGrid();
+			// Runs before the next tool becomes active, so the UV editor refresh waits for the switch
+			setTimeout(refreshAtlasView, 0);
 			if (previous_selection_mode && previous_selection_mode != 'object') {
 				BarItems.selection_mode.set(previous_selection_mode);
 				updateSelection();
