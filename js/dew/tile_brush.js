@@ -25,6 +25,8 @@ const BRUSH = {
 	OVERLAP_AREA: 1,			// a gap this much of which is already filled is not capped, in square units (a tile is 256)
 	BLOCK_SIDES: 2,				// outward sides a cell needs, besides the one it shares, to count as a block (Whole Block)
 	BLOCK_NAME: 'block',		// what Add DEW Block names the element it starts
+	TERRAIN_STEP: 16,			// one raise or lower, and the most two corners a half cell apart may differ (45 degrees)
+	TERRAIN_GROUND_Y: 0.1,		// a face whose normal points up at least this much counts as ground for the terrain brush
 };
 
 const H = DEW.HALF_CELL;
@@ -50,7 +52,7 @@ let previous_selection_mode = null;
 const round3 = v => Math.round(v * 1000) / 1000;
 const snap = (v, step = H) => Math.round(v / step) * step;
 const isActive = () => Toolbox.selected && ['dew_tile_brush', 'dew_whole_block'].includes(Toolbox.selected.id);
-const isDewTool = () => Toolbox.selected && ['dew_tile_select', 'dew_whole_block', 'dew_tile_brush', 'dew_shave', 'dew_ramp', 'dew_texture_brush', 'dew_paint_bucket'].includes(Toolbox.selected.id);
+const isDewTool = () => Toolbox.selected && ['dew_tile_select', 'dew_whole_block', 'dew_tile_brush', 'dew_shave', 'dew_ramp', 'dew_terrain', 'dew_texture_brush', 'dew_paint_bucket'].includes(Toolbox.selected.id);
 const cutsInside = () => Toolbox.selected && Toolbox.selected.id == 'dew_ramp';
 
 function planePoint(axis, depth, u, v) {
@@ -1281,6 +1283,209 @@ function onBlockHover(event, ctrl_held = event.ctrlKey) {
 	showGhostBox(target.origin, state.size, erase ? BRUSH.ERASE_COLOR : BRUSH.GHOST_COLOR);
 }
 
+// Terrain Brush: raises and lowers ground. Floor tiles in one element share their corner vertices, so the ground
+// is a height field: lifting a tile's corners tilts the tiles beside it into ramps, and a tile left with one
+// corner up splits into a flat and a sloped triangle. Nothing is added between heights, so nothing can leave a
+// gap. The ground around follows so no two corners a half cell apart differ by more than a step, which grows a
+// hill (or a trench) with repeated clicks. Corners on the cluster border, and corners a wall or anything else
+// that is not ground stands on, never move.
+let terrain_stroke = null;
+let terrain_previous_selection_mode = null;
+const groundKey = (x, z) => `${round3(x)},${round3(z)}`;
+
+// The ground a face belongs to: faces of that element that face up and cover one half cell, gathered across
+// shared corners from the hit face, so a floor on another storey stays out of it
+function buildGround(mesh, start_fkey) {
+	mesh.mesh.updateMatrixWorld(true);
+	let world = new Map();
+	let pos = vkey => {
+		if (!world.has(vkey)) world.set(vkey, mesh.mesh.localToWorld(new THREE.Vector3().fromArray(mesh.vertices[vkey])));
+		return world.get(vkey);
+	};
+	let isGround = face => {
+		if (face.vertices.length < 3 || worldNormal(mesh, face).y <= BRUSH.TERRAIN_GROUND_Y) return false;
+		let xs = face.vertices.map(vkey => pos(vkey).x), zs = face.vertices.map(vkey => pos(vkey).z);
+		return Math.max(...xs) - Math.min(...xs) <= H + 1e-3 && Math.max(...zs) - Math.min(...zs) <= H + 1e-3;
+	};
+	let faces_of = new Map();
+	for (let fkey in mesh.faces) {
+		for (let vkey of mesh.faces[fkey].vertices) {
+			if (!faces_of.has(vkey)) faces_of.set(vkey, []);
+			faces_of.get(vkey).push(fkey);
+		}
+	}
+	let ground = new Set();
+	let queue = [start_fkey];
+	while (queue.length) {
+		let fkey = queue.pop();
+		if (ground.has(fkey) || !mesh.faces[fkey] || !isGround(mesh.faces[fkey])) continue;
+		ground.add(fkey);
+		for (let vkey of mesh.faces[fkey].vertices) queue.push(...faces_of.get(vkey));
+	}
+	let grid = new Map(), pinned = new Set(), cells = new Map();
+	for (let fkey of ground) {
+		let face = mesh.faces[fkey];
+		for (let vkey of face.vertices) {
+			let p = pos(vkey);
+			grid.set(groundKey(p.x, p.z), vkey);
+			let on_border = p.x <= 1e-3 || p.z <= 1e-3 || p.x >= DEW.CLUSTER_SIZE - 1e-3 || p.z >= DEW.CLUSTER_SIZE - 1e-3;
+			if (on_border || faces_of.get(vkey).some(other => !ground.has(other))) pinned.add(vkey);
+		}
+		let cell = groundKey(Math.floor(Math.min(...face.vertices.map(vkey => pos(vkey).x)) / H + 1e-6) * H, Math.floor(Math.min(...face.vertices.map(vkey => pos(vkey).z)) / H + 1e-6) * H);
+		if (!cells.has(cell)) cells.set(cell, []);
+		cells.get(cell).push(fkey);
+	}
+	return {mesh, ground, grid, pinned, cells, pos, height: vkey => round3(pos(vkey).y)};
+}
+// Heights that lift (dir 1) or lower (dir -1) the given corners to `target`, with the ground around following so
+// no step between neighbours exceeds BRUSH.TERRAIN_STEP. Null when that would have to move a pinned corner.
+function settleTerrain(ground, corners, target, dir) {
+	let heights = new Map();
+	let get = vkey => heights.has(vkey) ? heights.get(vkey) : ground.height(vkey);
+	let queue = [];
+	for (let vkey of corners) {
+		if (ground.pinned.has(vkey) || (dir > 0 ? get(vkey) >= target : get(vkey) <= target)) continue;
+		heights.set(vkey, target);
+		queue.push(vkey);
+	}
+	while (queue.length) {
+		let vkey = queue.shift();
+		let p = ground.pos(vkey);
+		let limit = get(vkey) - dir * BRUSH.TERRAIN_STEP;
+		for (let [dx, dz] of [[H, 0], [-H, 0], [0, H], [0, -H]]) {
+			let next = ground.grid.get(groundKey(p.x + dx, p.z + dz));
+			if (!next || (dir > 0 ? get(next) >= limit : get(next) <= limit)) continue;
+			if (ground.pinned.has(next)) return null;
+			heights.set(next, limit);
+			queue.push(next);
+		}
+	}
+	return heights;
+}
+// A half cell of ground as one quad when its corners lie in a plane, or as two triangles when they do not. The split
+// takes the diagonal whose ends sit closest in height, so a tile with one corner up keeps a flat triangle.
+function refoldCell(ground, cx, cz) {
+	let mesh = ground.mesh;
+	let key = groundKey(cx, cz);
+	let corners = [[0, 0], [H, 0], [H, H], [0, H]].map(([dx, dz]) => ground.grid.get(groundKey(cx + dx, cz + dz)));
+	let fkeys = (ground.cells.get(key) || []).filter(fkey => mesh.faces[fkey]);
+	if (corners.includes(undefined) || !fkeys.length) return;
+	if (!fkeys.every(fkey => mesh.faces[fkey].vertices.every(vkey => corners.includes(vkey)))) return;
+	let h = corners.map(ground.height);
+	let planar = Math.abs(h[0] + h[2] - h[1] - h[3]) < 1e-3;
+	let [a, b, c, d] = corners;
+	let shapes = planar ? [corners]
+		: Math.abs(h[1] - h[3]) <= Math.abs(h[0] - h[2]) ? [[a, b, d], [b, c, d]] : [[a, b, c], [a, c, d]];
+	let same = fkeys.length == shapes.length && shapes.every(shape => fkeys.some(fkey => {
+		let vertices = mesh.faces[fkey].vertices;
+		return vertices.length == shape.length && shape.every(vkey => vertices.includes(vkey));
+	}));
+	if (same) return;
+	// Rebuilt from the same vertices, so the uv each corner carries and the texture come along
+	let uv = {}, texture = false;
+	for (let fkey of fkeys) {
+		Object.assign(uv, mesh.faces[fkey].uv);
+		if (mesh.faces[fkey].texture) texture = mesh.faces[fkey].texture;
+		delete mesh.faces[fkey];
+	}
+	ground.cells.set(key, shapes.map(shape => {
+		let face = new MeshFace(mesh, {vertices: shape, uv: Object.fromEntries(shape.map(vkey => [vkey, (uv[vkey] || [0, 0]).slice()])), texture});
+		let [fkey] = mesh.addFaces(face);
+		if (worldNormal(mesh, face).y < 0) face.invert();
+		ground.ground.add(fkey);
+		return fkey;
+	}));
+}
+function terrainStep(event) {
+	let stroke = terrain_stroke;
+	let hit = hitFace(stroke.preview, event);
+	if (!hit || hit.element != stroke.ground.mesh) return;
+	let size = stroke.size;
+	let bx = Math.floor(hit.point.x / size + 1e-6) * size, bz = Math.floor(hit.point.z / size + 1e-6) * size;
+	let id = groundKey(bx, bz);
+	if (stroke.done.has(id)) return;
+	stroke.done.add(id);
+	let ground = stroke.ground;
+	let corners = [];
+	for (let dx = 0; dx <= size; dx += H) {
+		for (let dz = 0; dz <= size; dz += H) {
+			let vkey = ground.grid.get(groundKey(bx + dx, bz + dz));
+			if (vkey) corners.push(vkey);
+		}
+	}
+	if (!corners.length) return;
+	// Measured against the ground as the stroke found it, so a drag lays one even ridge rather than a staircase
+	let from = corners.map(vkey => stroke.base.get(vkey));
+	let extreme = stroke.dir > 0 ? Math.max(...from) : Math.min(...from);
+	let heights = null;
+	for (let target of [extreme + stroke.dir * BRUSH.TERRAIN_STEP, extreme]) {
+		heights = settleTerrain(ground, corners, target, stroke.dir);
+		if (heights) break;
+	}
+	if (!heights || !heights.size) return;
+	let mesh = ground.mesh;
+	let cells = new Set();
+	for (let [vkey, y] of heights) {
+		let p = ground.pos(vkey);
+		p.y = y;
+		let local = mesh.mesh.worldToLocal(p.clone());
+		mesh.vertices[vkey] = [round3(local.x), round3(local.y), round3(local.z)];
+		for (let [dx, dz] of [[-H, -H], [-H, 0], [0, -H], [0, 0]]) cells.add(`${round3(p.x + dx)}|${round3(p.z + dz)}`);
+	}
+	for (let cell of cells) {
+		let [cx, cz] = cell.split('|').map(Number);
+		refoldCell(ground, cx, cz);
+	}
+	stroke.changed = true;
+	scheduleRebuild([mesh]);
+}
+function startTerrainStroke(preview, event) {
+	let hit = hitFace(preview, event);
+	if (!hit) return;
+	let ground = buildGround(hit.element, hit.face);
+	if (!ground.ground.size) return Blockbench.showQuickMessage('No ground under the cursor', BRUSH.MESSAGE_TIME);
+	Undo.initEdit({elements: [hit.element]});
+	let base = new Map();
+	ground.grid.forEach(vkey => base.set(vkey, ground.height(vkey)));
+	terrain_stroke = {preview, ground, base, dir: event.ctrlKey ? -1 : 1, size: state.size, done: new Set(), changed: false};
+	terrainStep(event);
+	document.addEventListener('mousemove', moveTerrainStroke);
+	document.addEventListener('mouseup', endTerrainStroke);
+}
+function moveTerrainStroke(event) {
+	if (terrain_stroke) terrainStep(event);
+}
+function endTerrainStroke() {
+	document.removeEventListener('mousemove', moveTerrainStroke);
+	document.removeEventListener('mouseup', endTerrainStroke);
+	if (!terrain_stroke) return;
+	let finished = terrain_stroke;
+	terrain_stroke = null;
+	cancelRebuild();
+	if (!finished.changed) return Undo.cancelEdit();
+	Undo.finishEdit(finished.dir > 0 ? 'Raise terrain' : 'Lower terrain');
+	Canvas.updateView({elements: [finished.ground.mesh], element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
+	if (last_paint_hover_event) onTerrainHover(last_paint_hover_event);
+}
+// The footprint a click works on, drawn flat just above the point under the cursor and through the slopes around it
+function onTerrainHover(event, ctrl_held = event.ctrlKey) {
+	last_paint_hover_event = event;
+	let preview = terrain_stroke ? terrain_stroke.preview : event.target && event.target.preview;
+	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	let hit = hitFace(preview, event);
+	if (!hit) return hideGhost();
+	let size = state.size;
+	let bx = Math.floor(hit.point.x / size + 1e-6) * size, bz = Math.floor(hit.point.z / size + 1e-6) * size;
+	let y = hit.point.y + BRUSH.LIFT;
+	let lower = terrain_stroke ? terrain_stroke.dir < 0 : (ctrl_held || Pressing.ctrl);
+	showGhostQuad([[0, 0], [size, 0], [size, size], [0, size]].map(([dx, dz]) => new THREE.Vector3(bx + dx, y, bz + dz)), lower ? BRUSH.ERASE_COLOR : BRUSH.GHOST_COLOR, true);
+}
+function onTerrainModifier(event) {
+	if (event.key == 'Control' && last_paint_hover_event && !terrain_stroke) {
+		onTerrainHover(last_paint_hover_event, event.type == 'keydown');
+	}
+}
+
 // Shave: bevels an outside corner where two planes of square tiles meet. The cut is 45 degrees and exactly one block
 // deep on both sides (a half or full tile, per C): the two blocks touching the corner edge become one diagonal face
 // that keeps the texture of the side the cursor touched. Ends close automatically: a tile in the end plane (a top
@@ -2010,6 +2215,43 @@ BARS.defineActions(function() {
 			setTimeout(refreshAtlasView, 0);	// after the next tool is active
 			if (previous_selection_mode && previous_selection_mode != 'object') {
 				BarItems.selection_mode.set(previous_selection_mode);
+				updateSelection();
+			}
+		},
+	});
+
+	new Tool('dew_terrain', {
+		name: 'Terrain Brush',
+		description: 'Raise ground a step, or lower it with Ctrl. The ground around follows as ramps and triangles, no steeper than a step per half cell, and the cluster border and anything standing on the ground stay put. Drag for a ridge or a trench. C switches full / half tiles',
+		icon: 'landscape',
+		category: 'tools',
+		transformerMode: 'hidden',
+		selectElements: false,
+		cursor: 'crosshair',
+		modes: ['edit'],
+		condition: () => Modes.edit && Format.id == 'dew_scene',
+		onCanvasClick(data) {
+			let event = data && data.event;
+			if (!event || event.button !== 0 || event.altKey || terrain_stroke) return;
+			startTerrainStroke(Preview.selected, event);
+		},
+		onSelect() {
+			terrain_previous_selection_mode = BarItems.selection_mode.value;
+			BarItems.selection_mode.set('object');
+			updateSelection();
+			active_hover = onTerrainHover;
+			document.addEventListener('mousemove', onTerrainHover);
+			document.addEventListener('keydown', onTerrainModifier);
+			document.addEventListener('keyup', onTerrainModifier);
+		},
+		onUnselect() {
+			document.removeEventListener('mousemove', onTerrainHover);
+			document.removeEventListener('keydown', onTerrainModifier);
+			document.removeEventListener('keyup', onTerrainModifier);
+			active_hover = null;
+			hideGhost();
+			if (terrain_previous_selection_mode && terrain_previous_selection_mode != 'object') {
+				BarItems.selection_mode.set(terrain_previous_selection_mode);
 				updateSelection();
 			}
 		},
