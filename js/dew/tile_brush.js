@@ -37,7 +37,7 @@ const state = {
 	sign: null,			// Alt copies a tile's facing; null follows the camera
 	axis: 'y',
 	depth: 0,
-	size: DEW.TILE,
+	size: H,			// half tiles by default, C switches to full
 	hover_point: null,	// last world point under the cursor, W aims the new plane through it
 };
 let stroke = null;

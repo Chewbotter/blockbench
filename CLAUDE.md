@@ -59,6 +59,7 @@ Personal fork of Blockbench 5.1.6 (JannisX11/blockbench). All work goes on branc
 - The tile tools snap blocks to multiples of the brush size, so geometry has to start on the 16 grid (32 for full size). Hand-built test geometry at, say, x 200 silently matches nothing; the brushes always build on-grid.
 
 ## Current state (newest first)
+- 2026-09-13: tile tools start at half tiles (C still switches), and the Whole Block ghost stays on the block under the cursor mid drag.
 - 2026-09-13: Whole Block drops the wall between two blocks on both sides (it kept one, visible through culled back faces), and Ctrl puts a neighbour's wall back.
 - 2026-09-12: number keys 1 to 5 pick the tile tools in DEW scenes, and deselect all clears everything there.
 - 2026-09-12: a scene remembers the view it was saved in, in every format.

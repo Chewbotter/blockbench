@@ -40,8 +40,10 @@ const meshInfo = `(() => { let m = Mesh.all.find(m => m.name == 'tiles'); if (!m
 	return JSON.stringify({faces: faces.length, vertices: Object.keys(m.vertices).length, normals: counts, textures: [...new Set(faces.map(f => f.texture))]}); })()`;
 const brushState = `JSON.stringify(DEWTileBrush.state, (k, v) => k == 'hover_point' ? undefined : v)`;
 
+// The brush starts at half tiles; the rest of this test was written for full ones, so it switches after reading
 console.log('A. setup:', await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); BarItems.selection_mode.set('face'); BarItems.dew_tile_brush.select();
-	return JSON.stringify({tool: Toolbox.selected.id, in_toolbar: Toolbars.tools.children.some(c => c.id == 'dew_tile_brush'), selection_mode: BarItems.selection_mode.value, plane_grid: !!Canvas.scene.getObjectByName('dew_plane_grid'), keybinds: ['dew_tile_plane_axis','dew_tile_plane_back','dew_tile_plane_forward','dew_tile_size'].map(id => BarItems[id].keybind.label)}); })()`));
+	let default_size = DEWTileBrush.state.size; DEWTileBrush.state.size = 32;
+	return JSON.stringify({default_size, tool: Toolbox.selected.id, in_toolbar: Toolbars.tools.children.some(c => c.id == 'dew_tile_brush'), selection_mode: BarItems.selection_mode.value, plane_grid: !!Canvas.scene.getObjectByName('dew_plane_grid'), keybinds: ['dew_tile_plane_axis','dew_tile_plane_back','dew_tile_plane_forward','dew_tile_size'].map(id => BarItems[id].keybind.label)}); })()`));
 
 await hover([100, 0, 100]);
 console.log('B. hover ghost:', await ev(`!!Canvas.scene.getObjectByName('dew_tile_ghost')`));
