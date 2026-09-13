@@ -458,10 +458,11 @@ function removePlaneGrid() {
 	if (plane_grid) disposeObject(plane_grid);
 	plane_grid = null;
 }
-// Grid lines on the current work plane, across the cluster (and three storeys up for walls)
+// Grid lines on the current work plane, across the cluster (and three storeys up for walls). Tile brush only:
+// Whole Block shares the plane keys but aims at surfaces, so the grid is just clutter there.
 function updatePlaneGrid() {
 	removePlaneGrid();
-	if (!isActive() || Format.id != 'dew_scene' || !Preview.selected) return;
+	if (!Toolbox.selected || Toolbox.selected.id != 'dew_tile_brush' || Format.id != 'dew_scene' || !Preview.selected) return;
 	let axis = stroke && !stroke.erase ? stroke.axis : state.axis;
 	let depth = stroke && !stroke.erase ? stroke.depth : state.depth;
 	let lifted = depth + BRUSH.LIFT * facingSign(Preview.selected, axis, depth);
@@ -1954,7 +1955,6 @@ BARS.defineActions(function() {
 			refreshAtlasView();
 			document.addEventListener('keydown', onBlockModifier);
 			document.addEventListener('keyup', onBlockModifier);
-			updatePlaneGrid();
 		},
 		onUnselect() {
 			document.removeEventListener('mousemove', onBlockHover);

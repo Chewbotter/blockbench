@@ -59,6 +59,7 @@ Personal fork of Blockbench 5.1.6 (JannisX11/blockbench). All work goes on branc
 - The tile tools snap blocks to multiples of the brush size, so geometry has to start on the 16 grid (32 for full size). Hand-built test geometry at, say, x 200 silently matches nothing; the brushes always build on-grid.
 
 ## Current state (newest first)
+- 2026-09-13: the work plane grid shows only under the Tile Brush (Whole Block no longer draws it).
 - 2026-09-13: atlas picks are half cells at either brush size; the texture brush fills its footprint from the pick's upper left, and the tile brush textures new tiles from the pick.
 - 2026-09-13: Whole Block picks atlas cells in the UV editor and textures every side of new blocks with them.
 - 2026-09-13: Add DEW Block starts a separate object on the grid; Whole Block culls only within its own element.

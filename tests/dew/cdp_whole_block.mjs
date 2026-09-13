@@ -49,8 +49,8 @@ await sleep(400);
 await camera(16, 8, 8, 96, 70, 96);
 await ev(`(() => { BarItems.dew_whole_block.select(); let s = DEWTileBrush.state; s.size = 16; s.axis = 'y'; s.depth = 0; s.sign = null; return true; })()`);
 await sleep(300);
-console.log('setup:', await ev(`JSON.stringify({tool: Toolbox.selected.id, size: DEWTileBrush.state.size, order: Toolbars.tools.children.map(c => c.id).filter(id => id.startsWith('dew_')).slice(0, 3)})`));
-console.log('   expect dew_whole_block between select and brush');
+console.log('setup:', await ev(`JSON.stringify({tool: Toolbox.selected.id, size: DEWTileBrush.state.size, plane_grid: !!Canvas.scene.getObjectByName('dew_plane_grid'), order: Toolbars.tools.children.map(c => c.id).filter(id => id.startsWith('dew_')).slice(0, 3)})`));
+console.log('   expect dew_whole_block between select and brush, plane_grid false (the grid is the tile brush\'s alone)');
 await hover([8, 0, 8]);
 console.log('A. ghost before placing:', await ev(`!!Canvas.scene.getObjectByName('dew_tile_ghost')`), ' expect true');
 
