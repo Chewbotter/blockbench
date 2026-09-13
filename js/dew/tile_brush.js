@@ -1336,26 +1336,31 @@ function buildGround(mesh, start_fkey) {
 	}
 	return {mesh, ground, grid, pinned, cells, pos, height: vkey => round3(pos(vkey).y)};
 }
-// Heights that lift (dir 1) or lower (dir -1) the given corners to `target`, with the ground around following so
-// no step between neighbours exceeds BRUSH.TERRAIN_STEP. Null when that would have to move a pinned corner.
+// Heights that bring the given corners to `target`: only up for a raise (dir 1), only down for a lower (dir -1),
+// either way for a flatten (dir 0). The ground around follows so no step between neighbours exceeds
+// BRUSH.TERRAIN_STEP. Null when that would have to move a pinned corner.
 function settleTerrain(ground, corners, target, dir) {
 	let heights = new Map();
 	let get = vkey => heights.has(vkey) ? heights.get(vkey) : ground.height(vkey);
 	let queue = [];
 	for (let vkey of corners) {
-		if (ground.pinned.has(vkey) || (dir > 0 ? get(vkey) >= target : get(vkey) <= target)) continue;
+		let h = get(vkey);
+		if (ground.pinned.has(vkey) || h == target || (dir > 0 && h > target) || (dir < 0 && h < target)) continue;
 		heights.set(vkey, target);
 		queue.push(vkey);
 	}
 	while (queue.length) {
 		let vkey = queue.shift();
 		let p = ground.pos(vkey);
-		let limit = get(vkey) - dir * BRUSH.TERRAIN_STEP;
+		let h = get(vkey), step = BRUSH.TERRAIN_STEP;
 		for (let [dx, dz] of [[H, 0], [-H, 0], [0, H], [0, -H]]) {
 			let next = ground.grid.get(groundKey(p.x + dx, p.z + dz));
-			if (!next || (dir > 0 ? get(next) >= limit : get(next) <= limit)) continue;
+			if (!next) continue;
+			let n = get(next);
+			let clamped = Math.min(Math.max(n, h - step), h + step);
+			if (clamped == n) continue;
 			if (ground.pinned.has(next)) return null;
-			heights.set(next, limit);
+			heights.set(next, clamped);
 			queue.push(next);
 		}
 	}
@@ -1416,8 +1421,9 @@ function terrainStep(event) {
 	// Measured against the ground as the stroke found it, so a drag lays one even ridge rather than a staircase
 	let from = corners.map(vkey => stroke.base.get(vkey));
 	let extreme = stroke.dir > 0 ? Math.max(...from) : Math.min(...from);
+	let targets = stroke.dir == 0 ? [stroke.flat] : [extreme + stroke.dir * BRUSH.TERRAIN_STEP, extreme];
 	let heights = null;
-	for (let target of [extreme + stroke.dir * BRUSH.TERRAIN_STEP, extreme]) {
+	for (let target of targets) {
 		heights = settleTerrain(ground, corners, target, stroke.dir);
 		if (heights) break;
 	}
@@ -1446,7 +1452,10 @@ function startTerrainStroke(preview, event) {
 	Undo.initEdit({elements: [hit.element]});
 	let base = new Map();
 	ground.grid.forEach(vkey => base.set(vkey, ground.height(vkey)));
-	terrain_stroke = {preview, ground, base, dir: event.ctrlKey ? -1 : 1, size: state.size, done: new Set(), changed: false};
+	// Shift flattens: every cell the drag touches goes to the height the stroke started at, snapped to a step
+	let dir = event.shiftKey ? 0 : event.ctrlKey ? -1 : 1;
+	let flat = Math.round(hit.point.y / BRUSH.TERRAIN_STEP) * BRUSH.TERRAIN_STEP;
+	terrain_stroke = {preview, ground, base, dir, flat, size: state.size, done: new Set(), changed: false};
 	terrainStep(event);
 	document.addEventListener('mousemove', moveTerrainStroke);
 	document.addEventListener('mouseup', endTerrainStroke);
@@ -1462,12 +1471,12 @@ function endTerrainStroke() {
 	terrain_stroke = null;
 	cancelRebuild();
 	if (!finished.changed) return Undo.cancelEdit();
-	Undo.finishEdit(finished.dir > 0 ? 'Raise terrain' : 'Lower terrain');
+	Undo.finishEdit(['Lower terrain', 'Flatten terrain', 'Raise terrain'][finished.dir + 1]);
 	Canvas.updateView({elements: [finished.ground.mesh], element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
 	if (last_paint_hover_event) onTerrainHover(last_paint_hover_event);
 }
 // The footprint a click works on, drawn flat just above the point under the cursor and through the slopes around it
-function onTerrainHover(event, ctrl_held = event.ctrlKey) {
+function onTerrainHover(event, modifiers = event) {
 	last_paint_hover_event = event;
 	let preview = terrain_stroke ? terrain_stroke.preview : event.target && event.target.preview;
 	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
@@ -1476,12 +1485,13 @@ function onTerrainHover(event, ctrl_held = event.ctrlKey) {
 	let size = state.size;
 	let bx = Math.floor(hit.point.x / size + 1e-6) * size, bz = Math.floor(hit.point.z / size + 1e-6) * size;
 	let y = hit.point.y + BRUSH.LIFT;
-	let lower = terrain_stroke ? terrain_stroke.dir < 0 : (ctrl_held || Pressing.ctrl);
-	showGhostQuad([[0, 0], [size, 0], [size, size], [0, size]].map(([dx, dz]) => new THREE.Vector3(bx + dx, y, bz + dz)), lower ? BRUSH.ERASE_COLOR : BRUSH.GHOST_COLOR, true);
+	let dir = terrain_stroke ? terrain_stroke.dir : modifiers.shiftKey ? 0 : modifiers.ctrlKey ? -1 : 1;
+	showGhostQuad([[0, 0], [size, 0], [size, size], [0, size]].map(([dx, dz]) => new THREE.Vector3(bx + dx, y, bz + dz)), [BRUSH.ERASE_COLOR, BRUSH.PAINT_COLOR, BRUSH.GHOST_COLOR][dir + 1], true);
 }
+// A key event carries the modifier state after the press or release, so the ghost can take its colour from it
 function onTerrainModifier(event) {
-	if (event.key == 'Control' && last_paint_hover_event && !terrain_stroke) {
-		onTerrainHover(last_paint_hover_event, event.type == 'keydown');
+	if ((event.key == 'Control' || event.key == 'Shift') && last_paint_hover_event && !terrain_stroke) {
+		onTerrainHover(last_paint_hover_event, event);
 	}
 }
 
@@ -2221,7 +2231,7 @@ BARS.defineActions(function() {
 
 	new Tool('dew_terrain', {
 		name: 'Terrain Brush',
-		description: 'Raise ground a step, or lower it with Ctrl. The ground around follows as ramps and triangles, no steeper than a step per half cell, and anything standing on the ground stays put. Drag for a ridge or a trench. C switches full / half tiles',
+		description: 'Raise ground a step, or lower it with Ctrl. Shift flattens everything a drag touches to the height it started at. The ground around follows as ramps and triangles, no steeper than a step per half cell, and anything standing on the ground stays put. Drag for a ridge or a trench. C switches full / half tiles',
 		icon: 'landscape',
 		category: 'tools',
 		transformerMode: 'hidden',

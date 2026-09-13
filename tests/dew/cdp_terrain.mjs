@@ -20,12 +20,12 @@ async function click(world, modifiers = 0) {
 	await mouse('mousePressed', at, { buttons: 1, modifiers }); await sleep(70);
 	await mouse('mouseReleased', at, { modifiers }); await sleep(250);
 }
-async function dragWorld(from, to, steps = 12) {
+async function dragWorld(from, to, steps = 12, modifiers = 0) {
 	const a = await screen(...from), b = await screen(...to);
-	for (let i = 0; i < 2; i++) { await mouse('mouseMoved', a, { button: 'none' }); await sleep(80); }
-	await mouse('mousePressed', a, { buttons: 1 }); await sleep(70);
-	for (let i = 1; i <= steps; i++) { await mouse('mouseMoved', [a[0] + (b[0] - a[0]) * i / steps, a[1] + (b[1] - a[1]) * i / steps], { buttons: 1 }); await sleep(40); }
-	await mouse('mouseReleased', b); await sleep(250);
+	for (let i = 0; i < 2; i++) { await mouse('mouseMoved', a, { button: 'none', modifiers }); await sleep(80); }
+	await mouse('mousePressed', a, { buttons: 1, modifiers }); await sleep(70);
+	for (let i = 1; i <= steps; i++) { await mouse('mouseMoved', [a[0] + (b[0] - a[0]) * i / steps, a[1] + (b[1] - a[1]) * i / steps], { buttons: 1, modifiers }); await sleep(40); }
+	await mouse('mouseReleased', b, { modifiers }); await sleep(250);
 }
 const camera = async (tx, ty, tz, px, py, pz) => {
 	await ev(`(() => { let p = Preview.selected; p.controls.target.set(${tx}, ${ty}, ${tz}); p.camera.position.set(${px}, ${py}, ${pz}); p.controls.update(); if (p.render) p.render(); return true; })()`);
@@ -92,6 +92,12 @@ const wall = [[208, 96], [224, 96], [224, 112], [208, 112]];
 await click([216, 0, 104]);
 console.log('F. raise the tile against the wall:', await ev(ground('ground', wall)));
 console.log('   expect 224,96 and 224,112 still [0,16] (floor and wall top), 208,96 and 208,112 at 16, and the wall face unchanged');
+
+// Shift drag from flat ground at 0 across the hill (peak 32 at 160..176): the row it crosses comes down to 0
+await camera(160, 0, 168, 160, 320, 169);
+await dragWorld([120, 0, 168], [200, 0, 168], 12, 8);
+console.log('J. shift drag across the hill at z 168:', await ev(ground('ground', [[160, 160], [176, 176], [144, 160], [192, 176], [160, 144]])), ' undo:', await ev(`Undo.history.at(-1)?.action`));
+console.log('   expect 160,160 176,176 144,160 192,176 at 0 (the touched row flattened), 160,144 still 16 (one step off the flat row), steepest 16, undo "Flatten terrain"');
 
 const border = [[0, 112], [0, 128], [16, 112], [16, 128]];
 await camera(24, 0, 120, 24, 200, 300);
