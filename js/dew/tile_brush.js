@@ -243,6 +243,7 @@ function addTile(u, v) {
 	let face = new MeshFace(mesh, {vertices: vkeys, uv, texture: false});
 	mesh.addFaces(face);
 	if (worldNormal(mesh, face)[axis] * sign < 0) face.invert();
+	if (stroke.paint) paintTileCell(mesh, face, axis, sign, u, v, originCell(axis, sign, u, v, stroke.paint.region), stroke.paint.texture);
 	return true;
 }
 
@@ -360,6 +361,8 @@ function startStroke(preview, event) {
 			sign: planeSign(preview, state.axis, target.depth),
 			occupied: new Set(buildOccupancy()),
 			vertex_map: buildVertexMap(mesh),
+			// An atlas pick textures every tile the stroke lays, tiled from the plane origin like the bucket
+			paint: getAtlasTexture() ? {texture: getAtlasTexture(), region: atlasRegion()} : null,
 			last_point: null,
 			changed: created,
 		};
@@ -544,12 +547,33 @@ let paint_previous_selection_mode = null;
 function getAtlasTexture() {
 	return texture_state.atlas && Texture.all.find(texture => texture.uuid == texture_state.atlas.texture);
 }
-// The picked rectangle of atlas cells at the given cell size
-function atlasRegion(size) {
+// The picked rectangle of atlas cells. A cell is always a half cell (H texels), whatever C says, so a pick is
+// the same art at either brush size: a full size brush with one cell picked lays that cell on all four tiles.
+function atlasRegion() {
 	let {x0, y0, x1, y1} = texture_state.atlas;
-	let col0 = Math.floor(Math.min(x0, x1) / size), col1 = Math.floor(Math.max(x0, x1) / size);
-	let row0 = Math.floor(Math.min(y0, y1) / size), row1 = Math.floor(Math.max(y0, y1) / size);
-	return {x: col0 * size, y: row0 * size, cols: col1 - col0 + 1, rows: row1 - row0 + 1};
+	let col0 = Math.floor(Math.min(x0, x1) / H), col1 = Math.floor(Math.max(x0, x1) / H);
+	let row0 = Math.floor(Math.min(y0, y1) / H), row1 = Math.floor(Math.max(y0, y1) / H);
+	return {x: col0 * H, y: row0 * H, cols: col1 - col0 + 1, rows: row1 - row0 + 1};
+}
+// Where a half tile's column and row fall, counted along texture-right and texture-down from `start`, the corner
+// the texture reads from. A tile at u covers u to u + H, so against the axis its first texel column is at u + H.
+function cellIndex(direction, value, start) {
+	return Math.round((direction > 0 ? value - start : start - value - H) / H);
+}
+// The atlas cell a fill gives the half tile at u, v: the pick repeats from the plane origin, so separate fills,
+// blocks and strokes line up with each other (bucket, tile brush, Whole Block)
+function originCell(axis, sign, u, v, region) {
+	let [ru, rv] = textureDirections(axis, sign);
+	return [region.x + posMod(cellIndex(ru, u, 0), region.cols) * H, region.y + posMod(cellIndex(rv, v, 0), region.rows) * H];
+}
+// The atlas cell the texture brush gives the half tile at u, v of its footprint (bu, bv, size): the pick starts at
+// the footprint's upper left as the texture reads, repeats when smaller than the footprint, and keeps its upper
+// left cells when larger
+function footprintCell(axis, sign, u, v, bu, bv, size, region) {
+	let [ru, rv] = textureDirections(axis, sign);
+	let i = cellIndex(ru, u, ru > 0 ? bu : bu + size);
+	let j = cellIndex(rv, v, rv > 0 ? bv : bv + size);
+	return [region.x + (i % region.cols) * H, region.y + (j % region.rows) * H];
 }
 const posMod = (n, m) => ((n % m) + m) % m;
 const blockOf = (tile, size) => [Math.floor(tile.u / size + 1e-6) * size, Math.floor(tile.v / size + 1e-6) * size];
@@ -560,22 +584,6 @@ function textureDirections(axis, sign) {
 	let origin = tileUV(axis, sign, 0, 0, 2);
 	return [tileUV(axis, sign, 1, 0, 2)[0] > origin[0] ? 1 : -1, tileUV(axis, sign, 0, 1, 2)[1] > origin[1] ? 1 : -1];
 }
-// The blocks of the stamp covering `block`. The stamp grid is anchored at `anchor`, the first block a stroke touched
-// on this plane, which takes the region's top-left cell, so repeated stamps line up. a, b index the region's cells.
-function stampBlocks(axis, sign, anchor, block, size, region) {
-	let [ru, rv] = textureDirections(axis, sign);
-	let i = Math.round(ru * (block[0] - anchor[0]) / size);
-	let j = Math.round(rv * (block[1] - anchor[1]) / size);
-	let si = i - posMod(i, region.cols), sj = j - posMod(j, region.rows);
-	let blocks = [];
-	for (let a = 0; a < region.cols; a++) {
-		for (let b = 0; b < region.rows; b++) {
-			blocks.push({u: anchor[0] + ru * (si + a) * size, v: anchor[1] + rv * (sj + b) * size, a, b});
-		}
-	}
-	return blocks;
-}
-
 // Tile faces of the visible meshes by plane and position, so a stamp reaches tiles away from the cursor
 function buildTileIndex() {
 	let index = new Map();
@@ -668,32 +676,34 @@ function looseGhost(hit) {
 	if (!points || points.length < 3) return hideGhost();
 	return showGhostQuad(points.length == 4 ? points : [points[0], points[1], points[2], points[2]], BRUSH.PAINT_COLOR, true);
 }
-// The cell a loose face takes: the first of the pick, since a stamp has no grid to run along here
+// A loose face has no grid to run along, so it takes the upper left of the pick, as much of it as the brush holds
 function paintLoose(mesh, face) {
 	let texture = getAtlasTexture();
 	if (!texture) return false;
-	let region = atlasRegion(state.size);
-	return paintLooseFace(mesh, face, state.size, region.x, region.y, texture);
+	let region = atlasRegion();
+	let span = Math.min(state.size, region.cols * H, region.rows * H);
+	return paintLooseFace(mesh, face, span, region.x, region.y, texture);
+}
+// Lays one atlas cell onto a half tile face whose corner is at u, v
+function paintTileCell(mesh, face, axis, sign, u, v, [cell_x, cell_y], texture) {
+	return paintFace(mesh, face, axis, sign, u, v, H, cell_x, cell_y, texture);
 }
 
-// Paints the whole stamp around a touched tile and returns the meshes that changed
+// Paints the brush footprint around a touched tile and returns the meshes that changed
 function paintStamp(tile) {
 	let texture = getAtlasTexture();
 	let size = state.size;
-	let region = atlasRegion(size);
+	let region = atlasRegion();
 	let plane = planeKey(tile);
-	let block = blockOf(tile, size);
-	if (!paint_stroke.anchors.has(plane)) paint_stroke.anchors.set(plane, block);
+	let [bu, bv] = blockOf(tile, size);
 	let changed = new Set();
-	for (let {u, v, a, b} of stampBlocks(tile.axis, tile.sign, paint_stroke.anchors.get(plane), block, size, region)) {
-		for (let du = 0; du < size; du += H) {
-			for (let dv = 0; dv < size; dv += H) {
-				let entry = paint_stroke.tiles.get(`${plane}|${round3(u + du)}|${round3(v + dv)}`);
-				let face = entry && entry.mesh.faces[entry.fkey];
-				if (face && paintFace(entry.mesh, face, tile.axis, tile.sign, u, v, size, region.x + a * size, region.y + b * size, texture)) {
-					changed.add(entry.mesh);
-				}
-			}
+	for (let du = 0; du < size; du += H) {
+		for (let dv = 0; dv < size; dv += H) {
+			let u = round3(bu + du), v = round3(bv + dv);
+			let entry = paint_stroke.tiles.get(`${plane}|${u}|${v}`);
+			let face = entry && entry.mesh.faces[entry.fkey];
+			let cell = footprintCell(tile.axis, tile.sign, u, v, bu, bv, size, region);
+			if (face && paintTileCell(entry.mesh, face, tile.axis, tile.sign, u, v, cell, texture)) changed.add(entry.mesh);
 		}
 	}
 	return changed;
@@ -718,7 +728,7 @@ function startPaintStroke(preview, event) {
 		return;
 	}
 	Undo.initEdit({elements: Mesh.all.filter(mesh => mesh.visibility !== false && !mesh.locked), uv_only: true});
-	paint_stroke = {preview, changed: false, tiles: buildTileIndex(), anchors: new Map()};
+	paint_stroke = {preview, changed: false, tiles: buildTileIndex()};
 	paintStep(event);
 	document.addEventListener('mousemove', movePaintStroke);
 	document.addEventListener('mouseup', endPaintStroke);
@@ -746,15 +756,9 @@ function onPaintHover(event) {
 	let hit = hitFace(preview, event);
 	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
 	if (!tile) return looseGhost(hit);
-	// The ghost covers the whole stamp a click (or the current stroke) would paint
-	let size = state.size;
-	let block = blockOf(tile, size);
-	let region = texture_state.atlas ? atlasRegion(size) : {cols: 1, rows: 1};
-	let anchor = (paint_stroke && paint_stroke.anchors.get(planeKey(tile))) || block;
-	let blocks = stampBlocks(tile.axis, tile.sign, anchor, block, size, region);
-	let us = blocks.map(b => b.u), vs = blocks.map(b => b.v);
-	let u0 = Math.min(...us), v0 = Math.min(...vs);
-	showGhost(tile.axis, tile.depth, tile.sign, u0, v0, Math.max(...us) - u0 + size, BRUSH.PAINT_COLOR, Math.max(...vs) - v0 + size);
+	// The ghost is the brush footprint, which is all a click paints
+	let [bu, bv] = blockOf(tile, state.size);
+	showGhost(tile.axis, tile.depth, tile.sign, bu, bv, state.size, BRUSH.PAINT_COLOR);
 }
 
 // Grid lines and the picked cell drawn over the atlas in the UV editor, sized in percent so they follow zoom
@@ -777,11 +781,11 @@ function updateAtlasOverlay() {
 	};
 	let cell = null;
 	if (texture_state.atlas && texture_state.atlas.texture == texture.uuid) {
-		let region = atlasRegion(state.size);
+		let region = atlasRegion();
 		cell = {
 			position: 'absolute', pointerEvents: 'none', zIndex: 3, boxSizing: 'border-box',
 			left: region.x / w * 100 + '%', top: region.y / h * 100 + '%',
-			width: region.cols * state.size / w * 100 + '%', height: region.rows * state.size / h * 100 + '%',
+			width: region.cols * H / w * 100 + '%', height: region.rows * H / h * 100 + '%',
 			border: `2px solid ${BRUSH.ATLAS_PICK_COLOR}`, boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.6)',
 		};
 		let shape = texture_state.atlas.shape || 'square';
@@ -797,8 +801,7 @@ const ATLAS_SHAPES = ['square', 'ul', 'lr'];
 function pickAtlasCell(texture, coords) {
 	let texel = c => [Math.clamp(Math.floor(c.x), 0, texture.width - 1), Math.clamp(Math.floor(c.y), 0, texture.height - 1)];
 	let [x, y] = texel(coords);
-	let size = state.size;
-	let cell = value => Math.floor(value / size);
+	let cell = value => Math.floor(value / H);
 	// Clicking the cell that is already picked walks on: the square, then the half a triangle would take
 	let last = texture_state.atlas;
 	let again = last && last.texture == texture.uuid && [last.x0, last.x1].every(v => cell(v) == cell(x))
@@ -809,7 +812,7 @@ function pickAtlasCell(texture, coords) {
 	let move = event => {
 		[texture_state.atlas.x1, texture_state.atlas.y1] = texel(UVEditor.getBrushCoordinates(event, texture));
 		// Dragging is for whole squares, so reaching past this cell drops the half
-		let region = atlasRegion(state.size);
+		let region = atlasRegion();
 		if (region.cols > 1 || region.rows > 1) texture_state.atlas.shape = 'square';
 		updateAtlasOverlay();
 	};
@@ -859,8 +862,8 @@ function pickAtlasFromTile(preview, event) {
 	texture_state.atlas = {texture: texture.uuid, x0: x, y0: y, x1: x, y1: y};
 	if (Texture.selected != texture) texture.select();
 	refreshAtlasView();
-	let region = atlasRegion(state.size);
-	Blockbench.showQuickMessage(`Atlas cell ${region.x / state.size}, ${region.y / state.size}`, BRUSH.MESSAGE_TIME);
+	let region = atlasRegion();
+	Blockbench.showQuickMessage(`Atlas cell ${region.x / H}, ${region.y / H}`, BRUSH.MESSAGE_TIME);
 	if (active_hover && last_paint_hover_event) active_hover(last_paint_hover_event);
 }
 
@@ -950,11 +953,9 @@ function onSelectHover(event) {
 // with the picked atlas cells. A multi-cell pick tiles from a fixed anchor, the plane origin, so fills always line up.
 function bucketFill(tile) {
 	let texture = getAtlasTexture();
-	let size = state.size;
-	let region = atlasRegion(size);
+	let region = atlasRegion();
 	let tiles = buildTileIndex();
 	let plane = planeKey(tile);
-	let [ru, rv] = textureDirections(tile.axis, tile.sign);
 	let changed = new Set();
 	let seen = new Set();
 	let queue = [[tile.u, tile.v]];
@@ -966,10 +967,8 @@ function bucketFill(tile) {
 		let entry = tiles.get(key);
 		let face = entry && entry.mesh.faces[entry.fkey];
 		if (!face) continue;
-		let [bu, bv] = blockOf({u, v}, size);
-		let a = posMod(Math.round(ru * bu / size), region.cols);
-		let b = posMod(Math.round(rv * bv / size), region.rows);
-		if (paintFace(entry.mesh, face, tile.axis, tile.sign, bu, bv, size, region.x + a * size, region.y + b * size, texture)) {
+		let cell = originCell(tile.axis, tile.sign, u, v, region);
+		if (paintTileCell(entry.mesh, face, tile.axis, tile.sign, round3(u), round3(v), cell, texture)) {
 			changed.add(entry.mesh);
 		}
 		queue.push([u + H, v], [u - H, v], [u, v + H], [u, v - H]);
@@ -1076,13 +1075,9 @@ function blockOwner(origin, size, index, skip_axis, skip_depth, mesh) {
 }
 // With an atlas pick, a new side takes its cell the way the bucket lays one: tiled from the plane origin, so a
 // pick of several cells runs on unbroken across a row of blocks
-function paintBlockSide(mesh, fkey, side, origin, size, paint) {
-	let [ua, va] = PLANE_AXES[side.axis];
-	let bu = origin[ua], bv = origin[va];
-	let [ru, rv] = textureDirections(side.axis, side.sign);
-	let a = posMod(Math.round(ru * bu / size), paint.region.cols);
-	let b = posMod(Math.round(rv * bv / size), paint.region.rows);
-	paintFace(mesh, mesh.faces[fkey], side.axis, side.sign, bu, bv, size, paint.region.x + a * size, paint.region.y + b * size, paint.texture);
+function paintBlockSide(mesh, fkey, side, paint) {
+	let cell = originCell(side.axis, side.sign, side.u, side.v, paint.region);
+	paintTileCell(mesh, mesh.faces[fkey], side.axis, side.sign, side.u, side.v, cell, paint.texture);
 }
 function placeBlock(mesh, origin, size, index, vertex_map, touched, paint) {
 	let added = 0, kept = 0, removed = 0;
@@ -1107,7 +1102,7 @@ function placeBlock(mesh, origin, size, index, vertex_map, touched, paint) {
 			continue;
 		}
 		let fkey = addBlockFace(mesh, side, vertex_map);
-		if (paint) paintBlockSide(mesh, fkey, side, origin, size, paint);
+		if (paint) paintBlockSide(mesh, fkey, side, paint);
 		index.set(cellKey(side), {mesh, fkey});
 		touched.add(mesh);
 		added++;
@@ -1242,7 +1237,7 @@ function startBlockStroke(preview, event) {
 		axis: target.axis, depth: target.depth, base: target.origin[target.axis], size: state.size,
 		index: buildTileIndex(), vertex_map: mesh ? buildVertexMap(mesh) : null,
 		touched: new Set(), placed: new Set(), changed: false, vertex_maps: new Map(),
-		paint: !erase && getAtlasTexture() ? {texture: getAtlasTexture(), region: atlasRegion(state.size)} : null,
+		paint: !erase && getAtlasTexture() ? {texture: getAtlasTexture(), region: atlasRegion()} : null,
 	};
 	blockStep(target.origin);
 	document.addEventListener('mousemove', moveBlockStroke);
@@ -1980,7 +1975,7 @@ BARS.defineActions(function() {
 	new Tool('dew_tile_brush', {
 		keybind: new Keybind({key: '3'}),	// the number keys pick the tools in DEW scenes
 		name: 'Tile Brush',
-		description: 'Paint tiles onto the work plane. Ctrl erases, Alt takes the plane and facing of the tile under the cursor. W cycles the plane, A / D step it, C switches full / half tiles',
+		description: 'Paint tiles onto the work plane, textured with the atlas cells picked in the UV editor if any. Ctrl erases, Alt takes the plane and facing of the tile under the cursor. W cycles the plane, A / D step it, C switches full / half tiles',
 		icon: 'grid_on',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -1994,11 +1989,14 @@ BARS.defineActions(function() {
 			if (event.altKey) return pickTilePlane(Preview.selected, event);
 			startStroke(Preview.selected, event);
 		},
+		atlas_picker: true,			// the UV editor shows the selected texture, and a pick textures new tiles
+		onAtlasClick: pickAtlasCell,
 		onSelect() {
 			previous_selection_mode = BarItems.selection_mode.value;
 			BarItems.selection_mode.set('object');
 			updateSelection();
 			document.addEventListener('mousemove', onHover);
+			refreshAtlasView();
 			document.addEventListener('keydown', onModifierKey);
 			document.addEventListener('keyup', onModifierKey);
 			updatePlaneGrid();
@@ -2009,6 +2007,7 @@ BARS.defineActions(function() {
 			document.removeEventListener('keyup', onModifierKey);
 			hideGhost();
 			removePlaneGrid();
+			setTimeout(refreshAtlasView, 0);	// after the next tool is active
 			if (previous_selection_mode && previous_selection_mode != 'object') {
 				BarItems.selection_mode.set(previous_selection_mode);
 				updateSelection();
@@ -2019,7 +2018,7 @@ BARS.defineActions(function() {
 	new Tool('dew_texture_brush', {
 		keybind: new Keybind({key: '4'}),	// the number keys pick the tools in DEW scenes
 		name: 'Texture Brush',
-		description: 'Pick a tile of the atlas in the UV editor (drag to pick several as one stamp), then click or drag over tiles to paint. Alt picks up the cell a tile already carries. C switches full / half tiles',
+		description: 'Pick a tile of the atlas in the UV editor (drag to pick several), then click or drag over tiles to paint. The pick fills the brush from its upper left, repeating if smaller and cut off if larger. Alt picks up the cell a tile already carries. C switches full / half tiles',
 		icon: 'format_paint',
 		category: 'tools',
 		transformerMode: 'hidden',

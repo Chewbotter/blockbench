@@ -61,7 +61,7 @@ await sleep(400);
 if (await ev(`!!Panels.uv.folded`)) await ev(`(() => { Panels.uv.fold(false); return true; })()`);
 await sleep(200);
 
-await ev(`(() => { BarItems.dew_texture_brush.select(); return true; })()`);
+await ev(`(() => { BarItems.dew_texture_brush.select(); DEWTileBrush.state.size = 32; return true; })()`);	// full size, which the steps below were written for
 await sleep(150);
 console.log('A. select texture brush:', await ev(`(() => { let v = UVEditor.vue;
 	return JSON.stringify({tool: Toolbox.selected.id, selected_texture: Texture.selected?.name ?? null, uv_texture: v.texture?.name ?? v.texture, in_toolbar: Toolbars.tools.children.some(c => c.id == 'dew_texture_brush'), uv_shows_atlas: v.texture === Texture.all[0], overlay_grid: !!v.atlas_overlay?.grid, cell: v.atlas_overlay?.cell || null, displayed_uv_elements: v.getDisplayedUVElements().length, frame: !!v.$refs.frame}); })()`));
@@ -71,14 +71,14 @@ await click([8, 24, 32]);
 console.log('   textured faces after click with no pick:', await ev(textured), ' expect none');
 
 await clickAt(await texel(24, 8));
-console.log('C. pick texel (24,8) in the UV editor:', await ev(`JSON.stringify(DEWTileBrush.texture_state.atlas)`), ' cell style:', await ev(`JSON.stringify(UVEditor.vue.atlas_overlay.cell && [UVEditor.vue.atlas_overlay.cell.left, UVEditor.vue.atlas_overlay.cell.top, UVEditor.vue.atlas_overlay.cell.width])`), ' expect full tile cell 0%,0%,25%');
+console.log('C. pick texel (24,8) in the UV editor:', await ev(`JSON.stringify(DEWTileBrush.texture_state.atlas)`), ' cell style:', await ev(`JSON.stringify(UVEditor.vue.atlas_overlay.cell && [UVEditor.vue.atlas_overlay.cell.left, UVEditor.vue.atlas_overlay.cell.top, UVEditor.vue.atlas_overlay.cell.width])`), ' expect cell 1,0 (texels are half cells even at full size): 12.5%,0%,12.5%');
 console.log('   face selection untouched by the pick:', await ev(`Outliner.selected.length`));
 
 await click([8, 24, 32]);
-console.log('D. full-tile paint on +z side:', await ev(textured), ' expect 0,0,1: 4');
-console.log('   top-left corner (0,32,32):', await ev(uvAt(0, 32, 32, '0,0,1')), ' expect uv [0,0]');
-console.log('   bottom-right corner (32,0,32):', await ev(uvAt(32, 0, 32, '0,0,1')), ' expect uv [32,32]');
-console.log('   center (16,16,32) on all 4 quads:', await ev(uvAt(16, 16, 32, '0,0,1')), ' expect uv [16,16] x4');
+console.log('D. full-tile paint on +z side:', await ev(textured), ' expect 0,0,1: 4, every quad carrying the one cell');
+console.log('   top-left corner (0,32,32):', await ev(uvAt(0, 32, 32, '0,0,1')), ' expect uv [16,0]');
+console.log('   bottom-right corner (32,0,32):', await ev(uvAt(32, 0, 32, '0,0,1')), ' expect uv [32,16]');
+console.log('   center (16,16,32) on all 4 quads:', await ev(uvAt(16, 16, 32, '0,0,1')), ' expect [32,16] [16,16] [32,0] [16,0] in some order, one corner of the cell each');
 
 await key('c');
 await clickAt(await texel(56, 24));

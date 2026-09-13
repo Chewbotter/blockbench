@@ -1,3 +1,5 @@
+// Texture brush picks: atlas cells are half cells whatever C says, and the brush lays the pick over its own footprint
+// from the upper left, repeating a pick smaller than the footprint and cutting off a larger one.
 import fs from 'fs';
 const targets = await (await fetch('http://127.0.0.1:9223/json')).json();
 const page = targets.find(t => t.type == 'page' && t.url.includes('index.html')) ?? targets.find(t => t.type == 'page');
@@ -20,9 +22,8 @@ async function dragPx(a, b, steps = 10) {
 	await mouse('mouseReleased', b); await sleep(100);
 }
 const clickAt = async at => dragPx(at, at, 1);
-const click = async world => clickAt(await screen(...world));
-const drag = async (from, to) => dragPx(await screen(...from), await screen(...to), 16);
-const hover = async world => { await mouse('mouseMoved', await screen(...world), { button: 'none' }); await sleep(80); };
+const click = async world => { await hover(world); await clickAt(await screen(...world)); };
+const hover = async world => { const at = await screen(...world); for (let i = 0; i < 2; i++) { await mouse('mouseMoved', at, { button: 'none' }); await sleep(80); } };
 async function key(letter) {
 	const code = letter.toUpperCase().charCodeAt(0);
 	await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: letter, code: 'Key' + letter.toUpperCase(), windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
@@ -33,14 +34,15 @@ async function key(letter) {
 const texel = async (x, y) => JSON.parse(await ev(`(() => { let f = UVEditor.vue.$refs.frame; let r = f.getBoundingClientRect(); let cs = getComputedStyle(f);
 	let bl = parseFloat(cs.borderLeftWidth), bt = parseFloat(cs.borderTopWidth); let w = f.clientWidth, h = f.clientHeight; let t = UVEditor.vue.texture;
 	return JSON.stringify([r.left + bl + (${x} + 0.5) / t.width * w, r.top + bt + (${y} + 0.5) / t.height * h]); })()`));
-// UV of each vertex of the tile whose min corner is (x, y, z) and whose normal matches
-const face = (x, y, z, normal) => `(() => { for (let m of Mesh.all) for (let f of Object.values(m.faces)) {
+// The atlas cell a tile carries: the lowest uv corner of the tile whose min corner is (x, y, z) and whose normal matches
+const cell = (x, y, z, normal) => `(() => { for (let m of Mesh.all) for (let f of Object.values(m.faces)) {
 	if (f.getNormal(true).map(v => Math.round(v)).join(',') != '${normal}') continue;
 	let ps = f.vertices.map(k => m.vertices[k]); let min = [0, 1, 2].map(i => Math.min(...ps.map(p => p[i])));
 	if (min.join(',') != '${x},${y},${z}') continue;
-	let out = {textured: !!f.texture}; f.vertices.forEach(k => out[m.vertices[k].join(',')] = f.uv[k].map(v => Math.round(v * 100) / 100)); return JSON.stringify(out); } return 'no face'; })()`;
+	if (!f.texture) return 'untextured';
+	let uvs = f.vertices.map(k => f.uv[k]); return JSON.stringify([0, 1].map(i => Math.round(Math.min(...uvs.map(uv => uv[i]))))); } return 'no face'; })()`;
 const textured = `(() => { let by = {}; for (let m of Mesh.all) for (let f of Object.values(m.faces)) { let n = f.getNormal(true).map(v => Math.round(v)).join(','); by[n] = (by[n] || 0) + (f.texture ? 1 : 0); } return JSON.stringify(by); })()`;
-const region = s => `JSON.stringify({atlas: DEWTileBrush.texture_state.atlas && (({x0, y0, x1, y1}) => [x0, y0, x1, y1])(DEWTileBrush.texture_state.atlas), cell: UVEditor.vue.atlas_overlay?.cell && ['left', 'top', 'width', 'height'].map(k => UVEditor.vue.atlas_overlay.cell[k])})`;
+const region = () => `JSON.stringify({atlas: DEWTileBrush.texture_state.atlas && (({x0, y0, x1, y1}) => [x0, y0, x1, y1])(DEWTileBrush.texture_state.atlas), cell: UVEditor.vue.atlas_overlay?.cell && ['left', 'top', 'width', 'height'].map(k => UVEditor.vue.atlas_overlay.cell[k])})`;
 
 // Floor of 8 x 4 half tiles (x 0..128, z 0..64) facing up, and a wall of 4 x 2 half tiles (x 0..64, y 0..32) at z = 0 facing +z
 await ev(`(() => {
@@ -61,41 +63,51 @@ await ev(`(() => {
 await ev(`(() => { BarItems.create_dew_atlas.click(); Dialog.open.confirm(); return true; })()`);
 await sleep(400);
 if (await ev(`!!Panels.uv.folded`)) await ev(`(() => { Panels.uv.fold(false); return true; })()`);
-await ev(`(() => { BarItems.dew_texture_brush.select(); return true; })()`);
+await ev(`(() => { BarItems.dew_texture_brush.select(); DEWTileBrush.state.size = 32; return true; })()`);
 await sleep(150);
-await key('c');   // half tiles
-console.log('setup:', await ev(`JSON.stringify({tool: Toolbox.selected.id, size: DEWTileBrush.state.size, uv_texture: UVEditor.vue.texture?.name})`));
+console.log('setup:', await ev(`JSON.stringify({tool: Toolbox.selected.id, size: DEWTileBrush.state.size, uv_texture: UVEditor.vue.texture?.name})`), ' expect size 32');
 
 await dragPx(await texel(8, 8), await texel(40, 24));
-console.log('A. drag-pick texels (8,8) to (40,24):', await ev(region()), ' expect 3 x 2 cells: 0%,0%,37.5%,25%');
+console.log('A. drag-pick texels (8,8) to (40,24) at full size:', await ev(region()), ' expect 3 x 2 half cells: 0%,0%,37.5%,25%');
 
 await hover([24, 0, 24]);
-console.log('B. ghost over floor tile (16,16):', await ev(`(() => { let g = Canvas.scene.getObjectByName('dew_tile_ghost'); if (!g) return 'no ghost'; let s = new THREE.Box3().setFromObject(g).getSize(new THREE.Vector3()); return [s.x, s.z].map(Math.round).join(' x '); })()`), ' expect 48 x 32');
+console.log('B. ghost over floor tile (16,16):', await ev(`(() => { let g = Canvas.scene.getObjectByName('dew_tile_ghost'); if (!g) return 'no ghost'; let s = new THREE.Box3().setFromObject(g).getSize(new THREE.Vector3()); return [s.x, s.z].map(Math.round).join(' x '); })()`), ' expect 32 x 32, the footprint');
 
 await click([24, 0, 24]);
-console.log('C. click stamps 3 x 2:', await ev(textured), ' expect 0,1,0: 6');
-console.log('   tile (16,0,16) takes cell (0,0):', await ev(face(16, 0, 16, '0,1,0')), ' expect 16,0,16 -> [0,0]');
-console.log('   tile (48,0,32) takes cell (2,1):', await ev(face(48, 0, 32, '0,1,0')), ' expect 48,0,32 -> [32,16], 64,0,48 -> [48,32]');
-console.log('   tile (64,0,16) untouched:', await ev(face(64, 0, 16, '0,1,0')), ' expect textured false');
+console.log('C. a 3 x 2 pick on a 2 x 2 footprint:', await ev(textured), ' expect 0,1,0: 4');
+console.log('   tile (0,0,0):', await ev(cell(0, 0, 0, '0,1,0')), ' expect [0,0]');
+console.log('   tile (16,0,0):', await ev(cell(16, 0, 0, '0,1,0')), ' expect [16,0]');
+console.log('   tile (16,0,16):', await ev(cell(16, 0, 16, '0,1,0')), ' expect [16,16]: the upper left 2 x 2, column 32 unused');
+console.log('   tile (32,0,0):', await ev(cell(32, 0, 0, '0,1,0')), ' expect untextured, outside the footprint');
 
-await drag([24, 0, 24], [120, 0, 24]);
-console.log('D. drag repeats the stamp seamlessly:', await ev(textured), ' expect 0,1,0: 14 (x 16..128, z 16..48 minus nothing)');
-console.log('   tile (64,0,16) starts the next stamp:', await ev(face(64, 0, 16, '0,1,0')), ' expect 64,0,16 -> [0,0]');
-console.log('   tile (80,0,16):', await ev(face(80, 0, 16, '0,1,0')), ' expect 80,0,16 -> [16,0]');
-console.log('   tile (64,0,32):', await ev(face(64, 0, 32, '0,1,0')), ' expect 64,0,32 -> [0,16]');
+await clickAt(await texel(56, 8));
+console.log('D. pick one cell (3,0):', await ev(region()), ' expect 37.5%,0%,12.5%,12.5%');
+await click([56, 0, 8]);
+console.log('   one cell on a 2 x 2 footprint:', await ev(textured), ' expect 0,1,0: 8');
+console.log('   tiles (32,0,0) and (48,0,16):', await ev(cell(32, 0, 0, '0,1,0')), await ev(cell(48, 0, 16, '0,1,0')), ' expect [48,0] both: all four take the one cell');
 
 await dragPx(await texel(8, 40), await texel(24, 40));
 console.log('E. pick 2 x 1 at row 2:', await ev(region()), ' expect 0%,25%,25%,12.5%');
 await click([8, 24, 0]);
-console.log('   wall stamp from tile (0,16):', await ev(textured), ' expect 0,0,1: 2');
-console.log('   wall tile (16,16,0) takes cell (1,0) of the region:', await ev(face(16, 16, 0, '0,0,1')), ' expect 16,32,0 -> [16,32], 32,16,0 -> [32,48]');
-console.log('   wall tile (0,16,0):', await ev(face(0, 16, 0, '0,0,1')), ' expect 0,32,0 -> [0,32]');
+console.log('   on the wall footprint x 0..32, y 0..32:', await ev(textured), ' expect 0,0,1: 4');
+console.log('   wall tiles (0,16,0) and (16,0,0):', await ev(cell(0, 16, 0, '0,0,1')), await ev(cell(16, 0, 0, '0,0,1')), ' expect [0,32] and [16,32]: the row repeats down the footprint');
 
-await key('c');
-console.log('F. C re-snaps the region to full tiles:', await ev(region()), ' expect 1 x 1 at 32px: 0%,25%,25%,25%');
+await ev(`(() => { DEWTileBrush.state.size = 16; return true; })()`);
+console.log('F. half size keeps the pick:', await ev(region()), ' expect 0%,25%,25%,12.5% unchanged');
+await click([40, 8, 0]);
+console.log('   wall tile (32,0,0):', await ev(cell(32, 0, 0, '0,0,1')), ' expect [0,32]: a half footprint holds only the upper left cell');
 
 await ev(`Undo.undo(); true`);
-console.log('G. undo the wall stamp:', await ev(textured), ' expect 0,0,1: 0');
+console.log('G. undo the half paint:', await ev(textured), ' expect 0,0,1: 4');
+
+// The tile brush textures what it lays, tiling a 2 x 2 pick from the plane origin like the bucket
+await ev(`(() => { BarItems.dew_tile_brush.select(); unselectAllElements(); let s = DEWTileBrush.state; s.size = 32; s.axis = 'y'; s.depth = 0; s.sign = null;
+	DEWTileBrush.texture_state.atlas = {texture: Texture.all[0].uuid, x0: 0, y0: 0, x1: 16, y1: 16, shape: 'square'}; return true; })()`);
+await sleep(200);
+console.log('H. tile brush offers the atlas:', await ev(`JSON.stringify({picker: !!BarItems.dew_tile_brush.atlas_picker, overlay: !!UVEditor.vue.atlas_overlay?.cell})`), ' expect both true');
+await click([24, 0, 88]);
+console.log('   tiles (0,0,80), (16,0,80), (0,0,64), (16,0,64):', await ev(cell(0, 0, 80, '0,1,0')), await ev(cell(16, 0, 80, '0,1,0')), await ev(cell(0, 0, 64, '0,1,0')), await ev(cell(16, 0, 64, '0,1,0')));
+console.log('   expect [0,16] [16,16] [0,0] [16,0]: column by x / 16, row by z / 16, both mod 2 (z 80 is row 1, z 64 row 0)');
 
 await hover([24, 0, 24]);
 const shot = await send('Page.captureScreenshot', { format: 'png' });

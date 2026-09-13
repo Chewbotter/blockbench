@@ -183,7 +183,8 @@ const painted = `(() => { let t = Texture.all[0]; let textured = 0, total = 0, c
 		let uvs = f.vertices.map(v => f.uv[v] || [NaN, NaN]); let c = Math.min(...uvs.map(u => u[0])) + ',' + Math.min(...uvs.map(u => u[1]));
 		let spans = Math.max(...uvs.map(u => u[0])) - Math.min(...uvs.map(u => u[0]));
 		let key = f.getNormal(true).map(Math.round).join(',') + ' @' + c + ' w' + spans; corners[key] = (corners[key] || 0) + 1; }
-	return JSON.stringify({picker: !!BarItems.dew_whole_block.atlas_picker, textured, total, corners}); })()`;
+	let meshes = Mesh.all.map(m => { let ps = Object.values(m.vertices); return m.name + ' ' + [0, 1, 2].map(i => Math.min(...ps.map(p => p[i]))).join(',') + ' to ' + [0, 1, 2].map(i => Math.max(...ps.map(p => p[i]))).join(','); });
+	return JSON.stringify({picker: !!BarItems.dew_whole_block.atlas_picker, textured, total, meshes, corners}); })()`;
 await hover([8, 0, 8]);
 await click([8, 0, 8]);
 console.log('Q. a block with cell 1,0 picked:', await ev(painted));
