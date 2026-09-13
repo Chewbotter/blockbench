@@ -1328,7 +1328,11 @@ function buildGround(mesh, start_fkey) {
 		for (let vkey of face.vertices) {
 			let p = pos(vkey);
 			grid.set(groundKey(p.x, p.z), vkey);
-			let on_border = p.x <= 1e-3 || p.z <= 1e-3 || p.x >= DEW.CLUSTER_SIZE - 1e-3 || p.z >= DEW.CLUSTER_SIZE - 1e-3;
+			// Only corners on the edge lines of the cluster square are pinned. Scenes run past it (the Warehouse floor
+			// spans x -312 to 408), and ground out there moves like any other.
+			let C = DEW.CLUSTER_SIZE;
+			let on_line = (a, b) => (Math.abs(a) < 1e-3 || Math.abs(a - C) < 1e-3) && b > -1e-3 && b < C + 1e-3;
+			let on_border = on_line(p.x, p.z) || on_line(p.z, p.x);
 			if (on_border || faces_of.get(vkey).some(other => !ground.has(other))) pinned.add(vkey);
 		}
 		let cell = groundKey(Math.floor(Math.min(...face.vertices.map(vkey => pos(vkey).x)) / H + 1e-6) * H, Math.floor(Math.min(...face.vertices.map(vkey => pos(vkey).z)) / H + 1e-6) * H);
@@ -2540,4 +2544,4 @@ Blockbench.on('select_project', () => {
 });
 
 // The internals the scripted tests poke at
-Object.assign(window, {DEWTileBrush: {state, texture_state, BRUSH, hitFace, describeTile, buildTileIndex, shaveTarget, tileUV, PLANE_AXES}});
+Object.assign(window, {DEWTileBrush: {state, texture_state, BRUSH, hitFace, describeTile, buildTileIndex, shaveTarget, tileUV, PLANE_AXES, buildGround, settleTerrain}});

@@ -103,5 +103,17 @@ await click([8, 8, 120]);
 console.log('H. raise it again:', await ev(ground('edge', border)), ' undo steps added:', (await ev(`Undo.history.length`)) - history);
 console.log('   expect no change and 0 undo steps: a second step would be too steep against the pinned border');
 
+// Ground beyond the cluster square is not border: a 3 x 3 floor at x 352..400 raises like any other
+await ev(`(() => { let m = new Mesh({name: 'outside', vertices: {}}); let map = {};
+	let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
+	for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) { let x = 352 + i * 16, z = 96 + j * 16;
+		let f = new MeshFace(m, {vertices: [[x,0,z],[x+16,0,z],[x+16,0,z+16],[x,0,z+16]].map(vert), texture: false});
+		m.addFaces(f); if (f.getNormal(true)[1] < 0) f.invert(); }
+	m.init(); unselectAllElements(); updateSelection(); return true; })()`);
+await camera(376, 0, 120, 376, 200, 300);
+await click([376, 0, 120]);
+console.log('I. raise a tile outside the cluster:', await ev(ground('outside', [[368, 112], [384, 128], [352, 112]])));
+console.log('   expect 368,112 and 384,128 at 16, 352,112 at 0; steepest 16');
+
 console.log('page errors:', errors.length ? errors : 'none');
 ws.close();
