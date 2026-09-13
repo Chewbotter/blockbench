@@ -20,6 +20,8 @@ async function click(world) {
 	await mouse('mousePressed', at, { buttons: 1 }); await sleep(40);
 	await mouse('mouseReleased', at); await sleep(120);
 }
+// C cycles the brush size (16, 32, 48); press it until the brush is `size`
+async function sizeTo(size) { for (let i = 0; i < 3 && await ev(`DEWTileBrush.state.size`) != size; i++) await key('c'); }
 async function key(letter) {
 	const code = letter.toUpperCase().charCodeAt(0);
 	await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: letter, code: 'Key' + letter.toUpperCase(), windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
@@ -73,7 +75,7 @@ await ev(`(() => { let t = Texture.all[0];
 	return true; })()`);
 await camera(32, 16, 32, 32 + 120, 16 + 90, 32 + 150);
 await ev(`(() => { BarItems.dew_ramp.select(); return true; })()`);
-await key('c');
+await sizeTo(16);
 console.log('setup:', await ev(`JSON.stringify({tool: Toolbox.selected.id, size: DEWTileBrush.state.size, order: (ids => ids.slice(ids.indexOf('dew_shave'), ids.indexOf('dew_shave') + 2))(Toolbars.tools.children.map(c => c.id))})`), ' expect dew_ramp after dew_shave');
 console.log('start:', await ev(counts), ' expect floor 16, wall_z 12, wall_x 8, ceiling 16');
 

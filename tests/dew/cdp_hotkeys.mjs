@@ -31,7 +31,7 @@ await ev(build);
 await sleep(400);
 console.log('a floor is up and selected:', await ev(`JSON.stringify({selected: Mesh.selected.length, tool: Toolbox.selected.id})`));
 
-for (let [n, tool] of [[1, 'dew_tile_select'], [2, 'dew_whole_block'], [3, 'dew_tile_brush'], [4, 'dew_texture_brush'], [5, 'dew_paint_bucket']]) {
+for (let [n, tool] of [[1, 'dew_tile_select'], [2, 'dew_whole_block'], [3, 'dew_tile_brush'], [4, 'dew_texture_brush'], [5, 'dew_paint_bucket'], [6, 'dew_terrain']]) {
 	await digit(n);
 	console.log(`${n}:`, await ev(`JSON.stringify({tool: Toolbox.selected.id, mode: BarItems.selection_mode.value})`), ` expect ${tool}`);
 }

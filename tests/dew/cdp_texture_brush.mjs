@@ -80,7 +80,7 @@ console.log('   top-left corner (0,32,32):', await ev(uvAt(0, 32, 32, '0,0,1')),
 console.log('   bottom-right corner (32,0,32):', await ev(uvAt(32, 0, 32, '0,0,1')), ' expect uv [32,16]');
 console.log('   center (16,16,32) on all 4 quads:', await ev(uvAt(16, 16, 32, '0,0,1')), ' expect [32,16] [16,16] [32,0] [16,0] in some order, one corner of the cell each');
 
-await key('c');
+await key('c'); await key('c');	// 32 -> 48 -> 16: C cycles 1, 2 x 2, 3 x 3
 await clickAt(await texel(56, 24));
 console.log('E. C -> half, pick (56,24):', await ev(`JSON.stringify({size: DEWTileBrush.state.size, atlas: DEWTileBrush.texture_state.atlas, cell: [UVEditor.vue.atlas_overlay.cell.left, UVEditor.vue.atlas_overlay.cell.top, UVEditor.vue.atlas_overlay.cell.width]})`), ' expect 16, cell 37.5%,12.5%,12.5%');
 await click([32, 8, 24]);

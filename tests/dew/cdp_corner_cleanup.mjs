@@ -19,6 +19,8 @@ async function click(world) {
 	await mouse('mousePressed', at, { buttons: 1 }); await sleep(50);
 	await mouse('mouseReleased', at); await sleep(140);
 }
+// C cycles the brush size (16, 32, 48); press it until the brush is `size`
+async function sizeTo(size) { for (let i = 0; i < 3 && await ev(`DEWTileBrush.state.size`) != size; i++) await key('c'); }
 async function key(letter) {
 	const code = letter.toUpperCase().charCodeAt(0);
 	await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: letter, code: 'Key' + letter.toUpperCase(), windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
@@ -100,13 +102,14 @@ await ev(`(() => { let t = Texture.all[0]; let m = Mesh.all[0];
 await camera(64, 8, 24, 64 + 60, 8 + 120, 24 + 150);
 await ev(`(() => { BarItems.dew_ramp.select(); return true; })()`);
 await sleep(150);
+await sizeTo(32);
 console.log('start:', await ev(health), ' expect no holes, no duplicates');
 
 await click([48, 0, 8]);
 console.log('A. full-size ramp x 32..64:', await ev(health));
 console.log('   triangles at x=32:', await ev(atPlane(32)), ' at x=64:', await ev(atPlane(64)), ' expect one 32x32 at each');
 
-await key('c');
+await sizeTo(16);
 await click([72, 0, 4]);
 console.log('B. half ramp x 64..80 beside it:', await ev(atPlane(64)), ' expect only the 32x32, the small one skipped');
 console.log('   ', await ev(health), ' expect no duplicates');
@@ -114,12 +117,12 @@ console.log('   ', await ev(health), ' expect no duplicates');
 await click([88, 0, 4]);
 console.log('C. half ramp x 80..96:', await ev(atPlane(80)), ' expect none: equal sizes cancel');
 
-await key('c');
+await sizeTo(32);
 await click([112, 0, 8]);
 console.log('D. full ramp x 96..128 beside the half one:', await ev(atPlane(96)), ' expect one 32x32, the small one removed');
 console.log('   ', await ev(health));
 
-await key('c');
+await sizeTo(16);
 await click([8, 0, 4]);
 await click([4, 0, 24]);
 console.log('E. two half ramps meeting at the room corner:', await ev(health), ' expect triangular_holes 0, untextured_triangles 0');

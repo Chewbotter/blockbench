@@ -20,6 +20,8 @@ async function click(world) {
 	await mouse('mousePressed', at, { buttons: 1 }); await sleep(40);
 	await mouse('mouseReleased', at); await sleep(120);
 }
+// C cycles the brush size (16, 32, 48); press it until the brush is `size`
+async function sizeTo(size) { for (let i = 0; i < 3 && await ev(`DEWTileBrush.state.size`) != size; i++) await key('c'); }
 async function key(letter) {
 	const code = letter.toUpperCase().charCodeAt(0);
 	await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: letter, code: 'Key' + letter.toUpperCase(), windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
@@ -67,7 +69,7 @@ await ev(`(() => { let t = Texture.all[0]; let m = Mesh.all.find(m => m.name == 
 	Canvas.updateView({elements: [m], element_aspects: {faces: true, uv: true}}); return true; })()`);
 await camera(16, 24, 16, 16 + 90, 24 + 60, 16 + 110);
 await ev(`(() => { BarItems.dew_shave.select(); return true; })()`);
-await key('c');   // half tiles
+await sizeTo(16);
 console.log('setup:', await ev(`JSON.stringify({tool: Toolbox.selected.id, size: DEWTileBrush.state.size, order: (ids => ids.slice(ids.indexOf('dew_tile_brush'), ids.indexOf('dew_tile_brush') + 3))(Toolbars.tools.children.map(c => c.id))})`), ' expect dew_shave after dew_tile_brush');
 console.log('start:', await ev(info('box')));
 
@@ -99,7 +101,7 @@ await click([88, 0, 17]);
 console.log('G. click on a flat plane:', await ev(`JSON.stringify({faces: Object.keys(Mesh.all.find(m => m.name == 'floor').faces).length, new_undo_steps: Undo.history.length - ${history}})`), ' expect 8 faces, 0 steps');
 
 await camera(224, 32, 32, 224 + 150, 32 + 110, 32 + 190);
-await key('c');   // full tiles
+await sizeTo(32);
 await click([254, 48, 64]);
 console.log('H. full-size shave on box2 (top stretch):', await ev(info('box2')));
 console.log('   expect 73 faces; one 32-deep diagonal; triangles: closing y 32 (up), and two split top quads (up)');

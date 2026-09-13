@@ -1,5 +1,5 @@
 // Tile brush for DEW scenes: paints half-cell square quads onto an axis-aligned work plane.
-// Click or drag places tiles, Ctrl erases. W cycles the plane axis, A / D step it, C toggles full / half tiles.
+// Click or drag places tiles, Ctrl erases. W cycles the plane axis, A / D step it, C cycles the brush size.
 import { THREE } from "../lib/libs";
 import { DEW } from "./dew_scene";
 
@@ -25,6 +25,7 @@ const BRUSH = {
 	OVERLAP_AREA: 1,			// a gap this much of which is already filled is not capped, in square units (a tile is 256)
 	BLOCK_SIDES: 2,				// outward sides a cell needs, besides the one it shares, to count as a block (Whole Block)
 	BLOCK_NAME: 'block',		// what Add DEW Block names the element it starts
+	SIZES: [16, 32, 48],		// C cycles the brush through these: 1, 2 x 2 and 3 x 3 half cell tiles, the first by default
 	TERRAIN_STEP: 16,			// one raise or lower, and the most two corners a half cell apart may differ (45 degrees)
 	TERRAIN_GROUND_Y: 0.1,		// a face whose normal points up at least this much counts as ground for the terrain brush
 };
@@ -40,7 +41,7 @@ const state = {
 	sign: null,			// Alt copies a tile's facing; null follows the camera
 	axis: 'y',
 	depth: 0,
-	size: H,			// half tiles by default, C switches to full
+	size: H,			// one tile by default, C cycles through BRUSH.SIZES
 	hover_point: null,	// last world point under the cursor, W aims the new plane through it
 };
 let stroke = null;
@@ -528,9 +529,14 @@ function onModifierKey(event) {
 	}
 }
 
+// The brush size as the user counts it, in half cell tiles
+function sizeLabel() {
+	let n = Math.round(state.size / H);
+	return n == 1 ? '1 tile' : `${n} x ${n} tiles`;
+}
 function announce() {
 	let depth_axis = state.axis;
-	let size = state.size == DEW.TILE ? 'full tile' : 'half tile';
+	let size = sizeLabel();
 	Blockbench.showQuickMessage(`${AXIS_LABEL[state.axis]}, ${depth_axis} ${state.depth}, ${size}`, BRUSH.MESSAGE_TIME);
 	updatePlaneGrid();
 	if (last_hover_event) onHover(last_hover_event);
@@ -1496,7 +1502,7 @@ function onTerrainModifier(event) {
 }
 
 // Shave: bevels an outside corner where two planes of square tiles meet. The cut is 45 degrees and exactly one block
-// deep on both sides (a half or full tile, per C): the two blocks touching the corner edge become one diagonal face
+// deep on both sides (the brush size, per C): the two blocks touching the corner edge become one diagonal face
 // that keeps the texture of the side the cursor touched. Ends close automatically: a tile in the end plane (a top
 // face) is trimmed to the inside of the cut, a notch against a still-square stretch of the corner gets a triangle,
 // and a triangle left by shaving the neighboring stretch earlier is removed.
@@ -2189,7 +2195,7 @@ BARS.defineActions(function() {
 	new Tool('dew_tile_brush', {
 		keybind: new Keybind({key: '3'}),	// the number keys pick the tools in DEW scenes
 		name: 'Tile Brush',
-		description: 'Paint tiles onto the work plane, textured with the atlas cells picked in the UV editor if any. Ctrl erases, Alt takes the plane and facing of the tile under the cursor. W cycles the plane, A / D step it, C switches full / half tiles',
+		description: 'Paint tiles onto the work plane, textured with the atlas cells picked in the UV editor if any. Ctrl erases, Alt takes the plane and facing of the tile under the cursor. W cycles the plane, A / D step it, C cycles the brush size: 1, 2 x 2, 3 x 3 tiles',
 		icon: 'grid_on',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -2230,8 +2236,9 @@ BARS.defineActions(function() {
 	});
 
 	new Tool('dew_terrain', {
+		keybind: new Keybind({key: '6'}),	// the number keys pick the tools in DEW scenes; 6 is otherwise only the weld selection mode, which stands down here
 		name: 'Terrain Brush',
-		description: 'Raise ground a step, or lower it with Ctrl. Shift flattens everything a drag touches to the height it started at. The ground around follows as ramps and triangles, no steeper than a step per half cell, and anything standing on the ground stays put. Drag for a ridge or a trench. C switches full / half tiles',
+		description: 'Raise ground a step, or lower it with Ctrl. Shift flattens everything a drag touches to the height it started at. The ground around follows as ramps and triangles, no steeper than a step per half cell, and anything standing on the ground stays put. Drag for a ridge or a trench. C cycles the brush size: 1, 2 x 2, 3 x 3 tiles',
 		icon: 'landscape',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -2269,7 +2276,7 @@ BARS.defineActions(function() {
 	new Tool('dew_texture_brush', {
 		keybind: new Keybind({key: '4'}),	// the number keys pick the tools in DEW scenes
 		name: 'Texture Brush',
-		description: 'Pick a tile of the atlas in the UV editor (drag to pick several), then click or drag over tiles to paint. The pick fills the brush from its upper left, repeating if smaller and cut off if larger. Alt picks up the cell a tile already carries. C switches full / half tiles',
+		description: 'Pick a tile of the atlas in the UV editor (drag to pick several), then click or drag over tiles to paint. The pick fills the brush from its upper left, repeating if smaller and cut off if larger. Alt picks up the cell a tile already carries. C cycles the brush size: 1, 2 x 2, 3 x 3 tiles',
 		icon: 'format_paint',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -2308,7 +2315,7 @@ BARS.defineActions(function() {
 
 	new Tool('dew_shave', {
 		name: 'Shave',
-		description: 'Bevel outside corners: click or drag along a corner to cut it at 45 degrees, one block deep. C switches full / half tiles',
+		description: 'Bevel outside corners: click or drag along a corner to cut it at 45 degrees, one block deep. C cycles the brush size: 1, 2 x 2, 3 x 3 tiles',
 		icon: 'change_history',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -2341,7 +2348,7 @@ BARS.defineActions(function() {
 
 	new Tool('dew_ramp', {
 		name: 'Ramp',
-		description: 'Draw 45 degree faces from an edge: drag to run several in a line, up a slope or along a diagonal wall. An inside corner fills as before. C switches full / half tiles',
+		description: 'Draw 45 degree faces from an edge: drag to run several in a line, up a slope or along a diagonal wall. An inside corner fills as before. C cycles the brush size: 1, 2 x 2, 3 x 3 tiles',
 		icon: 'trending_up',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -2377,7 +2384,7 @@ BARS.defineActions(function() {
 	new Tool('dew_tile_select', {
 		keybind: new Keybind({key: '1'}),	// the number keys pick the tools in DEW scenes
 		name: 'Tile Select',
-		description: 'Paint to select tiles. Shift adds, Ctrl removes, C switches full / half tiles',
+		description: 'Paint to select tiles. Shift adds, Ctrl removes, C cycles the brush size: 1, 2 x 2, 3 x 3 tiles',
 		icon: 'highlight_alt',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -2413,7 +2420,7 @@ BARS.defineActions(function() {
 	new Tool('dew_paint_bucket', {
 		keybind: new Keybind({key: '5'}),	// the number keys pick the tools in DEW scenes
 		name: 'Paint Bucket',
-		description: 'Fill the connected tiles of a plane with the picked atlas tiles. Alt picks up the cell a tile already carries. C switches full / half tiles',
+		description: 'Fill the connected tiles of a plane with the picked atlas tiles. Alt picks up the cell a tile already carries. C cycles the brush size: 1, 2 x 2, 3 x 3 tiles',
 		icon: 'format_color_fill',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -2514,17 +2521,17 @@ BARS.defineActions(function() {
 		}
 	});
 	new Action('dew_tile_size', {
-		name: 'Tile Brush: Full / Half Tile',
+		name: 'Tile Tools: Brush Size (1, 2 x 2, 3 x 3)',
 		icon: 'photo_size_select_small',
 		category: 'tools',
 		keybind: new Keybind({key: 'c'}),
 		condition: isDewTool,
 		click() {
-			state.size = state.size == DEW.TILE ? H : DEW.TILE;
+			state.size = BRUSH.SIZES[(BRUSH.SIZES.indexOf(state.size) + 1) % BRUSH.SIZES.length];
 			if (Toolbox.selected.id == 'dew_tile_brush') {
 				announce();
 			} else {
-				Blockbench.showQuickMessage(state.size == DEW.TILE ? 'Full tile' : 'Half tile', BRUSH.MESSAGE_TIME);
+				Blockbench.showQuickMessage(sizeLabel(), BRUSH.MESSAGE_TIME);
 				updateAtlasOverlay();
 				let hovered = Toolbox.selected.id == 'dew_whole_block' ? last_hover_event : last_paint_hover_event;
 				if (active_hover && hovered) active_hover(hovered);

@@ -56,7 +56,9 @@ await drag([40, 0, 40], [150, 0, 40]);
 console.log('D. drag along x to 150:', await ev(meshInfo), ' expect 16 faces, 27 verts');
 
 await key('c');
-console.log('E. C toggles half tile:', await ev(brushState));
+console.log('E. C cycles on to 3 x 3:', await ev(`DEWTileBrush.state.size`), ' expect 48');
+await key('c');
+console.log('   and round to 1 tile:', await ev(brushState), ' expect size 16');
 
 // Wall: hover over the floor tile, W re-aims the plane through the hover point, then click on the floor
 await hover([100, 0, 50]);

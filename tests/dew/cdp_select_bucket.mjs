@@ -22,6 +22,8 @@ async function dragPx(a, b, steps = 10, modifiers = 0) {
 }
 const click = async (world, modifiers = 0) => { let at = await screen(...world); return dragPx(at, at, 1, modifiers); };
 const drag = async (from, to, modifiers = 0) => dragPx(await screen(...from), await screen(...to), 16, modifiers);
+// C cycles the brush size (16, 32, 48); press it until the brush is `size`
+async function sizeTo(size) { for (let i = 0; i < 3 && await ev(`DEWTileBrush.state.size`) != size; i++) await key('c'); }
 async function key(letter) {
 	const code = letter.toUpperCase().charCodeAt(0);
 	await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: letter, code: 'Key' + letter.toUpperCase(), windowsVirtualKeyCode: code, nativeVirtualKeyCode: code });
@@ -63,7 +65,7 @@ await ev(`(() => {
 console.log('undo_selections setting was:', await ev(`(() => { let before = settings.undo_selections.value; settings.undo_selections.value = true; return before; })()`));
 console.log('A. tile select tool:', await ev(`(() => { BarItems.dew_tile_select.select(); let ids = Toolbars.tools.children.map(c => c.id); let i = ids.indexOf('dew_tile_brush');
 	return JSON.stringify({tool: Toolbox.selected.id, selection_mode: BarItems.selection_mode.value, order: ids.slice(i - 1, i + 3)}); })()`), ' expect face, order select, tile, texture, bucket');
-await key('c');
+await sizeTo(16);
 await click([24, 0, 24]);
 console.log('B. half-tile click selects one tile:', await ev(selection), ' expect floor [16,16], 4 vertices');
 await drag([24, 0, 24], [72, 0, 24]);
@@ -72,7 +74,7 @@ await drag([40, 0, 40], [72, 0, 40], SHIFT);
 console.log('D. shift drag adds:', await ev(selection), ' expect + 32,32 48,32 64,32 (7 tiles)');
 await click([24, 0, 24], CTRL);
 console.log('E. ctrl click removes:', await ev(selection), ' expect 6 tiles, no 16,16');
-await key('c');
+await sizeTo(32);
 await click([24, 0, 24]);
 console.log('F. full-tile click replaces with a 2x2 block:', await ev(selection), ' expect 0,0 0,16 16,0 16,16');
 console.log('G. empty spot on screen at', JSON.stringify((await screen(112, 0, -60)).map(Math.round)), 'canvas', await ev(`JSON.stringify((r => [r.left, r.top, r.right, r.bottom].map(Math.round))(Preview.selected.canvas.getBoundingClientRect()))`));
@@ -89,7 +91,7 @@ await sleep(400);
 if (await ev(`!!Panels.uv.folded`)) await ev(`(() => { Panels.uv.fold(false); return true; })()`);
 await ev(`(() => { unselectAllElements(); BarItems.dew_paint_bucket.select(); return true; })()`);
 await sleep(150);
-await key('c');
+await sizeTo(16);
 console.log('J. bucket tool:', await ev(`JSON.stringify({tool: Toolbox.selected.id, uv_texture: UVEditor.vue.texture?.name, grid: !!UVEditor.vue.atlas_overlay?.grid, size: DEWTileBrush.state.size})`));
 await dragPx(await texel(4, 4), await texel(24, 24));
 console.log('   pick 2 x 2:', await ev(`JSON.stringify(UVEditor.vue.atlas_overlay.cell && ['left','top','width','height'].map(k => UVEditor.vue.atlas_overlay.cell[k]))`), ' expect 0%,0%,25%,25%');
@@ -103,7 +105,7 @@ await ev(`Undo.undo(); true`);
 console.log('M. undo:', await ev(textured), ' expect all 0');
 await click([8, 8, 0]);
 console.log('N. bucket on the wall:', await ev(textured), ' expect wall 8 only');
-console.log('   wall (0,0,0) top-left corner (0,16,0):', await ev(face(0, 0, 0, '0,0,1')), ' expect 0,16,0 -> [0,0]');
+console.log('   wall (0,0,0) top-left corner (0,16,0):', await ev(face(0, 0, 0, '0,0,1')), ' expect 0,16,0 -> [0,16]: the pick tiles from the plane origin, so this lower row takes the second row of the 2 x 2 art and it reads upright');
 
 await click([24, 0, 24]);
 await ev(`(() => { BarItems.dew_tile_select.select(); return true; })()`);
