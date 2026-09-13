@@ -24,6 +24,7 @@ const BRUSH = {
 	EDGE_NUDGE: 0.05,			// how far either side of a hit surface the two candidate cells are sampled
 	OVERLAP_AREA: 1,			// a gap this much of which is already filled is not capped, in square units (a tile is 256)
 	BLOCK_SIDES: 2,				// outward sides a cell needs, besides the one it shares, to count as a block (Whole Block)
+	BLOCK_NAME: 'block',		// what Add DEW Block names the element it starts
 };
 
 const H = DEW.HALF_CELL;
@@ -1059,30 +1060,33 @@ function addBlockFace(mesh, side, vertex_map) {
 	if (worldNormal(mesh, face)[side.axis] * side.sign < 0) face.invert();
 	return fkey;
 }
-// The mesh of the block in the cell at origin, or null when the cell holds none: a block has faces pointing out
-// of the cell on at least BRUSH.BLOCK_SIDES sides other than the skipped plane. One is not enough, since a floor
-// tile is exactly the top of an empty cell under it, and taking that for a block hung walls under the ground.
-function blockOwner(origin, size, index, skip_axis, skip_depth) {
-	let planes = new Set(), owner = null;
+// Whether the cell at origin holds a block of this mesh: its faces point out of the cell on at least
+// BRUSH.BLOCK_SIDES sides other than the skipped plane. One is not enough, since a floor tile is exactly the top
+// of an empty cell under it, and taking that for a block hung walls under the ground. Other elements never count:
+// they are separate objects that may move away again, so they keep their faces and this one keeps its own.
+function blockOwner(origin, size, index, skip_axis, skip_depth, mesh) {
+	let planes = new Set();
 	for (let side of blockSides(origin, size)) {
 		if (side.axis == skip_axis && Math.abs(side.depth - skip_depth) < 1e-6) continue;
 		let entry = index.get(cellKey(side));
-		if (!entry || !entry.mesh.faces[entry.fkey]) continue;
+		if (!entry || entry.mesh != mesh || !entry.mesh.faces[entry.fkey]) continue;
 		planes.add(`${side.axis}|${side.sign}`);
-		owner = entry.mesh;
 	}
-	return planes.size >= BRUSH.BLOCK_SIDES ? owner : null;
+	return planes.size >= BRUSH.BLOCK_SIDES;
 }
 function placeBlock(mesh, origin, size, index, vertex_map, touched) {
 	let added = 0, kept = 0, removed = 0;
 	for (let side of blockSides(origin, size)) {
-		// A face already standing there means the block goes without its own. If that face is the wall of a
-		// block on the other side, it is between two solids and nobody can see it, so it goes too. Anything
-		// else stays: a floor the block lands on is still a floor once the block goes again.
+		// A face of this element already standing there means the block goes without its own. If that face is
+		// the wall of a block on the other side, it is between two solids and nobody can see it, so it goes too.
+		// Anything else stays: a floor the block lands on is still a floor once the block goes again. Another
+		// element's face is left alone and the block adds its own, unless the two would face the same way and
+		// z-fight.
 		let found = faceAtCell(index, side);
+		if (found && found.entry.mesh != mesh && found.sign != side.sign) found = null;
 		if (found) {
 			let neighbour = blockNeighbour(origin, side.axis, side.sign, size);
-			if (found.sign != side.sign && blockOwner(neighbour, size, index, side.axis, side.depth)) {
+			if (found.entry.mesh == mesh && found.sign != side.sign && blockOwner(neighbour, size, index, side.axis, side.depth, mesh)) {
 				delete found.entry.mesh.faces[found.entry.fkey];
 				index.delete(cellKey({...side, sign: found.sign}));
 				touched.add(found.entry.mesh);
@@ -1105,18 +1109,20 @@ function placeBlock(mesh, origin, size, index, vertex_map, touched) {
 function removeBlock(origin, size, index, touched, vertexMapOf) {
 	let removed = 0;
 	let sides = blockSides(origin, size);
+	let owners = new Set();
 	for (let side of sides) {
 		let entry = index.get(cellKey(side));
 		if (!entry || !entry.mesh.faces[entry.fkey]) continue;
 		delete entry.mesh.faces[entry.fkey];
 		index.delete(cellKey(side));
 		touched.add(entry.mesh);
+		owners.add(entry.mesh);
 		removed++;
 	}
 	for (let side of sides) {
 		if (faceAtCell(index, side)) continue;
 		let neighbour = blockNeighbour(origin, side.axis, side.sign, size);
-		let mesh = blockOwner(neighbour, size, index, side.axis, side.depth);
+		let mesh = [...owners].find(owner => blockOwner(neighbour, size, index, side.axis, side.depth, owner));
 		if (!mesh) continue;
 		let wall = {...side, sign: -side.sign};
 		index.set(cellKey(wall), {mesh, fkey: addBlockFace(mesh, wall, vertexMapOf(mesh))});
@@ -1124,6 +1130,28 @@ function removeBlock(origin, size, index, touched, vertexMapOf) {
 		removed++;
 	}
 	return {removed};
+}
+
+// Add DEW Block: a new element holding one block, where the camera orbits, snapped to the brush size. It comes
+// selected, and the tile tools build into the selected element first, so it is a clean start for a separate object.
+function addBlockElement() {
+	let size = state.size;
+	let preview = Preview.selected || Preview.all[0];
+	let center = DEW.CLUSTER_SIZE / 2;
+	let target = preview && preview.controls ? preview.controls.target : new THREE.Vector3(center, 0, center);
+	let snapTo = value => Math.floor(value / size + 1e-6) * size;
+	let origin = {x: snapTo(target.x), y: snapTo(target.y), z: snapTo(target.z)};
+	Undo.initEdit({outliner: true, elements: [], selection: true});
+	let mesh = new Mesh({name: BRUSH.BLOCK_NAME, vertices: {}}).init();
+	mesh.mesh.updateMatrixWorld(true);
+	let vertex_map = new Map();
+	for (let side of blockSides(origin, size)) addBlockFace(mesh, side, vertex_map);
+	unselectAllElements();
+	mesh.select();
+	Undo.finishEdit('Add DEW block', {outliner: true, elements: [mesh], selection: true});
+	Canvas.updateView({elements: [mesh], element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
+	updateSelection();
+	return mesh;
 }
 
 let block_stroke = null;
@@ -1882,6 +1910,14 @@ function onRampHover(event) {
 }
 
 BARS.defineActions(function() {
+	new Action('dew_add_block', {
+		name: 'Add DEW Block',
+		description: 'Start a new element with one block on the grid where the camera is looking, at the brush size (C). The tile tools build into it while it is selected',
+		icon: 'view_in_ar',
+		category: 'edit',
+		condition: () => Modes.edit && Format.id == 'dew_scene',
+		click: addBlockElement,
+	});
 	new Tool('dew_whole_block', {
 		keybind: new Keybind({key: '2'}),	// the number keys pick the tools in DEW scenes
 		name: 'Whole Block',

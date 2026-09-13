@@ -896,6 +896,7 @@ BARS.defineActions(function() {
 		icon: 'add_2',
 		condition: {modes: ['edit']},
 		side_menu: new Menu([
+			'dew_add_block',	// first, so the + button itself adds one in DEW scenes; hidden elsewhere
 			'add_mesh',
 			'add_cube',
 			'add_spline',

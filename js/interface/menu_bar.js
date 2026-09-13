@@ -309,6 +309,7 @@ export const MenuBar = {
 		})
 		new BarMenu('mesh', [
 			new MenuSeparator('dew'),
+			'dew_add_block',
 			'dew_group_tiles',
 			'dew_rotate_group_cw',
 			'dew_rotate_group_ccw',
