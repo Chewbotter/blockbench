@@ -86,6 +86,23 @@ await dragWorld([8, 0, 8], [104, 0, 8]);
 console.log('F. a drag along the plane:', await ev(shape));
 console.log('   expect a row of blocks, x running 0 to over 96, and only the two end walls facing along x (1,0,0 and -1,0,0 at 1 each)');
 
+// Mid drag the ghost stays on the block just laid instead of jumping onto its top
+await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); unselectAllElements(); updateSelection(); return true; })()`);
+await sleep(400);
+await camera(48, 8, 8, 150, 90, 150);
+await ev(`(() => { BarItems.dew_whole_block.select(); let s = DEWTileBrush.state; s.size = 16; s.axis = 'y'; s.depth = 0; return true; })()`);
+await sleep(300);
+{
+	const a = await screen(8, 0, 8), b = await screen(40, 0, 8);
+	await mouse('mouseMoved', a, { button: 'none' }); await sleep(70);
+	await mouse('mousePressed', a, { buttons: 1 }); await sleep(70);
+	for (let i = 1; i <= 8; i++) { await mouse('mouseMoved', [a[0] + (b[0] - a[0]) * i / 8, a[1] + (b[1] - a[1]) * i / 8], { buttons: 1 }); await sleep(30); }
+	await mouse('mouseMoved', b, { buttons: 1 }); await sleep(90);
+	console.log('F2. ghost mid drag:', await ev(`JSON.stringify(Canvas.scene.getObjectByName('dew_tile_ghost')?.position.toArray())`));
+	console.log('   expect [40,8,8]: on the block under the cursor, not [40,24,8] on top of it');
+	await mouse('mouseReleased', b); await sleep(250);
+}
+
 // Full size blocks are four half cell tiles a side
 await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); unselectAllElements(); updateSelection();
 	BarItems.dew_whole_block.select(); let s = DEWTileBrush.state; s.size = 32; s.axis = 'y'; s.depth = 0; return true; })()`);

@@ -1232,6 +1232,13 @@ function onBlockHover(event, ctrl_held = event.ctrlKey) {
 	let preview = block_stroke ? block_stroke.preview : event.target && event.target.preview;
 	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
 	let erase = block_stroke ? block_stroke.erase : (ctrl_held || Pressing.ctrl);
+	// Mid drag the ghost sits on the cell the stroke works on, the block just laid under the cursor. Aimed like
+	// a click it would jump onto the near side of that block, a spot the drag never places.
+	if (block_stroke) {
+		let origin = blockAlong(block_stroke, event);
+		if (origin) showGhostBox(origin, block_stroke.size, erase ? BRUSH.ERASE_COLOR : BRUSH.GHOST_COLOR);
+		return;
+	}
 	let target = blockTarget(preview, event, erase);
 	if (!target) return hideGhost();
 	showGhostBox(target.origin, state.size, erase ? BRUSH.ERASE_COLOR : BRUSH.GHOST_COLOR);
