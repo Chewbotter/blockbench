@@ -23,6 +23,7 @@ const BRUSH = {
 	RAMP_COLOR: 0x8ad4ff,		// ramp preview, which sits in open space
 	EDGE_NUDGE: 0.05,			// how far either side of a hit surface the two candidate cells are sampled
 	OVERLAP_AREA: 1,			// a gap this much of which is already filled is not capped, in square units (a tile is 256)
+	BLOCK_SIDES: 2,				// outward sides a cell needs, besides the one it shares, to count as a block (Whole Block)
 };
 
 const H = DEW.HALF_CELL;
@@ -1058,34 +1059,68 @@ function addBlockFace(mesh, side, vertex_map) {
 	if (worldNormal(mesh, face)[side.axis] * side.sign < 0) face.invert();
 	return fkey;
 }
-function placeBlock(mesh, origin, size, index, vertex_map, touched) {
-	let added = 0, kept = 0;
+// The mesh of the block in the cell at origin, or null when the cell holds none: a block has faces pointing out
+// of the cell on at least BRUSH.BLOCK_SIDES sides other than the skipped plane. One is not enough, since a floor
+// tile is exactly the top of an empty cell under it, and taking that for a block hung walls under the ground.
+function blockOwner(origin, size, index, skip_axis, skip_depth) {
+	let planes = new Set(), owner = null;
 	for (let side of blockSides(origin, size)) {
-		// A face already standing there stays, and the block goes without its own. Nothing another surface
-		// owns is destroyed, so a floor the block lands on is still a floor once the block goes again, and
-		// packed blocks have one face between them rather than two.
-		if (faceAtCell(index, side)) {
-			kept++;
+		if (side.axis == skip_axis && Math.abs(side.depth - skip_depth) < 1e-6) continue;
+		let entry = index.get(cellKey(side));
+		if (!entry || !entry.mesh.faces[entry.fkey]) continue;
+		planes.add(`${side.axis}|${side.sign}`);
+		owner = entry.mesh;
+	}
+	return planes.size >= BRUSH.BLOCK_SIDES ? owner : null;
+}
+function placeBlock(mesh, origin, size, index, vertex_map, touched) {
+	let added = 0, kept = 0, removed = 0;
+	for (let side of blockSides(origin, size)) {
+		// A face already standing there means the block goes without its own. If that face is the wall of a
+		// block on the other side, it is between two solids and nobody can see it, so it goes too. Anything
+		// else stays: a floor the block lands on is still a floor once the block goes again.
+		let found = faceAtCell(index, side);
+		if (found) {
+			let neighbour = blockNeighbour(origin, side.axis, side.sign, size);
+			if (found.sign != side.sign && blockOwner(neighbour, size, index, side.axis, side.depth)) {
+				delete found.entry.mesh.faces[found.entry.fkey];
+				index.delete(cellKey({...side, sign: found.sign}));
+				touched.add(found.entry.mesh);
+				removed++;
+			} else {
+				kept++;
+			}
 			continue;
 		}
 		index.set(cellKey(side), {mesh, fkey: addBlockFace(mesh, side, vertex_map)});
 		touched.add(mesh);
 		added++;
 	}
-	return {added, kept};
+	return {added, kept, removed};
 }
 // Taking a block out: only what faces out of the cell is the block's own. A face pointing into it belongs to
-// whatever stands on the other side, a floor under it or a block beside it, and that keeps its wall. Nothing
-// has to be put back, which is what the old seal got wrong: it could not tell a floor from a solid neighbour
-// and hung walls under flat ground.
-function removeBlock(origin, size, index, touched) {
+// whatever stands on the other side, a floor under it, and that stays. A neighbouring block lost its wall where
+// the two met, so it gets one back, but only when blockOwner finds a block there: a floor never has one hung
+// under it, which is what the old seal got wrong.
+function removeBlock(origin, size, index, touched, vertexMapOf) {
 	let removed = 0;
-	for (let side of blockSides(origin, size)) {
+	let sides = blockSides(origin, size);
+	for (let side of sides) {
 		let entry = index.get(cellKey(side));
 		if (!entry || !entry.mesh.faces[entry.fkey]) continue;
 		delete entry.mesh.faces[entry.fkey];
 		index.delete(cellKey(side));
 		touched.add(entry.mesh);
+		removed++;
+	}
+	for (let side of sides) {
+		if (faceAtCell(index, side)) continue;
+		let neighbour = blockNeighbour(origin, side.axis, side.sign, size);
+		let mesh = blockOwner(neighbour, size, index, side.axis, side.depth);
+		if (!mesh) continue;
+		let wall = {...side, sign: -side.sign};
+		index.set(cellKey(wall), {mesh, fkey: addBlockFace(mesh, wall, vertexMapOf(mesh))});
+		touched.add(mesh);
 		removed++;
 	}
 	return {removed};
@@ -1138,7 +1173,10 @@ function blockStep(origin) {
 	if (block_stroke.placed.has(id)) return;
 	block_stroke.placed.add(id);
 	let counts = block_stroke.erase
-		? removeBlock(origin, block_stroke.size, block_stroke.index, block_stroke.touched)
+		? removeBlock(origin, block_stroke.size, block_stroke.index, block_stroke.touched, mesh => {
+			if (!block_stroke.vertex_maps.has(mesh)) block_stroke.vertex_maps.set(mesh, buildVertexMap(mesh));
+			return block_stroke.vertex_maps.get(mesh);
+		})
 		: placeBlock(block_stroke.mesh, origin, block_stroke.size, block_stroke.index, block_stroke.vertex_map, block_stroke.touched);
 	if (counts.added || counts.removed) block_stroke.changed = true;
 	if (block_stroke.touched.size) {
@@ -1163,7 +1201,7 @@ function startBlockStroke(preview, event) {
 		preview, erase, created, mesh,
 		axis: target.axis, depth: target.depth, base: target.origin[target.axis], size: state.size,
 		index: buildTileIndex(), vertex_map: mesh ? buildVertexMap(mesh) : null,
-		touched: new Set(), placed: new Set(), changed: false,
+		touched: new Set(), placed: new Set(), changed: false, vertex_maps: new Map(),
 	};
 	blockStep(target.origin);
 	document.addEventListener('mousemove', moveBlockStroke);

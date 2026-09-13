@@ -62,17 +62,17 @@ console.log('   expect 6 faces, one each way, box 0,0,0 to 16,16,16: it sits on 
 await hover([16, 8, 8]);
 await click([16, 8, 8]);
 console.log('C. a second block against it:', await ev(shape));
-console.log('   expect 11 faces: the first block keeps its wall on x 16 and the second goes without its own,');
-console.log('   so there is one face between them rather than two, and the box runs to x 32');
+console.log('   expect 10 faces: the wall on x 16 is between two solids, so neither block keeps one there,');
+console.log('   and the box runs to x 32');
 
 // Ctrl takes the second one out and gives the first its wall back
 await hover([32, 8, 8], 2);
 await click([32, 8, 8], 2);
 console.log('D. ctrl removes it again:', await ev(shape));
-console.log('   expect 6 faces and the box back to 16 across: the first block still has the wall it always had');
+console.log('   expect 6 faces, one each way, and the box back to 16 across: the first block has its wall back');
 
 await ev(`Undo.undo(); true`);
-console.log('E. undo brings it back:', await ev(shape), ' expect 11 faces again');
+console.log('E. undo brings it back:', await ev(shape), ' expect 10 faces again');
 await ev(`Undo.undo(); true`);
 
 // A drag lays a run along the plane it started on
@@ -84,7 +84,7 @@ await sleep(300);
 await hover([8, 0, 8]);
 await dragWorld([8, 0, 8], [104, 0, 8]);
 console.log('F. a drag along the plane:', await ev(shape));
-console.log('   expect a row of blocks, x running 0 to over 96, one face between each pair rather than two');
+console.log('   expect a row of blocks, x running 0 to over 96, and only the two end walls facing along x (1,0,0 and -1,0,0 at 1 each)');
 
 // Full size blocks are four half cell tiles a side
 await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); unselectAllElements(); updateSelection();
@@ -148,7 +148,7 @@ await camera(24, 8, 8, 150, 110, 150);
 console.log('N. a floor of six tiles:', await ev(shape), ' expect 6 faces, all facing up');
 for (let x of [8, 24, 40]) { await hover([x, 0, 8]); await click([x, 0, 8]); }
 console.log('O. three blocks on it:', await ev(shape));
-console.log('   expect the six floor tiles plus the blocks, with one face between each pair and no undersides added');
+console.log('   expect 17 faces: the six floor tiles plus 11 block faces, no walls between the blocks and no undersides added');
 for (let x of [8, 24, 40]) { await hover([x, 16, 8], 2); await click([x, 16, 8], 2); }
 console.log('P. all three culled with ctrl:', await ev(shape));
 console.log('   expect the six floor tiles and nothing else: no holes in the floor, no walls left standing');
