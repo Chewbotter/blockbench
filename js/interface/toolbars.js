@@ -771,6 +771,7 @@ export const BARS = {
 				'dew_shave',
 				'dew_ramp',
 				'dew_terrain',
+				'dew_material_brush',
 				'dew_texture_brush',
 				'dew_paint_bucket',
 				'knife_tool',
