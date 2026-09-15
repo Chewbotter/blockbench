@@ -12,6 +12,8 @@ export const MATERIAL = {
 	ATLAS_NAME: 'atlas',								// the scene texture the fills go into
 	ATLAS_SIZES: [512, 1024, 2048, 4096],				// the atlas grows through these when a face does not fit
 	ALLOC_STEP: 4,										// regions start on this grid, the game's sample size
+	SAMPLE_UNITS: 4,									// fallback for the manifest's scale.sample_units: sizes and positions snap to it
+	ROTATED_MIN_SAMPLES: 2,								// a rotated cube is at least this many samples thick on every axis (contract 3.3)
 	GHOST_COLOR: 0xffb347,
 	MESSAGE_TIME: 2500,
 };
@@ -308,8 +310,48 @@ export function setGroupKind(group, kind) {
 	refreshPanel();
 }
 
-// Save into the game repo: models/<name>/<Name>.bbmodel, the one place the fork writes there
+// The contract's size rules (section 3, items 2 and 3), read from the manifest's scale block where it has them:
+// sizes and positions in multiples of a sample, at least the minimum thickness, and a rotated cube at least two
+// samples on every axis, since a thinner slab tilted off the lattice reads as scattered fragments in the game.
+export function fabricRules() {
+	let manifest = readManifest();
+	let scale = (manifest && manifest.scale) || {};
+	let step = scale.sample_units || MATERIAL.SAMPLE_UNITS;
+	return {step, min: scale.min_thickness_units || step, rotated_min: step * MATERIAL.ROTATED_MIN_SAMPLES};
+}
+export function validateFabric(cubes = Cube.all) {
+	let {step, min, rotated_min} = fabricRules();
+	let off = value => Math.abs(value / step - Math.round(value / step)) > 1e-6;
+	let problems = [];
+	for (let cube of cubes) {
+		if (cube.export === false) continue;
+		let size = [0, 1, 2].map(i => Math.abs(cube.to[i] - cube.from[i]));
+		let rotated = cube.rotation.some(angle => angle % 360 != 0);
+		let reasons = [];
+		if (size.some(off)) reasons.push(`size ${size.join(' x ')} not in multiples of ${step}`);
+		if (cube.from.some(off) || cube.to.some(off)) reasons.push(`position off the ${step} grid`);
+		if (size.some(v => v < min)) reasons.push(`thinner than ${min}`);
+		if (rotated && size.some(v => v < rotated_min)) reasons.push(`rotated and only ${size.join(' x ')}: a rotated cube needs ${rotated_min} on every axis`);
+		if (reasons.length) problems.push({cube, name: cube.name, reasons});
+	}
+	return problems;
+}
+
+// Save into the game repo: models/<name>/<Name>.bbmodel, the one place the fork writes there. Refused while a
+// cube breaks the size rules, with the offenders listed and selected, so the game never sees such a file.
 export function saveToGame() {
+	let problems = validateFabric();
+	if (problems.length) {
+		unselectAllElements();
+		problems.forEach(problem => problem.cube.select());
+		updateSelection();
+		Blockbench.showMessageBox({
+			title: 'Not saved: cubes break the fabric contract',
+			message: problems.slice(0, 12).map(problem => `${problem.name}: ${problem.reasons.join('; ')}`).join('\n')
+				+ (problems.length > 12 ? `\n... and ${problems.length - 12} more` : '') + '\n\nThe offending cubes are selected.',
+		});
+		return null;
+	}
 	let name = (Project.name || 'cluster').replace(/\.bbmodel$/i, '').replace(/[^\w\- ]+/g, '_').trim() || 'cluster';
 	let folder = PathModule.join(MATERIAL.GAME_DIR, MATERIAL.MODELS_DIR, name.toLowerCase());
 	let file = name[0].toUpperCase() + name.slice(1) + '.bbmodel';
@@ -370,7 +412,7 @@ let material_panel = new Panel('dew_materials', {
 				if (group) setGroupKind(group, event.target.value);
 			},
 			reload() { manifest_state.mtime = 0; refreshPanel(); },
-			save() { let path = saveToGame(); Blockbench.showQuickMessage(`Saved ${path}`, MATERIAL.MESSAGE_TIME); },
+			save() { let path = saveToGame(); if (path) Blockbench.showQuickMessage(`Saved ${path}`, MATERIAL.MESSAGE_TIME); },
 			tip(material) {
 				return `${material.name}: hardness ${material.hardness}, density ${material.density_kg_m3} kg/m3, fuel ${material.fuel_turns} turns`
 					+ (material.transparent ? ', transparent' : '') + (material.sheet ? ', sheet' : '') + (material.dents ? ', dents' : '')
@@ -479,9 +521,9 @@ BARS.defineActions(function() {
 		condition: () => Format.id == 'dew_scene',
 		click() {
 			let path = saveToGame();
-			Blockbench.showQuickMessage(`Saved ${path}`, MATERIAL.MESSAGE_TIME);
+			if (path) Blockbench.showQuickMessage(`Saved ${path}`, MATERIAL.MESSAGE_TIME);
 		},
 	});
 });
 
-Object.assign(window, {DEWMaterial: {MATERIAL, manifest_state, getMaterials, getMaterial, tagKeys, getAtlas, applyMaterial, selectMaterial, setGroupKind, saveToGame, atlasUsage, hasHandPaint, loadFill}});
+Object.assign(window, {DEWMaterial: {MATERIAL, manifest_state, getMaterials, getMaterial, tagKeys, getAtlas, applyMaterial, selectMaterial, setGroupKind, saveToGame, atlasUsage, hasHandPaint, loadFill, fabricRules, validateFabric}});

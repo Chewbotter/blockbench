@@ -15,26 +15,28 @@ for (let i = 0; i < 40; i++) { if (await ev('typeof Blockbench != "undefined" &&
 await send('Runtime.enable');
 
 // name, material, from, to, optional {origin, rotation}
+// Rev d.p: the floor sits ON the ground plane (y 0 to 4, its top at 4) and everything stands on it, so the walls
+// run y 4 to 68. A rotated cube is at least 8 thick, and -30 about X at the north eave rises to the south.
 const ROOM = [
-	['floor.concrete', 'concrete', [0, -4, 0], [192, 0, 192]],
-	['wall.north', 'brick', [0, 0, 0], [192, 64, 8]],
-	['wall.west', 'brick', [0, 0, 8], [8, 64, 192]],
-	// East wall with a window opening x 184..192, y 24..48, z 72..120
-	['wall.east.a', 'brick', [184, 0, 8], [192, 64, 72]],
-	['wall.east.b', 'brick', [184, 0, 120], [192, 64, 184]],
-	['wall.east.sill', 'brick', [184, 0, 72], [192, 24, 120]],
-	['wall.east.lintel', 'brick', [184, 48, 72], [192, 64, 120]],
-	['frame.bottom', 'metal', [184, 24, 72], [192, 28, 120]],
-	['frame.top', 'metal', [184, 44, 72], [192, 48, 120]],
-	['frame.left', 'metal', [184, 28, 72], [192, 44, 76]],
-	['frame.right', 'metal', [184, 28, 116], [192, 44, 120]],
-	['pane.glass', 'glass', [184, 28, 76], [188, 44, 116]],	// 4 thick, flush with the outer face: the wall is 8 thick, so a centred pane would sit at x 186, off the 4 grid
-	// South wall, stucco, with a door opening x 80..112 (32 wide), y 0..48
-	['wall.south.a', 'stucco', [8, 0, 184], [80, 64, 192]],
-	['wall.south.b', 'stucco', [112, 0, 184], [184, 64, 192]],
-	['wall.south.lintel', 'stucco', [80, 48, 184], [112, 64, 192]],
-	// Roof: a wooden slab pitched 30 degrees about the north eave, long enough to reach past the south wall
-	['roof.wood', 'wood', [0, 64, 0], [192, 68, 224], {origin: [0, 64, 0], rotation: [30, 0, 0]}],
+	['floor.concrete', 'concrete', [0, 0, 0], [192, 4, 192]],
+	['wall.north', 'brick', [0, 4, 0], [192, 68, 8]],
+	['wall.west', 'brick', [0, 4, 8], [8, 68, 192]],
+	// East wall with a window opening x 184..192, y 28..52, z 72..120
+	['wall.east.a', 'brick', [184, 4, 8], [192, 68, 72]],
+	['wall.east.b', 'brick', [184, 4, 120], [192, 68, 184]],
+	['wall.east.sill', 'brick', [184, 4, 72], [192, 28, 120]],
+	['wall.east.lintel', 'brick', [184, 52, 72], [192, 68, 120]],
+	['frame.bottom', 'metal', [184, 28, 72], [192, 32, 120]],
+	['frame.top', 'metal', [184, 48, 72], [192, 52, 120]],
+	['frame.left', 'metal', [184, 32, 72], [192, 48, 76]],
+	['frame.right', 'metal', [184, 32, 116], [192, 48, 120]],
+	['pane.glass', 'glass', [184, 32, 76], [188, 48, 116]],	// 4 thick, flush with the outer face: the wall is 8 thick, so a centred pane would sit at x 186, off the 4 grid
+	// South wall, stucco, with a door opening x 80..112 (32 wide), y 4..52 (48 tall)
+	['wall.south.a', 'stucco', [8, 4, 184], [80, 68, 192]],
+	['wall.south.b', 'stucco', [112, 4, 184], [184, 68, 192]],
+	['wall.south.lintel', 'stucco', [80, 52, 184], [112, 68, 192]],
+	// Roof: a wooden slab 8 thick, pitched 30 degrees about the north eave and rising to the south
+	['roof.wood', 'wood', [0, 68, 0], [192, 76, 224], {origin: [0, 68, 0], rotation: [-30, 0, 0]}],
 ];
 
 await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); Cube.all.slice().forEach(c => c.remove()); unselectAllElements(); updateSelection();
@@ -49,6 +51,13 @@ for (const [name, material, from, to, extra = {}] of ROOM) {
 }
 await sleep(300);
 console.log('built:', await ev(`JSON.stringify({cubes: Cube.all.length, atlas: DEWMaterial.atlasUsage(), group_kind: Group.all[0].game})`));
+
+// The save gate: a 4 thick rotated slab is refused with the cube named, then removed
+await ev(`(() => { new Cube({name: 'bad.slab', from: [0, 100, 0], to: [64, 104, 64], origin: [0, 100, 0], rotation: [20, 0, 0]}).init(); return true; })()`);
+console.log('gate:', await ev(`JSON.stringify({rules: DEWMaterial.fabricRules(), problems: DEWMaterial.validateFabric().map(p => p.name + ': ' + p.reasons.join('; ')), refused: DEWMaterial.saveToGame() == null})`));
+console.log('   expect rules step 4 min 4 rotated_min 8, one problem naming bad.slab, refused true');
+await ev(`(() => { if (Dialog.open) Dialog.open.close(); Cube.all.find(c => c.name == 'bad.slab').remove(); return true; })()`);
+console.log('   clean again:', await ev(`DEWMaterial.validateFabric().length`), ' expect 0');
 
 const saved_path = await ev(`DEWMaterial.saveToGame()`);
 await sleep(800);
@@ -67,7 +76,9 @@ console.log('  group tags (model.groups, format 5.0):', JSON.stringify((file.gro
 const wall = cubes.find(e => e.name == 'wall.north');
 console.log('  one tagged cube, wall.north:', JSON.stringify({name: wall.name, uuid: wall.uuid, from: wall.from, to: wall.to, game: wall.game, south_uv: wall.faces.south.uv, south_texture: wall.faces.south.texture}));
 const roof = cubes.find(e => e.name == 'roof.wood');
-console.log('  the pitched roof:', JSON.stringify({from: roof.from, to: roof.to, origin: roof.origin, rotation: roof.rotation, game: roof.game}));
+const south_end_y = roof.origin[1] + (roof.to[2] - roof.origin[2]) * Math.sin(-roof.rotation[0] * Math.PI / 180);
+console.log('  the pitched roof:', JSON.stringify({from: roof.from, to: roof.to, origin: roof.origin, rotation: roof.rotation, game: roof.game, thickness: roof.to[1] - roof.from[1], south_end_rises_to_y: Math.round(south_end_y)}));
+console.log('  floor top / wall base:', JSON.stringify({floor_top: cubes.find(e => e.name == 'floor.concrete').to[1], wall_base: wall.from[1]}), ' expect 4 and 4');
 console.log('  the pane:', JSON.stringify({from: cubes.find(e => e.name == 'pane.glass').from, to: cubes.find(e => e.name == 'pane.glass').to, game: cubes.find(e => e.name == 'pane.glass').game}));
 console.log('page errors:', errors.length ? errors : 'none');
 ws.close();
