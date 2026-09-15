@@ -311,6 +311,7 @@ export const MenuBar = {
 			new MenuSeparator('dew'),
 			'dew_add_block',
 			'dew_apply_material',
+			'dew_prop_snap',
 			'dew_save_to_game',
 			'dew_group_tiles',
 			'dew_rotate_group_cw',

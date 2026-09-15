@@ -12,6 +12,8 @@ export const DEW = {
 	EXPORT_SCALE: 16,			// a 16-unit cube exports as 1.0, the game imports at 0.6 m per glTF unit
 	GRID_Y: -0.05,				// ground grid sits just under y = 0 so floor tiles cover it
 	THIN_LINE_OPACITY: 0.3,		// half-cell lines; full-tile lines are opaque
+	SAMPLE: 4,					// the game's destruction sample: fabric snaps to it (the manifest's scale block is the authority, this is the grid's own copy)
+	SAMPLE_LINE_OPACITY: 0.1,	// 4 unit lines between the half-cell lines
 	STOREY_LINE_OPACITY: 0.35,
 	CAMERA_OFFSET: [220, 260, 380],	// new scenes look at the cluster center from here
 	BACKFACE_TINT: 0.85,		// how far back faces are pulled toward BACKFACE_COLOR in the viewport, 0 to 1
@@ -37,11 +39,13 @@ function buildDewGrid(parent) {
 	const {HALF_CELL, TILE, STOREY, CLUSTER_SIZE: C, STOREYS_SHOWN, GRID_Y: y} = DEW;
 	let color = new THREE.Color(CustomTheme.data.colors.grid);
 	let thin = [], bold = [], storeys = [];
-	for (let i = 0; i <= C; i += HALF_CELL) {
-		let target = (i % TILE == 0) ? bold : thin;
+	let sample = [];
+	for (let i = 0; i <= C; i += DEW.SAMPLE) {
+		let target = (i % TILE == 0) ? bold : (i % HALF_CELL == 0) ? thin : sample;
 		target.push(i, y, 0, i, y, C);
 		target.push(0, y, i, C, y, i);
 	}
+	parent.add(lineSegments(sample, new THREE.LineBasicMaterial({color, transparent: true, opacity: DEW.SAMPLE_LINE_OPACITY})));
 	let top = STOREY * STOREYS_SHOWN;
 	for (let s = 1; s <= STOREYS_SHOWN; s++) {
 		let h = s * STOREY;

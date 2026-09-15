@@ -363,6 +363,39 @@ export function saveToGame() {
 	return path;
 }
 
+// The fabric snap (handoff section 7, item 2): moves and resizes step by a sample (4) in DEW scenes, a cube can
+// not be resized under the minimum (4, or 8 once it is rotated), and a toggle drops to whole units for props.
+// Both hang off the format: canvasGridSize reads Format.edit_size and Cube.resize calls Format.cube_size_limiter.
+let prop_snap = false;
+export function propSnap() { return prop_snap; }
+function fabricMinimum(cube) {
+	let {min, rotated_min} = fabricRules();
+	return cube.rotation.some(angle => angle % 360 != 0) ? rotated_min : min;
+}
+const fabric_limiter = {
+	test(cube, values = {}) {
+		let from = values.from || cube.from, to = values.to || cube.to;
+		let min = fabricMinimum(cube);
+		return [0, 1, 2].some(i => Math.abs(to[i] - from[i]) < min - 1e-6);
+	},
+	move() {},
+	// Called by Cube.resize with the axis and the side being dragged (negative: the from side moves), and by the
+	// format switch with neither. The dragged side is pushed back out to the minimum; the other stays put.
+	clamp(cube, values = {}, axis, negative) {
+		let min = fabricMinimum(cube);
+		for (let i of axis == undefined ? [0, 1, 2] : [axis]) {
+			let size = cube.to[i] - cube.from[i];
+			if (Math.abs(size) >= min - 1e-6) continue;
+			if (negative) cube.from[i] = cube.to[i] - min;
+			else cube.to[i] = cube.from[i] + min;
+		}
+	},
+};
+Object.assign(Formats.dew_scene, {
+	edit_size: () => prop_snap ? 16 : 16 / fabricRules().step,	// canvasGridSize returns 16 / edit_size units
+	cube_size_limiter: fabric_limiter,
+});
+
 // Panel: the palette from the manifest, the selection's tags, and the atlas usage
 function refreshPanel() {
 	let vue = Panels.dew_materials && Panels.dew_materials.inside_vue;
@@ -513,6 +546,18 @@ BARS.defineActions(function() {
 			applyMaterial(Cube.selected, manifest_state.selected);
 		},
 	});
+	new Toggle('dew_prop_snap', {
+		name: 'Prop Snap (whole units)',
+		description: 'Move and resize in whole units instead of the 4 unit fabric grid, for props that sit off the sample lattice. The fabric size minimum still applies',
+		icon: 'chair',
+		category: 'edit',
+		default: false,
+		condition: () => Format.id == 'dew_scene',
+		onChange(value) {
+			prop_snap = value;
+			Blockbench.showQuickMessage(value ? 'Prop snap: whole units' : `Fabric snap: ${fabricRules().step} units`, MATERIAL.MESSAGE_TIME);
+		},
+	});
 	new Action('dew_save_to_game', {
 		name: 'Save to Game Folder',
 		description: 'Save this scene into the game repo as models/<name>/<Name>.bbmodel',
@@ -526,4 +571,4 @@ BARS.defineActions(function() {
 	});
 });
 
-Object.assign(window, {DEWMaterial: {MATERIAL, manifest_state, getMaterials, getMaterial, tagKeys, getAtlas, applyMaterial, selectMaterial, setGroupKind, saveToGame, atlasUsage, hasHandPaint, loadFill, fabricRules, validateFabric}});
+Object.assign(window, {DEWMaterial: {MATERIAL, manifest_state, getMaterials, getMaterial, tagKeys, getAtlas, applyMaterial, selectMaterial, setGroupKind, saveToGame, atlasUsage, hasHandPaint, loadFill, fabricRules, validateFabric, propSnap, fabric_limiter}});
