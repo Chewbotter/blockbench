@@ -677,6 +677,7 @@ onVueSetup(function() {
 			isMobile: Blockbench.isMobile,
 			streamer_mode: settings.streamer_mode.value,
 			selection_info: '',
+			poly_info: '',		// triangles drawn, selected / scene, updated with the selection
 			Format: null,
 			show_modifier_keys: settings.status_bar_modifier_keys.value,
 			warnings: Validator.warnings,
@@ -696,7 +697,28 @@ onVueSetup(function() {
 			toggleStreamerMode() {
 				ActionControl.select(`setting: ${tl('settings.streamer_mode')}`);
 			},
+			// Triangles an element draws: a cube face is two unless it is disabled (texture null), a mesh face with n
+			// corners is n - 2, anything else (splines, locators) counts nothing
+			countTriangles(elements) {
+				let tris = 0;
+				for (let element of elements) {
+					if (element instanceof Cube) {
+						for (let key in element.faces) if (element.faces[key].texture !== null) tris += 2;
+					} else if (element instanceof Mesh) {
+						for (let key in element.faces) tris += Math.max(0, element.faces[key].vertices.length - 2);
+					}
+				}
+				return tris;
+			},
+			updatePolyInfo() {
+				if (!Modes.edit && !Modes.paint) { this.poly_info = ''; return; }
+				let total = this.countTriangles(Outliner.elements.filter(element => element.visibility !== false && element.export !== false));
+				let selected = Outliner.selected.length ? this.countTriangles(Outliner.selected) : 0;
+				let fmt = n => n.toLocaleString('en-US');
+				this.poly_info = Outliner.selected.length ? `${fmt(selected)} / ${fmt(total)} tris` : `${fmt(total)} tris`;
+			},
 			updateSelectionInfo() {
+				this.updatePolyInfo();
 				let selection_mode = BarItems.selection_mode.value;
 				let spline_selection_mode = BarItems.spline_selection_mode.value;
 				if (Modes.edit && Mesh.selected.length && selection_mode !== 'object') {
@@ -797,6 +819,7 @@ onVueSetup(function() {
 				</template>
 
 				<div class="status_selection_info">{{ selection_info }}</div>
+				<div class="status_selection_info" v-if="poly_info" title="Triangles drawn: selected / scene. Hidden elements and helpers marked not exported are left out of the scene count">{{ poly_info }}</div>
 
 				<div class="f_right" id="validator_status" v-if="warnings.length || errors.length" @click="openValidator()">
 					<span v-if="warnings.length" style="color: var(--color-warning)">{{ warnings.length }}<i class="material-icons">warning</i></span>
