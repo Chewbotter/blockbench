@@ -138,4 +138,20 @@ Blockbench.on('finished_edit', () => {
 	dirty.clear();
 });
 
-Object.assign(window, {DEWPerf: {PERF, perf_stats}});
+// Undo snapshots. Face.getUndoCopy built a whole MeshFace through the constructor (property resets, merges) and then
+// deleted the fields it did not want, 4.5 microseconds a face: 45 of the 50 ms a 10k face mesh cost per copy, twice
+// per edit. The copy the restore reads (Mesh.extend, then MeshFace.extend) is four fields, so build those directly.
+// Same content as the stock copy, checked field for field by cdp_undo_copy.mjs; the stock method stays reachable.
+const stockFaceUndoCopy = MeshFace.prototype.getUndoCopy;
+MeshFace.prototype.getUndoCopy = function() {
+	let copy = {texture: this.texture, uv: {}};
+	// As the stock copy normalised them through MeshFace.extend: one entry per vertex, a missing one is [0, 0]
+	for (let vkey of this.vertices) {
+		let uv = this.uv[vkey];
+		copy.uv[vkey] = uv ? uv.slice() : [0, 0];
+	}
+	for (let key in MeshFace.properties) MeshFace.properties[key].copy(this, copy);
+	return copy;
+};
+
+Object.assign(window, {DEWPerf: {PERF, perf_stats, stockFaceUndoCopy}});
