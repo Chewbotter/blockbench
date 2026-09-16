@@ -85,6 +85,7 @@ function rotateImageDataByDegrees(imageData, degrees) {
 
 
 export const UVEditor = {
+	max_displayed_faces: 2000,	// per mesh, in the UV panel; see filterMeshFaces
 	face: 'north',
 	size: 320,
 	grid: 1,
@@ -4211,17 +4212,31 @@ Interface.definePanels(function() {
 					})
 					return max - min;
 				},
+				// Above UVEditor.max_displayed_faces faces a mesh shows only its selected faces here, and at most that many of
+				// them: every face drawn is about seven DOM nodes, and select-all on a 10k face mesh took 3.9 seconds and
+				// 70k nodes. UV operations act on the selection itself, so the hidden faces still move with it.
 				filterMeshFaces(element) {
+					let cap = UVEditor.max_displayed_faces;
 					let keys = Object.keys(element.faces);
-					if (keys.length > 2000) {
+					if (keys.length > cap) {
 						let result = {};
-						element.getSelectedFaces().forEach(key => {
-							result[key] = element.faces[key];
-						})
+						let selected = element.getSelectedFaces();
+						for (let i = 0; i < selected.length && i < cap; i++) result[selected[i]] = element.faces[selected[i]];
 						return result;
 					} else {
 						return element.faces;
 					}
+				},
+				meshFaceCapNote() {
+					let cap = UVEditor.max_displayed_faces;
+					let hidden = 0, shown = 0;
+					for (let element of this.getDisplayedUVElements()) {
+						if (element.type != 'mesh' || Object.keys(element.faces).length <= cap) continue;
+						let selected = element.getSelectedFaces().length;
+						shown += Math.min(selected, cap);
+						hidden += Math.max(0, selected - cap);
+					}
+					return hidden ? `Showing ${shown} of ${shown + hidden} selected faces. UV edits still apply to all of them.` : '';
 				},
 				isScalingAvailable() {
 					if (this.mappable_elements[0]?.getTypeBehavior('cube_faces')) {
@@ -4989,6 +5004,7 @@ Interface.definePanels(function() {
 							:style="{width: inner_width + 'px', height: inner_height + 'px', margin: getFrameMargin(true), '--inner-width': inner_width + 'px', '--inner-height': inner_height + 'px'}"
 						>
 							<div id="uv_frame_spacer" :style="{left: (inner_width+getFrameMargin()[0])+'px', top: (inner_height+getFrameMargin()[1])+'px'}"></div>
+							<div v-if="meshFaceCapNote()" class="uv_face_cap_note" style="position: absolute; left: 4px; top: 4px; z-index: 4; padding: 2px 6px; font-size: 12px; background: var(--color-back); color: var(--color-subtle_text); pointer-events: none;">{{ meshFaceCapNote() }}</div>
 							<div v-if="atlas_overlay" :style="atlas_overlay.grid"></div>
 							<div v-if="atlas_overlay && atlas_overlay.cell" :style="atlas_overlay.cell"></div>
 
