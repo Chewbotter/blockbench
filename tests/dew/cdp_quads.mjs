@@ -69,5 +69,12 @@ console.log('E. no uvs, opposite winding:', await ev(`(() => { Mesh.all.slice().
 	return JSON.stringify({before_normals: before, merged: out.merged, why: out.why, quad_corners: quad.vertices.length, quad_normal_y: Math.round(quad.getNormal(true)[1])}); })()`));
 console.log('   expect before_normals [-1, 1] (opposite winding), merged 1, 4 corners, the quad taking the first triangle normal');
 
+// Untextured faces with the importer's placeholder uvs (different on every triangle) still merge
+console.log('F. placeholder uvs on untextured faces:', await ev(`(() => { Mesh.all.slice().forEach(m => m.remove()); let m = new Mesh({name: 'placeholder', vertices: {}}); let map = {};
+	let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
+	let tri = pts => { let vs = pts.map(vert); let uv = {[vs[0]]: [0, 0], [vs[1]]: [64, 0], [vs[2]]: [0, 64]}; m.addFaces(new MeshFace(m, {vertices: vs, uv, texture: false})); };
+	tri([[0,0,0],[16,0,0],[16,0,16]]); tri([[0,0,0],[16,0,16],[0,0,16]]);
+	m.init(); m.select(); return JSON.stringify(DEWQuads.mergeTrianglesToQuads()); })()`), ' expect merged 1, uv_seam 0');
+
 console.log('page errors:', errors.length ? errors : 'none');
 ws.close();

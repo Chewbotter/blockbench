@@ -97,8 +97,11 @@ export function mergeTrianglesToQuads(meshes = Mesh.selected) {
 			let [a, b] = key.split('|');
 			let c = f1.vertices.find(v => v != a && v != b), d = f2.vertices.find(v => v != a && v != b);
 			if (!c || !d || c == d) continue;
-			// The shared edge must read the same texture from both sides, or the diagonal is a uv seam
-			if (!sameUV(f1.uv[a], f2.uv[a]) || !sameUV(f1.uv[b], f2.uv[b])) { why.uv_seam++; continue; }
+			// A textured face must read the same texels from both sides of the shared edge, or the diagonal is a uv seam.
+			// An untextured face has nothing to tear: the glTF importer gives such faces placeholder uvs that differ on
+			// every triangle, which is not a seam.
+			let textured = f1.texture !== false && f1.texture != null;
+			if (textured && (!sameUV(f1.uv[a], f2.uv[a]) || !sameUV(f1.uv[b], f2.uv[b]))) { why.uv_seam++; continue; }
 			let order = [c, a, d, b];
 			let points = order.map(point);
 			if (!convex(points, n1)) { why.concave++; continue; }
