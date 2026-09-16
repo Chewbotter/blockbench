@@ -6,6 +6,7 @@ import { THREE } from "../lib/libs";
 
 export const QUADS = {
 	MAX_ANGLE: 5,			// degrees between the two triangles' normals for them to count as one plane
+	WELD_DISTANCE: 0.001,	// vertices closer than this are one vertex: importers split them wherever normals or uvs differ
 	MESSAGE_TIME: 3000,
 };
 
@@ -38,13 +39,40 @@ function skew(points) {
 	return worst;
 }
 
+// Vertices at one position become one vertex, so triangles that only touch start sharing edges. Face uvs are
+// per face and per vertex in Blockbench, so nothing is lost by welding.
+function weldVertices(mesh) {
+	let q = 1 / QUADS.WELD_DISTANCE;
+	let by_position = new Map(), remap = new Map();
+	for (let vkey in mesh.vertices) {
+		let key = mesh.vertices[vkey].map(v => Math.round(v * q)).join(',');
+		if (by_position.has(key)) remap.set(vkey, by_position.get(key));
+		else by_position.set(key, vkey);
+	}
+	if (!remap.size) return 0;
+	for (let fkey in mesh.faces) {
+		let face = mesh.faces[fkey];
+		let seen = new Set();
+		let vertices = face.vertices.map(vkey => remap.get(vkey) || vkey).filter(vkey => !seen.has(vkey) && seen.add(vkey));
+		let uv = {};
+		face.vertices.forEach((vkey, i) => { let to = remap.get(vkey) || vkey; if (!uv[to]) uv[to] = face.uv[vkey]; });
+		if (vertices.length < 3) { delete mesh.faces[fkey]; continue; }	// a degenerate sliver collapsed
+		face.vertices = vertices;
+		face.uv = uv;
+	}
+	for (let vkey of remap.keys()) delete mesh.vertices[vkey];
+	return remap.size;
+}
+
 export function mergeTrianglesToQuads(meshes = Mesh.selected) {
 	meshes = meshes.filter(mesh => mesh instanceof Mesh);
 	if (!meshes.length) return null;
 	let min_dot = Math.cos(QUADS.MAX_ANGLE * Math.PI / 180);
-	let merged = 0, left = 0;
+	let merged = 0, left = 0, welded = 0;
+	let why = {shared_edges: 0, texture: 0, angle: 0, uv_seam: 0, concave: 0};
 	Undo.initEdit({elements: meshes});
 	for (let mesh of meshes) {
+		welded += weldVertices(mesh);
 		let point = vkey => new THREE.Vector3().fromArray(mesh.vertices[vkey]);
 		let edges = new Map();
 		for (let fkey in mesh.faces) {
@@ -59,18 +87,19 @@ export function mergeTrianglesToQuads(meshes = Mesh.selected) {
 		let candidates = [];
 		for (let [key, fkeys] of edges) {
 			if (fkeys.length != 2) continue;
+			why.shared_edges++;
 			let [f1, f2] = fkeys.map(fkey => mesh.faces[fkey]);
-			if (f1.texture !== f2.texture) continue;
+			if (f1.texture !== f2.texture) { why.texture++; continue; }
 			let n1 = worldNormal(mesh, f1), n2 = worldNormal(mesh, f2);
-			if (n1.dot(n2) < min_dot) continue;
+			if (n1.dot(n2) < min_dot) { why.angle++; continue; }
 			let [a, b] = key.split('|');
 			let c = f1.vertices.find(v => v != a && v != b), d = f2.vertices.find(v => v != a && v != b);
 			if (!c || !d || c == d) continue;
 			// The shared edge must read the same texture from both sides, or the diagonal is a uv seam
-			if (!sameUV(f1.uv[a], f2.uv[a]) || !sameUV(f1.uv[b], f2.uv[b])) continue;
+			if (!sameUV(f1.uv[a], f2.uv[a]) || !sameUV(f1.uv[b], f2.uv[b])) { why.uv_seam++; continue; }
 			let order = [c, a, d, b];
 			let points = order.map(point);
-			if (!convex(points, n1)) continue;
+			if (!convex(points, n1)) { why.concave++; continue; }
 			candidates.push({fkeys, order, skew: skew(points), normal: n1, texture: f1.texture, uv: {[a]: f1.uv[a], [b]: f1.uv[b], [c]: f1.uv[c], [d]: f2.uv[d]}});
 		}
 		candidates.sort((p, q) => p.skew - q.skew);
@@ -85,15 +114,17 @@ export function mergeTrianglesToQuads(meshes = Mesh.selected) {
 		}
 		for (let fkey in mesh.faces) if (mesh.faces[fkey].vertices.length == 3) left++;
 	}
-	if (!merged) {
+	if (!merged && !welded) {
 		Undo.cancelEdit();
-		Blockbench.showQuickMessage('No triangle pairs to merge', QUADS.MESSAGE_TIME);
-		return {merged, left};
+		// Say why, so a mesh that will not merge can be read: no shared edges means split vertices the weld did not
+		// catch (positions differ), the rest are the rules
+		Blockbench.showQuickMessage(`No triangle pairs to merge: ${why.shared_edges} shared edges, rejected ${why.angle} by angle, ${why.uv_seam} by uv seam, ${why.texture} by texture, ${why.concave} concave`, QUADS.MESSAGE_TIME * 2);
+		return {merged, left, welded, why};
 	}
 	Undo.finishEdit('Merge triangles into quads');
 	Canvas.updateView({elements: meshes, element_aspects: {geometry: true, faces: true, uv: true}, selection: true});
-	Blockbench.showQuickMessage(`Merged ${merged} pairs into quads, ${left} triangles left`, QUADS.MESSAGE_TIME);
-	return {merged, left};
+	Blockbench.showQuickMessage(`${welded ? `Welded ${welded} vertices, ` : ''}merged ${merged} pairs into quads, ${left} triangles left`, QUADS.MESSAGE_TIME);
+	return {merged, left, welded, why};
 }
 
 BARS.defineActions(function() {

@@ -44,5 +44,19 @@ console.log('   undo:', await ev(`(() => { Undo.undo(); return JSON.stringify({f
 await ev(`Undo.redo(); true`);
 console.log('B. run again on the result:', await ev(`JSON.stringify(DEWQuads.mergeTrianglesToQuads())`), ' expect merged 0, left 6, no undo entry added');
 console.log('   action offered:', await ev(`JSON.stringify({offered: Condition(BarItems.dew_merge_triangles.condition), in_menu: MenuBar.menus.mesh.structure.includes('dew_merge_triangles')})`), ' expect both true');
+// An import with split vertices: every triangle owns its own copies, as a glTF importer leaves them
+await ev(`(() => { Mesh.all.slice().forEach(m => m.remove());
+	let m = new Mesh({name: 'split', vertices: {}});
+	let tri = (pts, uvs) => { let vs = pts.map(p => m.addVertices(p)[0]); let uv = {}; vs.forEach((v, i) => uv[v] = uvs[i]); m.addFaces(new MeshFace(m, {vertices: vs, uv, texture: false})); };
+	for (let x = 0; x < 32; x += 16) { tri([[x,0,0],[x+16,0,0],[x+16,0,16]], [[x,0],[x+16,0],[x+16,16]]); tri([[x,0,0],[x+16,0,16],[x,0,16]], [[x,0],[x+16,16],[x,16]]); }
+	m.init(); m.select(); updateSelection(); return JSON.stringify({vertices: Object.keys(m.vertices).length, faces: Object.keys(m.faces).length}); })()`).then(v => console.log('C. split mesh:', v, ' expect 12 vertices for 4 faces'));
+console.log('   merge welds first:', await ev(`JSON.stringify(DEWQuads.mergeTrianglesToQuads())`), ' expect welded 6, merged 2, left 0');
+console.log('   result:', await ev(`(() => { let m = Mesh.all[0]; return JSON.stringify({vertices: Object.keys(m.vertices).length, quads: Object.values(m.faces).filter(f => f.vertices.length == 4).length, shared: Object.values(m.faces).every(f => f.vertices.every(v => m.vertices[v]))}); })()`), ' expect 6 vertices, 2 quads, every face on live vertices');
+console.log('D. a lone folded pair reports why:', await ev(`(() => { Mesh.all.slice().forEach(m => m.remove()); let m = new Mesh({name: 'fold', vertices: {}}); let map = {};
+	let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
+	let tri = pts => { let vs = pts.map(vert); let uv = {}; vs.forEach(v => uv[v] = [0, 0]); m.addFaces(new MeshFace(m, {vertices: vs, uv, texture: false})); };
+	tri([[0,0,0],[16,0,0],[16,0,16]]); tri([[16,0,0],[16,16,16],[16,0,16]]);
+	m.init(); m.select(); return JSON.stringify(DEWQuads.mergeTrianglesToQuads()); })()`), ' expect merged 0, welded 0, why shared_edges 1 angle 1');
+
 console.log('page errors:', errors.length ? errors : 'none');
 ws.close();
