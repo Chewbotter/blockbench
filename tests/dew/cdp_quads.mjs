@@ -58,5 +58,16 @@ console.log('D. a lone folded pair reports why:', await ev(`(() => { Mesh.all.sl
 	tri([[0,0,0],[16,0,0],[16,0,16]]); tri([[16,0,0],[16,16,16],[16,0,16]]);
 	m.init(); m.select(); return JSON.stringify(DEWQuads.mergeTrianglesToQuads()); })()`), ' expect merged 0, welded 0, why shared_edges 1 angle 1');
 
+// An untextured pair with no uvs at all, wound opposite ways: one plane, one quad
+console.log('E. no uvs, opposite winding:', await ev(`(() => { Mesh.all.slice().forEach(m => m.remove()); let m = new Mesh({name: 'bare', vertices: {}}); let map = {};
+	let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
+	m.addFaces(new MeshFace(m, {vertices: [[0,0,0],[16,0,0],[16,0,16]].map(vert), texture: false}));
+	m.addFaces(new MeshFace(m, {vertices: [[0,0,0],[0,0,16],[16,0,16]].map(vert), texture: false}));
+	for (let f of Object.values(m.faces)) f.uv = {};
+	m.init(); m.select(); let before = Object.values(m.faces).map(f => Math.round(f.getNormal(true)[1]));
+	let out = DEWQuads.mergeTrianglesToQuads(); let quad = Object.values(m.faces)[0];
+	return JSON.stringify({before_normals: before, merged: out.merged, why: out.why, quad_corners: quad.vertices.length, quad_normal_y: Math.round(quad.getNormal(true)[1])}); })()`));
+console.log('   expect before_normals [-1, 1] (opposite winding), merged 1, 4 corners, the quad taking the first triangle's normal');
+
 console.log('page errors:', errors.length ? errors : 'none');
 ws.close();

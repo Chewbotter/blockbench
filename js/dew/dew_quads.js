@@ -14,7 +14,8 @@ function worldNormal(mesh, face) {
 	let n = face.getNormal(true);
 	return new THREE.Vector3().fromArray(Array.isArray(n) ? n : n.toArray());
 }
-const sameUV = (a, b) => a && b && Math.abs(a[0] - b[0]) < 1e-4 && Math.abs(a[1] - b[1]) < 1e-4;
+// Missing uvs (an untextured import has none) are not a seam; two present uvs must agree within a hundredth of a texel
+const sameUV = (a, b) => (!a && !b) || (a && b && Math.abs(a[0] - b[0]) < 0.01 && Math.abs(a[1] - b[1]) < 0.01);
 
 // Is the polygon c, a, d, b convex, seen along its normal
 function convex(points, normal) {
@@ -91,7 +92,8 @@ export function mergeTrianglesToQuads(meshes = Mesh.selected) {
 			let [f1, f2] = fkeys.map(fkey => mesh.faces[fkey]);
 			if (f1.texture !== f2.texture) { why.texture++; continue; }
 			let n1 = worldNormal(mesh, f1), n2 = worldNormal(mesh, f2);
-			if (n1.dot(n2) < min_dot) { why.angle++; continue; }
+			// Coplanar either way round: an importer does not always keep the winding consistent, and the quad takes f1's
+			if (Math.abs(n1.dot(n2)) < min_dot) { why.angle++; continue; }
 			let [a, b] = key.split('|');
 			let c = f1.vertices.find(v => v != a && v != b), d = f2.vertices.find(v => v != a && v != b);
 			if (!c || !d || c == d) continue;
