@@ -39,7 +39,7 @@ const shape = `(() => { let m = Mesh.all[0]; let faces = Object.values(m.faces);
 	return JSON.stringify({quads: quads.length, tris: tris.length, quads_keep_normal: up, quad_uvs_match_position: uv_ok, status: Interface.status_bar.vue.poly_info}); })()`;
 console.log('start:', await ev(shape), ' expect 0 quads, 14 tris');
 console.log('A. merge:', await ev(`JSON.stringify(DEWQuads.mergeTrianglesToQuads())`), ' expect merged 4, left 6');
-console.log('   result:', await ev(shape), ' expect 4 quads keeping the triangles' normal, uvs intact, 6 tris (folded, seam, texture pairs), status 14 tris either way');
+console.log('   result:', await ev(shape), ' expect 4 quads keeping the triangles normal, uvs intact, 6 tris (folded, seam, texture pairs), status 14 tris either way');
 console.log('   undo:', await ev(`(() => { Undo.undo(); return JSON.stringify({faces: Object.keys(Mesh.all[0].faces).length, action: Undo.history.at(Undo.index)?.action}); })()`), ' expect 14 faces back');
 await ev(`Undo.redo(); true`);
 console.log('B. run again on the result:', await ev(`JSON.stringify(DEWQuads.mergeTrianglesToQuads())`), ' expect merged 0, left 6, no undo entry added');
