@@ -30,6 +30,8 @@ export const RIG = {
 	POSE_FORMAT: 1,
 	DECIMALS: 4,
 	MESSAGE_TIME: 5000,
+	BONE_OPACITY: 0.35,		// bones while Translucent Bones is on, so the mesh shows through the rig
+	SELECTED_BONE_OPACITY: 0.7,	// the selected bone, kept clearer so it can still be told apart
 };
 
 const round = v => Math.round(v * 10 ** RIG.DECIMALS) / 10 ** RIG.DECIMALS;
@@ -390,6 +392,32 @@ BARS.defineActions(function() {
 				content,
 			});
 		},
+	});
+});
+
+// Translucent bones: the stock bone material is opaque and drawn over everything, so a posed mesh hides behind
+// its own rig. The stock updateFaces resets the opacity on every call (0.3 under the weight brush, 1 otherwise),
+// so the toggle's value is applied after it. Both materials are shared by every bone.
+let translucent_bones = true;
+const stockUpdateBoneFaces = ArmatureBone.preview_controller.updateFaces;
+ArmatureBone.preview_controller.updateFaces = function(element) {
+	stockUpdateBoneFaces.call(this, element);
+	let painting = Toolbox.selected && Toolbox.selected.id == 'weight_brush';
+	this.material.opacity = translucent_bones && !painting ? RIG.BONE_OPACITY : this.material.opacity;
+	this.material_selected.opacity = translucent_bones && !painting ? RIG.SELECTED_BONE_OPACITY : 1;
+};
+BARS.defineActions(function() {
+	new Toggle('dew_translucent_bones', {
+		name: 'Translucent Bones',
+		description: 'Draw armature bones see-through, so the mesh stays visible behind the rig while posing',
+		icon: 'opacity',
+		category: 'view',
+		default: true,
+		condition: () => Format.armature_rig,
+		onChange(value) {
+			translucent_bones = value;
+			if (ArmatureBone.all[0]) ArmatureBone.preview_controller.updateFaces(ArmatureBone.all[0]);
+		}
 	});
 });
 

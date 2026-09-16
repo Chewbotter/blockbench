@@ -528,6 +528,7 @@ export const MenuBar = {
 			'toggle_ground_plane',
 			'dew_scale_figure',
 			'dew_hide_back_faces',
+			'dew_translucent_bones',
 			'preview_checkerboard',
 			'pixel_grid',
 			'painting_grid',

@@ -5,7 +5,7 @@
 // rotation relative to rest and nothing else. D: the core glTF exporter writes the result back with the
 // skeleton, the names and both animations. E: the real soldier (four skins, rigid pieces on joints, names with
 // dots, four skinned meshes) imports whole, its weights sum to one, and the per-frame deformation cost is printed. F: File > Open
-// takes a .glb through the codec.
+// takes a .glb through the codec. G: the Translucent Bones toggle drives the shared bone materials.
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -112,6 +112,14 @@ if (fs.existsSync(soldier)) {
 // F. File > Open on a .glb goes through the codec into a new project
 console.log('F. open:', await ev(`(() => { let before = ModelProject.all.length; loadModelFile({path: ${JSON.stringify(fixture)}, name: 'rig_fixture.glb', content: ''});
 	return new Promise(r => setTimeout(() => r(JSON.stringify({new_project: ModelProject.all.length - before, format: Format.id, armatures: Armature.all.length, bones: ArmatureBone.all.length})), 1500)); })()`), ' expect 1 new project, format free, 1 armature, 3 bones');
+
+// G. Translucent Bones: on by default, the shared bone materials take the constants, off restores the stock 1
+console.log('G. translucent bones:', await ev(`(() => { let c = ArmatureBone.preview_controller; let out = {};
+	c.updateFaces(ArmatureBone.all[0]); out.on = [c.material.opacity, c.material_selected.opacity];
+	BarItems.dew_translucent_bones.set(false); out.off = [c.material.opacity, c.material_selected.opacity];
+	BarItems.dew_translucent_bones.set(true); out.back = [c.material.opacity, c.material_selected.opacity];
+	out.in_view_menu = MenuBar.menus.view.structure.includes('dew_translucent_bones');
+	return JSON.stringify(out); })()`), ' expect on 0.35 and 0.7, off 1 and 1, back 0.35 and 0.7, in the View menu');
 
 await sleep(200);
 console.log('page errors:', errors.length ? errors : 'none');
