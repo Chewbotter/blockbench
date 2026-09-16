@@ -85,10 +85,20 @@ if (fs.existsSync(soldier)) {
 	console.log('   weights:', await ev(`(() => { let bones = ArmatureBone.all; let out = {};
 		for (let m of Mesh.all) { let bad = 0, n = 0; for (let k in m.vertices) { let sum = 0; for (let b of bones) sum += b.getVertexWeight(m, k); n++; if (Math.abs(sum - 1) > 0.01) bad++; } out[m.name] = bad ? bad + ' of ' + n + ' off' : 'ok'; }
 		return JSON.stringify(out); })()`), ' expect every mesh ok (skinned ones sum to 1, rigid ones weight 1 to their own bone)');
-	console.log('   deformation cost:', await ev(`(() => { let a = Armature.all[0]; let skinned = Mesh.all.filter(m => Object.keys(m.vertices).length > 500);
-		let t = performance.now(); for (let m of skinned) { let offsets = a.calculateVertexDeformation(m); Mesh.preview_controller.displayDeformation(m, offsets); } let calc = performance.now() - t;
-		t = performance.now(); Animator.showDefaultPose(); let reset = performance.now() - t;
-		return JSON.stringify({meshes: skinned.map(m => m.name + ' ' + Object.keys(m.vertices).length), deform_ms: Math.round(calc), reset_ms: Math.round(reset)}); })()`), ' info: per-frame cost of posing the four biggest meshes');
+	// The cached deformation (dew_perf) against the stock one, on a posed frame so the offsets are not all zero
+	console.log('   deformation:', await ev(`(() => { let a = Armature.all[0]; let skinned = Mesh.all.filter(m => Object.keys(m.vertices).length > 500);
+		let anim = new Animation({name: 'probe', length: 1}).add(false); for (let n of ['thigh.L', 'spine', 'forearm.R']) anim.getBoneAnimator(ArmatureBone.all.find(b => b.name == n)).addKeyframe({channel: 'rotation', time: 0, data_points: [{x: 25, y: 10, z: -15}]});
+		Animator.showDefaultPose(true); Timeline.time = 0; Animator.stackAnimations([anim], false);
+		let t = performance.now(); let stock = skinned.map(m => DEWPerf.stockCalculateVertexDeformation.call(a, m)); let stock_ms = performance.now() - t;
+		DEWPerf.influence_cache.clear(); t = performance.now(); let first = skinned.map(m => a.calculateVertexDeformation(m)); let first_ms = performance.now() - t;
+		t = performance.now(); let cached = skinned.map(m => a.calculateVertexDeformation(m)); let cached_ms = performance.now() - t;
+		let worst = 0, moved = 0; skinned.forEach((m, i) => { for (let k in stock[i]) { for (let c = 0; c < 3; c++) worst = Math.max(worst, Math.abs(stock[i][k][c] - cached[i][k][c])); if (Math.hypot(...stock[i][k]) > 0.1) moved++; } });
+		t = performance.now(); skinned.forEach((m, i) => DEWPerf.stockDisplayDeformation.call(Mesh.preview_controller, m, cached[i])); let stock_display_ms = performance.now() - t;
+		let before = skinned.map(m => m.mesh.geometry.getAttribute('position').array.slice());
+		t = performance.now(); skinned.forEach((m, i) => Mesh.preview_controller.displayDeformation(m, cached[i])); let display_ms = performance.now() - t;
+		let display_worst = 0, in_place = true; skinned.forEach((m, i) => { let now = m.mesh.geometry.getAttribute('position').array; if (now.length != before[i].length) in_place = false; for (let k = 0; k < now.length; k++) display_worst = Math.max(display_worst, Math.abs(now[k] - before[i][k])); });
+		Timeline.time = 0; Animator.showDefaultPose(true); anim.remove(false);
+		return JSON.stringify({vertices: skinned.reduce((n, m) => n + Object.keys(m.vertices).length, 0), moved, worst_difference: worst, stock_ms: Math.round(stock_ms), first_ms: Math.round(first_ms), cached_ms: Math.round(cached_ms * 10) / 10, stock_display_ms: Math.round(stock_display_ms), display_ms: Math.round(display_ms), display_worst, in_place}); })()`), ' expect worst differences 0 (or 1e-14) with thousands of vertices moved, the in-place display matching the stock arrays; stock about 100 ms, cached a few ms, display down from about 30 ms');
 	const soldier_out = path.join(out_dir, 'Soldier_base_rigged.blockbench.gltf');
 	console.log('   export:', await ev(`Codecs.gltf.compile({encoding: 'ascii', armature: false, animations: true, scale: 16, embed_textures: true}).then(text => {
 		let g = JSON.parse(text);

@@ -231,4 +231,102 @@ controller.updateSelection = function(element) {
 	this.dispatchEvent('update_selection', {element});
 };
 
-Object.assign(window, {DEWPerf: {PERF, perf_stats, stockFaceUndoCopy, stockUpdateSelection}});
+// Armature deformation. The stock Armature.calculateVertexDeformation asks every bone for its weight on every
+// vertex, a string key built and looked up per pair, and multiplies the three matrices per vertex per bone: on
+// the soldier (4272 skinned vertices, 65 bones) 106 ms a frame, so scrubbing a pose ran at under 10 frames a
+// second. Here each mesh's influences are gathered once from the bones' weight tables (one pass over the weights
+// that exist, not over every pair) and kept until an edit ends, and the per-bone matrix is built once per call.
+// The result is the stock one to the last digit (cdp_rig_import.mjs compares them): the first four influencing
+// bones in armature order, normalised by their sum, a vertex without influence left where it is. (With more than
+// four influences the stock code sorts its list in place and drops the slice, so it ends up with the four
+// smallest; a glTF gives at most four, and this keeps the first four.) The weight brush edits weights
+// mid-stroke, so it takes the stock path.
+const stockCalculateVertexDeformation = Armature.prototype.calculateVertexDeformation;
+const influence_cache = new Map();	// mesh uuid -> {armature, bones, influences: Map vkey -> [[bone, weight], ...]}
+function gatherInfluences(armature, mesh) {
+	let bones = armature.getAllBones();
+	let prefix = mesh.uuid.substring(0, 6) + ':';
+	let influences = new Map();
+	for (let bone of bones) {
+		for (let key in bone.vertex_weights) {
+			let vkey = key.startsWith(prefix) ? key.slice(prefix.length) : (key.includes(':') ? null : key);
+			if (!vkey || !mesh.vertices[vkey]) continue;
+			let weight = bone.vertex_weights[key];
+			if (!weight) continue;
+			if (!influences.has(vkey)) influences.set(vkey, []);
+			let list = influences.get(vkey);
+			if (list.length < 4) list.push([bone, weight]);	// the stock loop only ever reads the first four
+		}
+	}
+	return {armature, bones, influences};
+}
+Armature.prototype.calculateVertexDeformation = function(mesh) {
+	if (Toolbox.selected && Toolbox.selected.id === 'weight_brush') return stockCalculateVertexDeformation.call(this, mesh);
+	let cached = influence_cache.get(mesh.uuid);
+	if (!cached || cached.armature !== this) { cached = gatherInfluences(this, mesh); influence_cache.set(mesh.uuid, cached); }
+	let armature_matrix_inverse = new THREE.Matrix4().copy(this.scene_object.parent.matrixWorld).invert();
+	let bind_matrix = new THREE.Matrix4().copy(armature_matrix_inverse).multiply(mesh.mesh.matrixWorld);
+	let bind_matrix_inverse = bind_matrix.clone().invert();
+	let bone_matrices = new Map();
+	for (let bone of cached.bones) {
+		if (!bone.scene_object) continue;
+		bone_matrices.set(bone, new THREE.Matrix4().multiplyMatrices(armature_matrix_inverse, bone.scene_object.matrixWorld).multiply(bone.scene_object.inverse_bind_matrix));
+	}
+	let base = new THREE.Vector3(), target = new THREE.Vector3(), scratch = new THREE.Vector3();
+	let vertex_offsets = {};
+	for (let vkey in mesh.vertices) {
+		let vertex = mesh.vertices[vkey];
+		base.fromArray(vertex).applyMatrix4(bind_matrix);
+		let list = cached.influences.get(vkey);
+		let sum = 0;
+		if (list) for (let [, weight] of list) sum += weight;
+		if (list && sum > 0) {
+			target.set(0, 0, 0);
+			for (let [bone, weight] of list) {
+				let matrix = bone_matrices.get(bone);
+				if (matrix) target.addScaledVector(scratch.copy(base).applyMatrix4(matrix), weight / sum);
+			}
+		} else {
+			target.copy(base);
+		}
+		target.applyMatrix4(bind_matrix_inverse);
+		vertex_offsets[vkey] = [target.x - vertex[0], target.y - vertex[1], target.z - vertex[2]];
+	}
+	return vertex_offsets;
+};
+for (let event of ['finished_edit', 'undo', 'redo', 'select_project', 'load_project']) Blockbench.on(event, () => influence_cache.clear());
+
+// The display half of the same frame: the stock displayDeformation pushes every face's vertices into a plain
+// array and allocates a new typed array for the geometry and the outline, 30 ms on the soldier. The layout is
+// the stock one (faces in order, each face's vertices in its own order, the outline in its vertex order), so
+// when the existing buffers are the right size the deformed positions go straight into them.
+const stockDisplayDeformation = Mesh.preview_controller.displayDeformation;
+Mesh.preview_controller.displayDeformation = function(element, vertex_offsets) {
+	let {mesh, vertices, faces} = element;
+	let position = mesh.geometry.getAttribute('position');
+	let outline = mesh.outline?.geometry.getAttribute('position');
+	let order = mesh.outline?.vertex_order;
+	if (!vertex_offsets || !position || !outline || !order || outline.count != order.length) return stockDisplayDeformation.call(this, element, vertex_offsets);
+	let slots = 0;
+	for (let key in faces) if (faces[key].vertices.length > 2) slots += faces[key].vertices.length;
+	if (position.count != slots) return stockDisplayDeformation.call(this, element, vertex_offsets);
+	let deformed = {};
+	for (let vkey in vertices) {
+		let v = vertices[vkey], d = vertex_offsets[vkey];
+		deformed[vkey] = d instanceof Array ? [v[0] + d[0], v[1] + d[1], v[2] + d[2]] : v;
+	}
+	let array = position.array, i = 0;
+	for (let key in faces) {
+		let face = faces[key];
+		if (face.vertices.length <= 2) continue;
+		for (let vkey of face.vertices) { let p = deformed[vkey]; array[i++] = p[0]; array[i++] = p[1]; array[i++] = p[2]; }
+	}
+	position.needsUpdate = true;
+	let outline_array = outline.array;
+	i = 0;
+	for (let vkey of order) { let p = deformed[vkey]; outline_array[i++] = p[0]; outline_array[i++] = p[1]; outline_array[i++] = p[2]; }
+	outline.needsUpdate = true;
+	mesh.frustumCulled = false;
+};
+
+Object.assign(window, {DEWPerf: {PERF, perf_stats, stockFaceUndoCopy, stockUpdateSelection, stockCalculateVertexDeformation, stockDisplayDeformation, influence_cache}});
