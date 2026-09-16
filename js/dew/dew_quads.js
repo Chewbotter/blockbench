@@ -5,7 +5,7 @@
 import { THREE } from "../lib/libs";
 
 export const QUADS = {
-	MAX_ANGLE: 5,			// degrees between the two triangles' normals for them to count as one plane
+	MAX_ANGLE: 10,			// degrees between the two triangles' normals for them to count as one plane
 	WELD_DISTANCE: 0.001,	// vertices closer than this are one vertex: importers split them wherever normals or uvs differ
 	MESSAGE_TIME: 3000,
 };
@@ -143,4 +143,63 @@ BARS.defineActions(function() {
 	});
 });
 
-Object.assign(window, {DEWQuads: {QUADS, mergeTrianglesToQuads}});
+// Turn Edges on a visible edge: the stock tool flips a quad's hidden diagonal; here a click on an edge shared by
+// exactly two triangles flips that edge (the two triangles are rebuilt across the other diagonal). An edge of a
+// quad, or between a quad and a triangle, has no other diagonal and is left alone.
+export function flipSharedEdge(mesh, a, b) {
+	let faces = Object.entries(mesh.faces).filter(([, face]) => face.vertices.length == 3 && face.vertices.includes(a) && face.vertices.includes(b));
+	if (faces.length != 2) return false;
+	let [[k1, f1], [k2, f2]] = faces;
+	let c = f1.vertices.find(v => v != a && v != b), d = f2.vertices.find(v => v != a && v != b);
+	if (!c || !d || c == d) return false;
+	let normal = worldNormal(mesh, f1);
+	let uv = {[a]: f1.uv[a], [b]: f1.uv[b], [c]: f1.uv[c], [d]: f2.uv[d]};
+	delete mesh.faces[k1];
+	delete mesh.faces[k2];
+	for (let order of [[c, d, a], [c, d, b]]) {
+		let face = new MeshFace(mesh, {vertices: order, uv: Object.fromEntries(order.map(v => [v, uv[v]])), texture: f1.texture});
+		mesh.addFaces(face);
+		if (worldNormal(mesh, face).dot(normal) < 0) face.invert();
+	}
+	return true;
+}
+// The face edge nearest a world point
+function nearestEdge(mesh, face, point) {
+	let world = vkey => mesh.mesh.localToWorld(new THREE.Vector3().fromArray(mesh.vertices[vkey]));
+	let vertices = face.getSortedVertices();
+	let best = null;
+	for (let i = 0; i < vertices.length; i++) {
+		let a = vertices[i], b = vertices[(i + 1) % vertices.length];
+		let segment = new THREE.Line3(world(a), world(b));
+		let distance = segment.closestPointToPoint(point, true, new THREE.Vector3()).distanceTo(point);
+		if (!best || distance < best.distance) best = {a, b, distance};
+	}
+	return best;
+}
+BARS.defineActions(function() {
+	let tool = BarItems.turn_edges_tool;
+	if (!tool) return;
+	let turnDiagonal = tool.onCanvasClick;
+	tool.onCanvasClick = function(data) {
+		if (!data || !data.intersects) return;
+		// A hidden diagonal under the cursor keeps the stock behaviour
+		let first_surface = data.intersects.find(intersect => !intersect.object.is_turn_edges);
+		let max_distance = first_surface ? first_surface.distance + 0.5 : Infinity;
+		if (data.intersects.some(intersect => intersect.object.is_turn_edges && intersect.distance <= max_distance)) return turnDiagonal.call(this, data);
+		let hit = data.event && window.DEWTileBrush ? DEWTileBrush.hitFace(Preview.selected, data.event) : null;
+		if (!hit || !(hit.element instanceof Mesh)) return;
+		let mesh = hit.element;
+		let edge = nearestEdge(mesh, mesh.faces[hit.face], hit.point);
+		if (!edge) return;
+		Undo.initEdit({elements: [mesh]});
+		if (!flipSharedEdge(mesh, edge.a, edge.b)) {
+			Undo.cancelEdit();
+			Blockbench.showQuickMessage('Only an edge between two triangles can be flipped', QUADS.MESSAGE_TIME);
+			return;
+		}
+		Undo.finishEdit('Flip edge');
+		Canvas.updateView({elements: [mesh], element_aspects: {geometry: true, uv: true, faces: true}});
+	};
+});
+
+Object.assign(window, {DEWQuads: {QUADS, mergeTrianglesToQuads, flipSharedEdge}});
