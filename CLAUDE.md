@@ -3,7 +3,7 @@
 Personal fork of Blockbench 5.1.6 (JannisX11/blockbench). All work goes on branch `custom`. Since 2026-09-11 the fork takes no upstream updates: everything here is custom, core files may be changed freely, and anything upstream adds later gets re-implemented by hand if wanted. `master` just mirrors upstream.
 
 ## Roadmap (user, 2026-09-15)
-The fork is permanent and refined for the long run; only official upstream updates are off the table. Three tracks, in this order: (1) performance for mid-poly meshes, 1 to 10k faces, since Blockbench was not built for it (`probe_perf.mjs` is the yardstick: measure, fix one thing, re-measure); (2) importing models with a rig; (3) textures up to 2048 x 2048. Not all at once.
+The fork is permanent and refined for the long run; only official upstream updates are off the table. Three tracks, in this order: (1) performance for mid-poly meshes, 1 to 10k faces (done 2026-09-15/16 to the user's satisfaction: drags, undo, selection, UV panel; `probe_perf.mjs` and `probe_hitch.mjs` in the scratchpad pattern are the yardsticks: measure on the real file with the real keymap, fix one thing, re-measure); (2) importing models with a rig, and (3) textures up to 2048 x 2048, both now the current track: stabilise the import path first. Performance rule learned: a static probe misses costs that only appear while a selection is changing; replay the user's exact gesture on his file.
 
 ## Commands
 - `npm run build-electron`: bundle, about half a second. After every change.
@@ -72,6 +72,7 @@ The fork is permanent and refined for the long run; only official upstream updat
 - Real scenes run past the 320 cluster square: the Warehouse floor (`D:/Work/DistantEarlyWarning/model_working/Warehouse.bbmodel`, read only) spans x -312 to 408 and z -24 to 536. The first terrain brush pinned everything at or beyond the square's edges and did nothing on most of that floor; the border lock was then dropped altogether (see the no cluster size decision above). `probe_terrain_warehouse.mjs` loads a copy (`PROBE_FILE=<path>`) and reports what the terrain brush sees.
 
 ## Current state (newest first)
+- 2026-09-16: performance track closed for now, user confirmed: only selecting thousands of faces with the UV panel open still costs, on release, and that is accepted. Next: rigged model import and 2048 textures.
 - 2026-09-16: drag-selecting faces no longer slows as the selection grows: the UV panel waits for the stroke or rectangle to end (measured as pre-existing, not a regression of the performance work).
 - 2026-09-15: face mode: Shift drag from empty space box-selects faces into the selection (Shift drag from a face still paints).
 - 2026-09-15: performance track, three commits: lean undo copies (94 to 42 ms per edit), in-place selection colours (13 to 0.3 ms object, 26 to 14 face), UV panel face cap (select-all on 10k faces 3.9 s to 0.4 s).
