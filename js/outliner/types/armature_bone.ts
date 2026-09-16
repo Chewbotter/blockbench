@@ -302,7 +302,9 @@ export class ArmatureBone extends OutlinerElement {
 	public title = tl('data.armature_bone');
 	public type = 'armature_bone';
 	public icon = 'humerus';
-	public name_regex = () => Format.bone_rig ? 'a-zA-Z0-9_' : false;
+	// Armature formats keep bone names as the file had them (the game keys poses by names like thigh.L); the
+	// identifier rule stays for bone rigs that write engine files
+	public name_regex = () => (Format.bone_rig && !Format.armature_rig) ? 'a-zA-Z0-9_' : false;
 	public buttons = [
 		Outliner.buttons.locked,
 		Outliner.buttons.visibility,

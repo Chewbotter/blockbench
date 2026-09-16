@@ -185,6 +185,7 @@ export const MenuBar = {
 				'import_bedrock_attachable',
 				'import_bedrock_voxel_shape',
 				'import_obj',
+				'dew_import_rig',
 				'extrude_texture'
 			]},
 			{name: 'generic.export', id: 'export', icon: 'insert_drive_file', condition: () => Project, children: [
@@ -198,6 +199,7 @@ export const MenuBar = {
 				'export_minecraft_skin',
 				'export_image',
 				'export_gltf',
+				'dew_export_poses',
 				'export_obj',
 				'export_fbx',
 				'export_stl',
