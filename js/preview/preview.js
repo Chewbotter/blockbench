@@ -1446,7 +1446,8 @@ export class Preview {
 			!Transformer.was_clicked &&
 			Toolbox.selected.selectElements != false &&
 			!this.selection.click_target &&
-			!this.paint_move_f
+			!this.paint_move_f &&
+			!(event.shiftKey || Pressing.overrides.shift)	// a shift click on nothing is an add that found nothing, not a clear
 		) {
 			let selection_mode = Condition(BarItems.selection_mode.condition) ? BarItems.selection_mode.value : 'object';
 			let spline_selection_mode = Condition(BarItems.spline_selection_mode.condition) ? BarItems.spline_selection_mode.value : 'object';
@@ -1663,6 +1664,21 @@ export class Preview {
 		if (!Modes.edit || Toolbox.selected.selectElements == false) return false;
 		if (!Condition(BarItems.selection_mode.condition) || BarItems.selection_mode.value != 'face') return false;
 		if (!Keybinds.extra.preview_paint_select.keybind.isTriggered(event)) return false;
+		// Over nothing, the same press draws a selection rectangle instead: shift makes the rectangle add to the
+		// current face selection, so a brush stroke from a face and a box from empty space both extend it
+		let data = this.raycast(event);
+		if (!data || !(data.element instanceof Mesh) || !data.face) {
+			this.startSelRect(event);
+			// Shift + left drag over nothing is also the camera zoom in the default keymap, and the controls only stand
+			// down when the pointer is over geometry. Park them for the length of the rectangle.
+			if (this.sr_stop_f) {
+				let controls = this.controls, was_enabled = controls.enabled;
+				controls.enabled = false;
+				let restore = () => { controls.enabled = was_enabled; removeEventListeners(document, 'mouseup touchend', restore); };
+				addEventListeners(document, 'mouseup touchend', restore);
+			}
+			return true;
+		}
 
 		Undo.initSelection();
 		this.paint_move_f = event => this.movePaintSelect(event);
