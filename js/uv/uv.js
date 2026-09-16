@@ -86,7 +86,7 @@ function rotateImageDataByDegrees(imageData, degrees) {
 
 export const UVEditor = {
 	max_displayed_faces: 2000,	// per mesh, in the UV panel; see filterMeshFaces
-	defer_during_area_select: true,	// draw no faces while a selection rectangle is being dragged; see getDisplayedUVElements
+	defer_during_area_select: true,	// draw no faces while a selection rectangle or a paint select is being dragged; see getDisplayedUVElements
 	face: 'north',
 	size: 320,
 	grid: 1,
@@ -4173,7 +4173,7 @@ Interface.definePanels(function() {
 					// A selection rectangle in progress changes the face selection on every mouse move, and redrawing the
 					// selected faces here each time was most of the stall (about 120 ms a move at 1200 faces). The panel
 					// goes blank for the drag and redraws on release.
-					if (UVEditor.defer_during_area_select && Preview.selected && Preview.selected.sr_move_f) return [];
+					if (UVEditor.defer_during_area_select && Preview.selected && (Preview.selected.sr_move_f || Preview.selected.paint_move_f)) return [];
 					if (this.mode == 'uv' || this.uv_overlay) {
 						if (this.display_uv === 'texture_group') return this.getTextureGroupElements();
 						return (this.display_uv === 'all_elements' || this.mode == 'paint')

@@ -1711,6 +1711,8 @@ export class Preview {
 		delete this.paint_stop_f;
 		updateSelection();
 		Undo.finishSelection('Paint select');
+		// The UV panel drew nothing during the stroke (UVEditor.defer_during_area_select); ask it to redraw
+		if (UVEditor.defer_during_area_select && UVEditor.vue) UVEditor.vue.$forceUpdate();
 	}
 	// Background
 	loadBackground() {
