@@ -115,11 +115,11 @@ console.log('F. open:', await ev(`(() => { let before = ModelProject.all.length;
 
 // G. Translucent Bones: on by default, the shared bone materials take the constants, off restores the stock 1
 console.log('G. translucent bones:', await ev(`(() => { let c = ArmatureBone.preview_controller; let out = {};
-	c.updateFaces(ArmatureBone.all[0]); out.on = [c.material.opacity, c.material_selected.opacity];
+	c.updateFaces(ArmatureBone.all[0]); out.on = [c.material.opacity, c.material_selected.opacity]; out.constant = DEWRig.RIG.BONE_OPACITY;
 	BarItems.dew_translucent_bones.set(false); out.off = [c.material.opacity, c.material_selected.opacity];
 	BarItems.dew_translucent_bones.set(true); out.back = [c.material.opacity, c.material_selected.opacity];
 	out.in_view_menu = MenuBar.menus.view.structure.includes('dew_translucent_bones');
-	return JSON.stringify(out); })()`), ' expect on 0.35 and 0.7, off 1 and 1, back 0.35 and 0.7, in the View menu');
+	return JSON.stringify(out); })()`), ' expect on at the constant (0.2) and 0.7, off 1 and 1, back the same, in the View menu');
 
 await sleep(200);
 console.log('page errors:', errors.length ? errors : 'none');

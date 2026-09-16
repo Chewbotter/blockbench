@@ -30,7 +30,7 @@ export const RIG = {
 	POSE_FORMAT: 1,
 	DECIMALS: 4,
 	MESSAGE_TIME: 5000,
-	BONE_OPACITY: 0.35,		// bones while Translucent Bones is on, so the mesh shows through the rig
+	BONE_OPACITY: 0.2,		// bones while Translucent Bones is on, so the mesh shows through the rig
 	SELECTED_BONE_OPACITY: 0.7,	// the selected bone, kept clearer so it can still be told apart
 };
 
