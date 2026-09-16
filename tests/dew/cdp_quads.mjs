@@ -67,7 +67,7 @@ console.log('E. no uvs, opposite winding:', await ev(`(() => { Mesh.all.slice().
 	m.init(); m.select(); let before = Object.values(m.faces).map(f => Math.round(f.getNormal(true)[1]));
 	let out = DEWQuads.mergeTrianglesToQuads(); let quad = Object.values(m.faces)[0];
 	return JSON.stringify({before_normals: before, merged: out.merged, why: out.why, quad_corners: quad.vertices.length, quad_normal_y: Math.round(quad.getNormal(true)[1])}); })()`));
-console.log('   expect before_normals [-1, 1] (opposite winding), merged 1, 4 corners, the quad taking the first triangle's normal');
+console.log('   expect before_normals [-1, 1] (opposite winding), merged 1, 4 corners, the quad taking the first triangle normal');
 
 console.log('page errors:', errors.length ? errors : 'none');
 ws.close();
