@@ -1659,7 +1659,7 @@ export class Preview {
 		Undo.finishSelection('Area select');
 		// The UV panel drew nothing while the rectangle ran (UVEditor.defer_during_area_select) and reads that flag
 		// outside Vue's reactivity, so it is asked to redraw here; a release that changed nothing would otherwise leave it blank
-		if (UVEditor.defer_during_area_select && UVEditor.vue) UVEditor.vue.$forceUpdate();
+		if (UVEditor.defer_during_area_select) UVEditor.loadData();
 	}
 	// Paint select: in face mode, drag to add every face under the cursor. Only the visible (nearest) face is hit.
 	startPaintSelect(event) {
@@ -1712,7 +1712,7 @@ export class Preview {
 		updateSelection();
 		Undo.finishSelection('Paint select');
 		// The UV panel drew nothing during the stroke (UVEditor.defer_during_area_select); ask it to redraw
-		if (UVEditor.defer_during_area_select && UVEditor.vue) UVEditor.vue.$forceUpdate();
+		if (UVEditor.defer_during_area_select) UVEditor.loadData();
 	}
 	// Background
 	loadBackground() {

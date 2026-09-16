@@ -690,6 +690,10 @@ export const UVEditor = {
 	//Load
 	loadData() {
 		if (this.panel.folded) return this;
+		// While a selection rectangle or paint select is running, the selection changes on every mouse move and the
+		// slider refresh in displayTools recomputes uv extents over every selected face each time (170 ms a move on a
+		// 4k face mesh). The release handlers in the preview call loadData once when the drag ends.
+		if (UVEditor.defer_during_area_select && Preview.selected && (Preview.selected.sr_move_f || Preview.selected.paint_move_f)) return this;
 		this.vue.updateTexture();
 		this.displayTools();
 		//this.displayTools();
