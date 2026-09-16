@@ -154,4 +154,81 @@ MeshFace.prototype.getUndoCopy = function() {
 	return copy;
 };
 
-Object.assign(window, {DEWPerf: {PERF, perf_stats, stockFaceUndoCopy}});
+// Selection colours. The stock Mesh.preview_controller.updateSelection pushes three floats per outline vertex into a
+// plain array (80k entries on 10k quads), with a string sort and join per entry in edge mode, then allocates a new
+// attribute: 15 to 28 ms of every selection change. This writes the same colours into the existing typed arrays,
+// fills object mode in one pass, and only builds the edge key set in edge mode. The seam tool keeps the stock path,
+// since its seam lookups are the one thing here that is not a colour per selection state.
+const stockUpdateSelection = controller.updateSelection;
+function fillColor(array, i, color) {
+	array[i * 3] = color.r; array[i * 3 + 1] = color.g; array[i * 3 + 2] = color.b;
+}
+function colorAttribute(geometry, count) {
+	let attribute = geometry.attributes.color;
+	if (!attribute || attribute.count != count) {
+		attribute = new THREE.Float32BufferAttribute(new Float32Array(count * 3), 3);
+		geometry.setAttribute('color', attribute);
+	}
+	return attribute;
+}
+controller.updateSelection = function(element) {
+	if (Toolbox.selected && Toolbox.selected.id === 'seam_tool') return stockUpdateSelection.call(this, element);
+	NodePreviewController.prototype.updateSelection.call(this, element);
+	let mesh = element.mesh;
+	let white = new THREE.Color(0xffffff);
+	let selection_mode = BarItems.selection_mode.value;
+	if (!Modes.edit) selection_mode = 'object';
+
+	if (Mesh.isVertexSelectionMode()) {
+		let selected = new Set(element.getSelectedVertices());
+		let keys = Object.keys(element.vertices);
+		let attribute = colorAttribute(mesh.vertex_points.geometry, keys.length);
+		for (let i = 0; i < keys.length; i++) fillColor(attribute.array, i, selected.has(keys[i]) ? white : gizmo_colors.grid);
+		attribute.needsUpdate = true;
+		mesh.outline.geometry.needsUpdate = true;
+	}
+
+	let order = mesh.outline.vertex_order;
+	let attribute = colorAttribute(mesh.outline.geometry, order.length);
+	let array = attribute.array;
+	if (selection_mode == 'object') {
+		let color = gizmo_colors.outline;
+		for (let i = 0; i < order.length; i++) fillColor(array, i, color);
+	} else if (selection_mode == 'face' || selection_mode == 'cluster') {
+		// Every pair of vertices inside a selected face lights the outline edge between them, as the stock code did.
+		// Pairs are integer keys over a vertex index, since 120k string joins cost more than the stock per-vertex Sets.
+		let index = new Map();
+		let n = 0;
+		for (let vkey in element.vertices) index.set(vkey, n++);
+		let lit = new Set();
+		let faces = element.faces;
+		for (let fkey of element.getSelectedFaces()) {
+			let ids = faces[fkey].vertices.map(vkey => index.get(vkey));
+			for (let a of ids) for (let b of ids) if (a != b) lit.add(a * n + b);
+		}
+		for (let i = 0; i < order.length; i++) {
+			let key_b = order[i + ((i % 2) ? -1 : 1)];
+			fillColor(array, i, key_b && lit.has(index.get(order[i]) * n + index.get(key_b)) ? white : gizmo_colors.grid);
+		}
+	} else if (selection_mode == 'edge') {
+		let lit = new Set();
+		for (let edge of element.getSelectedEdges()) { lit.add(edge[0] + '|' + edge[1]); lit.add(edge[1] + '|' + edge[0]); }
+		for (let i = 0; i < order.length; i++) {
+			let key_b = order[i + ((i % 2) ? -1 : 1)];
+			fillColor(array, i, key_b && lit.has(order[i] + '|' + key_b) ? white : gizmo_colors.grid);
+		}
+	} else {
+		for (let i = 0; i < order.length; i++) fillColor(array, i, gizmo_colors.grid);
+	}
+	attribute.needsUpdate = true;
+	mesh.outline.geometry.needsUpdate = true;
+
+	mesh.vertex_points.visible = ((Mode.selected.id == 'edit' && Mesh.isVertexSelectionMode()) || Toolbox.selected.id == 'knife_tool') && element.selected;
+	if (Toolbox.selected.id == 'weight_brush') mesh.vertex_points.visible = true;
+	if (mesh.turn_edges) {
+		mesh.turn_edges.visible = Mode.selected.id == 'edit' && Toolbox.selected.id == 'turn_edges_tool' && element.selected;
+	}
+	this.dispatchEvent('update_selection', {element});
+};
+
+Object.assign(window, {DEWPerf: {PERF, perf_stats, stockFaceUndoCopy, stockUpdateSelection}});
