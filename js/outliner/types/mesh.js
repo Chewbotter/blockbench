@@ -1905,10 +1905,12 @@ new NodePreviewController(Mesh, {
 					mesh_selection.faces = mesh_selection.faces.filter(fkey => !element.faces[fkey]?.vertices.find(vkey => removed.includes(vkey)));
 				}
 			} else {
+				let selected_set = new Set(mesh_selection.vertices);
 				for (let vkey in element.vertices) {
 					let point = vertex_points[vkey];
-					if (!mesh_selection.vertices.includes(vkey) && pointInRectangle(point, rect_start, rect_end)) {
+					if (!selected_set.has(vkey) && pointInRectangle(point, rect_start, rect_end)) {
 						mesh_selection.vertices.push(vkey);
+						selected_set.add(vkey);
 					}
 				}
 			}
@@ -1947,6 +1949,8 @@ new NodePreviewController(Mesh, {
 			if (selection_mode != 'object' && !extend_selection) {
 				mesh_selection.faces.empty();
 			}
+			let vertex_set = mesh_selection ? new Set(mesh_selection.vertices) : null;
+			let face_set = mesh_selection ? new Set(mesh_selection.faces) : null;
 			for (let fkey in element.faces) {
 				let face = element.faces[fkey];
 				let vertices = face.getSortedVertices();
@@ -1972,8 +1976,8 @@ new NodePreviewController(Mesh, {
 					}
 				} else {
 					if (face_intersects) {
-						mesh_selection.vertices.safePush(...face.vertices);
-						mesh_selection.faces.safePush(fkey);
+						for (let vkey of face.vertices) if (!vertex_set.has(vkey)) { vertex_set.add(vkey); mesh_selection.vertices.push(vkey); }
+						if (!face_set.has(fkey)) { face_set.add(fkey); mesh_selection.faces.push(fkey); }
 					}
 				}
 			}
