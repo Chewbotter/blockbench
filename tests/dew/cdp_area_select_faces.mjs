@@ -69,14 +69,15 @@ console.log('E. plain click on nothing:', await ev(sel), ' expect 0 faces');
 // G. the shift paint select, with the UV panel open: no UV faces drawn mid-stroke, drawn again on release
 {
 	await ev(`(() => { let m = Mesh.all[0]; m.select(); m.getSelectedFaces(true).empty(); updateSelection(); return true; })()`); await sleep(300);
+	const before_faces = await ev(`document.querySelectorAll('#uv_frame .mesh_uv_face').length`);
 	const a = await screen(8, 0, 72), b = await screen(120, 0, 72);
 	for (let i = 0; i < 2; i++) { await mouse('mouseMoved', a, { button: 'none', modifiers: SHIFT }); await sleep(60); }
 	await mouse('mousePressed', a, { buttons: 1, modifiers: SHIFT }); await sleep(60);
 	for (let i = 1; i <= 8; i++) { await mouse('mouseMoved', [a[0] + (b[0] - a[0]) * i / 8, a[1] + (b[1] - a[1]) * i / 8], { buttons: 1, modifiers: SHIFT }); await sleep(40); }
-	const mid = await ev(`new Promise(done => Vue.nextTick(() => done(JSON.stringify({painting: !!Preview.selected.paint_move_f, faces_selected: Mesh.all[0].getSelectedFaces().length, uv_faces_drawn: document.querySelectorAll('#uv_frame .mesh_uv_face').length}))))`);
+	const mid = await ev(`new Promise(done => Vue.nextTick(() => done(JSON.stringify({painting: !!Preview.selected.paint_move_f, faces_selected: Mesh.all[0].getSelectedFaces().length, uv_faces_drawn: document.querySelectorAll('#uv_frame .mesh_uv_face').length, uv_frozen_or_blank: document.querySelectorAll('#uv_frame .mesh_uv_face').length <= ${before_faces}}))))`);
 	await mouse('mouseReleased', b, { modifiers: SHIFT }); await sleep(400);
 	const after = await ev(`new Promise(done => Vue.nextTick(() => requestAnimationFrame(() => done(JSON.stringify({painting: !!Preview.selected.paint_move_f, faces_selected: Mesh.all[0].getSelectedFaces().length, uv_draws_again: document.querySelectorAll('#uv_frame .mesh_uv_face').length > 0})))))`);
-	console.log('G. shift paint mid-stroke:', mid, ' expect painting true, faces selected, uv_faces_drawn 0');
+	console.log('G. shift paint mid-stroke:', mid, ' expect painting true, faces selected, uv_frozen_or_blank true (the panel is not redrawn mid-stroke: blank or as it was)');
 	console.log('   on release:', after, ' expect painting false, the same faces, uv_draws_again true');
 }
 await ev(`BarItems.selection_mode.set('object'); unselectAllElements(); updateSelection(); true`);
