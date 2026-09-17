@@ -533,11 +533,11 @@ export const Canvas = {
 		Canvas.pivot_marker.base_scale = new THREE.Vector3(1, 1, 1);
 		Canvas.pivot_marker.no_export = true;
 
+		// Plain color only (user, 2026-09-17): the stock plane borrowed the marker texture's pattern; set the color with
+		// --color-ground on #preview in the theme CSS
 		Canvas.groundPlaneMaterial = new THREE.MeshBasicMaterial({
-			map: Canvas.emptyMaterials[0].uniforms.map.value,
 			color: CustomTheme.data.colors.back,
 			side: settings.ground_plane_double_side.value ? THREE.DoubleSide : THREE.FrontSide,
-			alphaTest: 0.2
 		})
 		let size = 4096;
 		Canvas.ground_plane = new THREE.Mesh(new THREE.PlaneGeometry(size, size), Canvas.groundPlaneMaterial);
