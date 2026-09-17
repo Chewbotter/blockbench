@@ -61,13 +61,13 @@ console.log(await ev(`(() => {
 
 // Screenshots with back faces culled, so a flipped face shows as a hole
 await ev(`(() => { Texture.all.forEach(t => { t.render_sides = 'front'; }); Canvas.updateAllFaces(); Canvas.updateView({elements: Mesh.all, element_aspects: {faces: true}}); return true; })()`);
-const shots = [[[120, 110, 140], 'a'], [[-140, 60, -120], 'b'], [[0, -120, 20], 'c']];
+const shots = (process.env.SHOTS ? JSON.parse(process.env.SHOTS) : [[[120, 110, 140], 'a'], [[-140, 60, -120], 'b'], [[0, -120, 20], 'c']]);
 for (const [pos, tag] of shots) {
-	await ev(`(() => { let p = Preview.selected || Preview.all[0]; p.camera.position.set(${pos}); p.controls.target.set(0, 50, 0); p.camera.lookAt(0, 50, 0); p.controls.update(); p.render(); return true; })()`);
+	await ev(`(() => { let p = Preview.selected || Preview.all[0]; p.camera.position.set(${pos}); p.controls.target.set(0, ${+(process.env.LOOK_Y || 50)}, 0); p.camera.lookAt(0, ${+(process.env.LOOK_Y || 50)}, 0); p.controls.update(); p.render(); return true; })()`);
 	await sleep(300);
 	await ev(`(() => { (Preview.selected || Preview.all[0]).render(); return true; })()`);
 	const shot = await send('Page.captureScreenshot', { format: 'png' });
-	const out = `${process.env.SHOT_DIR}/chair_${tag}.png`;
+	const out = `${process.env.SHOT_DIR}/shot_${tag}.png`;
 	fs.writeFileSync(out, Buffer.from(shot.result.data, 'base64'));
 	console.log('shot', out);
 }
