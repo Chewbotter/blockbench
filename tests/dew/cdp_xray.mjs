@@ -1,4 +1,4 @@
-// View > X-Ray (Alt + Z): elements draw see-through, a vertex hidden behind the front faces can be clicked in vertex
+// View > X-Ray (Alt + X): elements draw see-through, a vertex hidden behind the front faces can be clicked in vertex
 // mode, and turning it off puts every material back.
 const targets = await (await fetch('http://127.0.0.1:9223/json')).json();
 const page = targets.find(t => t.type == 'page' && t.url.includes('index.html')) ?? targets.find(t => t.type == 'page');
@@ -102,7 +102,7 @@ await setInner(false);
 const back_without = await ev(pixel);
 check('   and the inner cube is hidden again', JSON.stringify(back_with) == JSON.stringify(back_without), {with: back_with, without: back_without});
 
-check('G. keybind is Alt + Z', await ev(`(() => { let k = BarItems.dew_xray.keybind; return k.key == 90 && k.alt && !k.ctrl && !k.shift; })()`) === true, await ev(`BarItems.dew_xray.keybind.getText()`));
+check('G. keybind is Alt + X', await ev(`(() => { let k = BarItems.dew_xray.keybind; return k.key == 88 && k.alt && !k.ctrl && !k.shift; })()`) === true, await ev(`BarItems.dew_xray.keybind.getText()`));
 check('   in the View menu', await ev(`JSON.stringify(MenuBar.menus.view.structure).includes('dew_xray')`) === true);
 
 console.log('page errors:', errors.length ? errors : 'none');

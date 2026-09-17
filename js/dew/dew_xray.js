@@ -1,4 +1,4 @@
-// View > X-Ray (Alt + Z): every element drawn see-through, so faces, edges and vertices inside or behind an object show.
+// View > X-Ray (Alt + X): every element drawn see-through, so faces, edges and vertices inside or behind an object show.
 // The face shaders multiply their alpha by the shared XRAY_OPACITY uniform (js/preview/canvas.js). Alpha alone is not
 // enough: a face still writes depth and hides whatever is drawn after it, so while X-Ray is on every element material
 // is made transparent without depth writes. Materials are created lazily (a new texture, a view mode switch), so the
@@ -61,7 +61,7 @@ BARS.defineActions(function() {
 		description: 'Draw every element see-through, so faces, edges and vertices behind the front surface show and can be clicked',
 		icon: 'flip_to_back',
 		category: 'view',
-		keybind: new Keybind({key: 'z', alt: true}),
+		keybind: new Keybind({key: 'x', alt: true}),
 		default: false,
 		condition: () => !!Project,
 		onChange(value) {
