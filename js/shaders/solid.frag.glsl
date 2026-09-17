@@ -7,6 +7,7 @@ uniform float BRIGHTNESS;
 uniform vec3 base;
 uniform float BACKFACE_TINT;
 uniform vec3 BACKFACE_COLOR;
+uniform float XRAY_OPACITY;
 
 varying float light;
 varying float lift;
@@ -27,5 +28,8 @@ void main(void)
 
 	// Back faces pulled toward a flat color (DEW scenes); a tint of 0 leaves them untouched
 	if (!gl_FrontFacing) gl_FragColor.rgb = mix(gl_FragColor.rgb, BACKFACE_COLOR, BACKFACE_TINT);
+
+	// X-Ray: every face drawn see-through; 1 leaves it opaque
+	gl_FragColor.a *= XRAY_OPACITY;
 
 }

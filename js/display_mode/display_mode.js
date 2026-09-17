@@ -540,7 +540,9 @@ export class refModel {
 					SHADE: {type: 'bool', value: settings.shading.value},
 					LIGHTCOLOR: {type: 'vec3', value: new THREE.Color().copy(Canvas.global_light_color).multiplyScalar(settings.brightness.value / 50)},
 					LIGHTSIDE: {type: 'int', value: Canvas.global_light_side},
-					EMISSIVE: {type: 'bool', value: false}
+					EMISSIVE: {type: 'bool', value: false},
+					// The shader multiplies alpha by this (X-Ray); display reference models stay opaque
+					XRAY_OPACITY: {value: 1},
 				},
 				vertexShader: prepareShader(VertShader),
 				fragmentShader: prepareShader(FragShader),

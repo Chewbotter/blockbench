@@ -529,6 +529,7 @@ export const MenuBar = {
 			'dew_scale_figure',
 			'dew_hide_back_faces',
 			'dew_translucent_bones',
+			'dew_xray',
 			'preview_checkerboard',
 			'pixel_grid',
 			'painting_grid',

@@ -501,6 +501,12 @@ export class Preview {
 				return a.distance - b.distance;
 			});
 		}
+		// X-Ray (js/dew/dew_xray.js): in vertex or edge mode a click reaches the points or lines behind the front faces
+		if (Canvas.xray && Modes.edit && BarItems.selection_mode && ['vertex', 'edge'].includes(BarItems.selection_mode.value)) {
+			let wanted = BarItems.selection_mode.value == 'vertex' ? (a => a.object.isPoints) : (a => a.object.isLine);
+			let through = intersects.filter(wanted);
+			if (through.length) intersects = through;
+		}
 		if ((settings.seethrough_outline.value && BarItems.selection_mode.value == 'edge')) {
 			let all_intersects = intersects;
 			intersects = intersects.filter(a => a.object.isLine);

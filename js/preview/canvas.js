@@ -37,6 +37,8 @@ export const Reusable = {
 const backface_uniforms = {
 	BACKFACE_TINT: {value: 0},
 	BACKFACE_COLOR: {value: new THREE.Color(0x2a3348)},
+	// View > X-Ray lowers it (js/dew/dew_xray.js)
+	XRAY_OPACITY: {value: 1},
 };
 
 export const Canvas = {
