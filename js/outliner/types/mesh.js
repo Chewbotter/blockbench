@@ -1042,6 +1042,7 @@ export class Mesh extends OutlinerElement {
 		'apply_mesh_rotation',
 		'split_mesh',
 		'split_closed_mesh',
+		'dew_separate_loose_parts',
 		'merge_meshes',
 		'dew_cull_overlapping',
 		'dew_group_tiles',

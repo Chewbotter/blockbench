@@ -334,6 +334,8 @@ export const MenuBar = {
 			'apply_mesh_rotation',
 			'split_mesh',
 			'split_closed_mesh',
+			'dew_select_linked',
+			'dew_separate_loose_parts',
 			'merge_meshes',
 		], {icon: 'fa-gem', condition: {selected: {mesh: true}, modes: ['edit']}})
 
