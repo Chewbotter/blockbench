@@ -776,6 +776,7 @@ export const BARS = {
 				'dew_paint_bucket',
 				'knife_tool',
 				'turn_edges_tool',
+				'dew_edge_boundary',
 				'seam_tool',
 				'weight_brush',
 				'pan_tool',

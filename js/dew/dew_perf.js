@@ -226,7 +226,7 @@ controller.updateSelection = function(element) {
 	mesh.vertex_points.visible = ((Mode.selected.id == 'edit' && Mesh.isVertexSelectionMode()) || Toolbox.selected.id == 'knife_tool') && element.selected;
 	if (Toolbox.selected.id == 'weight_brush') mesh.vertex_points.visible = true;
 	if (mesh.turn_edges) {
-		mesh.turn_edges.visible = Mode.selected.id == 'edit' && Toolbox.selected.id == 'turn_edges_tool' && element.selected;
+		mesh.turn_edges.visible = Mode.selected.id == 'edit' && !!Toolbox.selected.raycast_options?.turn_edges && element.selected;
 	}
 	this.dispatchEvent('update_selection', {element});
 };

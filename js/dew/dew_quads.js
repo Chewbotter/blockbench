@@ -8,6 +8,7 @@ export const QUADS = {
 	MAX_ANGLE: 10,			// degrees between the two triangles' normals for them to count as one plane
 	WELD_DISTANCE: 0.001,	// vertices closer than this are one vertex: importers split them wherever normals or uvs differ
 	MESSAGE_TIME: 3000,
+	EDGE_PICK_PIXELS: 8,
 };
 
 function worldNormal(mesh, face) {
@@ -202,4 +203,110 @@ BARS.defineActions(function() {
 	};
 });
 
-Object.assign(window, {DEWQuads: {QUADS, mergeTrianglesToQuads, flipSharedEdge}});
+// Explicitly join/split a boundary, keeping the same rendered triangles. Unlike the bulk
+// importer cleanup this never welds vertices: rig weights keep their original vertex keys.
+export function toggleEdgeBoundary(mesh, a, b) {
+	let adjacent = [], diagonal = null;
+	for (let [key, face] of Object.entries(mesh.faces)) {
+		let vs = face.getSortedVertices();
+		if (!vs.includes(a) || !vs.includes(b)) continue;
+		if (vs.length == 4 && [vs[0], vs[2]].includes(a) && [vs[0], vs[2]].includes(b)) {
+			diagonal = [key, face];
+		} else if (vs.some((v, i) => v == a && (vs[(i + 1) % vs.length] == b || vs[(i + vs.length - 1) % vs.length] == b))) {
+			adjacent.push([key, face]);
+		}
+	}
+	let removed, replacements;
+	if (diagonal && !adjacent.length) {
+		let [key, face] = diagonal, vs = face.getSortedVertices();
+		removed = [key];
+		replacements = [[vs[0], vs[1], vs[2]], [vs[0], vs[2], vs[3]]].map(vertices => new MeshFace(mesh, {...face, vertices}));
+	} else {
+		if (diagonal || adjacent.length != 2 || adjacent.some(([, face]) => face.vertices.length != 3)) {
+			return {error: 'Only the edge between two triangles or a quad diagonal can be toggled'};
+		}
+		let [[k1, f1], [k2, f2]] = adjacent;
+		if (f1.texture !== f2.texture) return {error: 'This edge separates different textures'};
+		for (let property in MeshFace.properties) {
+			if (property != 'vertices' && property != 'uv' && JSON.stringify(f1[property]) !== JSON.stringify(f2[property])) {
+				return {error: 'This edge separates different face settings, such as smoothing groups'};
+			}
+		}
+		if (f1.getTexture() && (!sameUV(f1.uv[a], f2.uv[a]) || !sameUV(f1.uv[b], f2.uv[b]))) {
+			return {error: 'This edge is a UV seam; joining it would change the texture'};
+		}
+		let c = f1.vertices.find(v => v != a && v != b), d = f2.vertices.find(v => v != a && v != b);
+		if (!c || !d || c == d) return {error: 'These triangles do not form a four-corner face'};
+		let i = f1.vertices.indexOf(c);
+		let order = [f1.vertices[(i + 2) % 3], c, f1.vertices[(i + 1) % 3], d];
+		if (f2.vertices[(f2.vertices.indexOf(order[2]) + 1) % 3] != d) {
+			return {error: 'These triangles face opposite ways; fix their winding first'};
+		}
+		let quad = new MeshFace(mesh, {...f1, vertices: order, uv: {...f1.uv, [d]: f2.uv[d]}});
+		// Blockbench sorts quad corners geometrically. Reject a pair it would reorder,
+		// instead of silently changing the diagonal on a folded or overlapping face.
+		if (!quad.getSortedVertices().every((v, j) => v == order[j]) || !worldNormal(mesh, f1).lengthSq() || !worldNormal(mesh, f2).lengthSq()) {
+			return {error: 'These triangles cannot form a quad with the same diagonal'};
+		}
+		removed = [k1, k2];
+		replacements = [quad];
+	}
+	Undo.initEdit({elements: [mesh], selection: true});
+	let selected = mesh.getSelectedFaces(true), was_selected = removed.some(key => selected.includes(key));
+	removed.forEach(key => { delete mesh.faces[key]; selected.remove(key); });
+	// Retain the first face key; only a split needs a second key.
+	mesh.faces[removed[0]] = replacements[0];
+	let added = [removed[0], ...mesh.addFaces(...replacements.slice(1))];
+	if (was_selected) selected.safePush(...added);
+	if (replacements.length == 1) {
+		let edges = mesh.getSelectedEdges(true);
+		for (let i = edges.length - 1; i >= 0; i--) if (edges[i].includes(a) && edges[i].includes(b)) edges.splice(i, 1);
+	}
+	Undo.finishEdit(replacements.length == 1 ? 'Hide edge boundary' : 'Show edge boundary');
+	Canvas.updateView({elements: [mesh], element_aspects: {geometry: true, uv: true, faces: true}, selection: true});
+	return {split: replacements.length == 2, faces: added};
+}
+
+BARS.defineActions(function() {
+	new Tool('dew_edge_boundary', {
+		name: 'Edge Boundary',
+		description: 'Click a triangle edge to join a quad, or an orange quad diagonal to split it into triangles',
+		icon: 'border_inner',
+		category: 'tools',
+		transformerMode: 'hidden',
+		selectElements: false,
+		cursor: 'pointer',
+		raycast_options: {turn_edges: true},
+		modes: ['edit'],
+		condition: () => Modes.edit && Format.meshes,
+		onCanvasClick(data) {
+			if (!data?.event) return;
+			let preview = Preview.selected;
+			// Read the actual front surface so a guide behind another face cannot be edited.
+			let hit = DEWTileBrush.hitFace(preview, data.event);
+			if (!hit || !(hit.element instanceof Mesh) || !hit.element.selected) return;
+			let mesh = hit.element, vs = mesh.faces[hit.face].getSortedVertices();
+			let rect = preview.canvas.getBoundingClientRect();
+			let mouse = new THREE.Vector3(data.event.clientX - rect.left, data.event.clientY - rect.top, 0);
+			let screen = v => {
+				let p = mesh.mesh.localToWorld(new THREE.Vector3().fromArray(mesh.vertices[v])).project(preview.camera);
+				return new THREE.Vector3((p.x + 1) * rect.width / 2, (1 - p.y) * rect.height / 2, 0);
+			};
+			let edges = vs.map((v, i) => [v, vs[(i + 1) % vs.length]]);
+			if (vs.length == 4) edges.push([vs[0], vs[2]]);
+			let best, distance = QUADS.EDGE_PICK_PIXELS;
+			for (let edge of edges) {
+				let line = new THREE.Line3(...edge.map(screen));
+				let d = line.closestPointToPoint(mouse, true, new THREE.Vector3()).distanceTo(mouse);
+				if (d < distance) { best = edge; distance = d; }
+			}
+			if (!best) return;
+			let result = toggleEdgeBoundary(mesh, ...best);
+			if (result.error) Blockbench.showQuickMessage(result.error, QUADS.MESSAGE_TIME);
+		},
+		onSelect() { Mesh.selected.forEach(mesh => mesh.preview_controller.updateSelection(mesh)); },
+		onUnselect() { setTimeout(() => Mesh.selected.forEach(mesh => mesh.preview_controller.updateSelection(mesh)), 0); },
+	});
+});
+
+Object.assign(window, {DEWQuads: {QUADS, mergeTrianglesToQuads, flipSharedEdge, toggleEdgeBoundary}});

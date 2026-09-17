@@ -285,8 +285,8 @@ BARS.defineActions(function() {
 			if (value == 'cluster') value = 'face';
 			// Welding mode is vertex mode with weld-on-drop, so it shares vertex mode's selection handling
 			if (value == 'weld') value = 'vertex';
-			// Picking a selection mode leaves the Turn Edges tool
-			if (Toolbox.selected.id == 'turn_edges_tool') BarItems.move_tool.select();
+			// Picking a selection mode leaves either edge-editing tool.
+			if (Toolbox.selected.raycast_options?.turn_edges) BarItems.move_tool.select();
 			if (value === previous_selection_mode) return;
 			if (value === 'object') {
 				Mesh.selected.forEach(mesh => {

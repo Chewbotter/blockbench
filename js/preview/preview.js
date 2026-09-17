@@ -1178,7 +1178,7 @@ export class Preview {
 					Undo.finishSelection('Select keyframe');
 				}
 
-			} else if (data.type == 'vertex' && Toolbox.selected.id !== 'vertex_snap_tool' && Toolbox.selected.id !== 'turn_edges_tool') {
+			} else if (data.type == 'vertex' && Toolbox.selected.id !== 'vertex_snap_tool' && !Toolbox.selected.raycast_options?.turn_edges) {
 				Undo.initSelection();
 				let list = data.element.getSelectedVertices(true);
 				let edges;
@@ -1199,7 +1199,7 @@ export class Preview {
 				updateSelection();
 				Undo.finishSelection('Select vertex');
 
-			} else if (data.type == 'line' && Toolbox.selected.id !== 'turn_edges_tool') {
+			} else if (data.type == 'line' && !Toolbox.selected.raycast_options?.turn_edges) {
 
 				Undo.initSelection();
 				let vertices = data.element.getSelectedVertices(true);
