@@ -165,6 +165,9 @@ function setupSettings() {
 
 	//Edit
 	new Setting('undo_selections',			{category: 'edit', value: true});
+	// Off by default in this fork (user, 2026-09-17): the checks interrupt every mesh edit, and their overlap test
+	// compares each moved vertex against every vertex of the mesh, which costs on a mid-poly model
+	new Setting('auto_fix_mesh_edits',		{category: 'edit', value: false});
 	new Setting('undo_limit',				{category: 'edit', value: 256, type: 'number', min: 1});
 	new Setting('highlight_cubes',  		{category: 'edit', value: true, onChange() {
 		updateCubeHighlights();

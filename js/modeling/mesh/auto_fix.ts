@@ -135,6 +135,7 @@ export function weldDroppedVertex(event: MouseEvent | TouchEvent): boolean {
 }
 
 export async function autoFixMeshEdit(affected_vertices?: string[]) {
+	if (!settings.auto_fix_mesh_edits.value) return;	// Settings > Edit > Auto Fix Mesh Edits
 	let meshes = Mesh.selected;
 	if (!meshes.length || !Modes.edit || (BarItems.selection_mode as BarSelect).value == 'object') return;
 

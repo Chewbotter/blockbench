@@ -1156,6 +1156,8 @@
 
 	"settings.undo_selections": "Undo Selection",
 	"settings.undo_selections.desc": "Track selection changes as a step in the undo history",
+	"settings.auto_fix_mesh_edits": "Auto Fix Mesh Edits",
+	"settings.auto_fix_mesh_edits.desc": "After a mesh edit, offer to merge vertices that landed on each other and to split quads that turned concave",
 	"settings.undo_limit": "Undo Limit",
 	"settings.undo_limit.desc": "Number of steps you can undo",
 	"settings.local_move": "Move on Relative Axes",
