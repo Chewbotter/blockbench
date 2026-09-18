@@ -6,10 +6,12 @@ export const CAGE = {
 	MIN_POINTS: 2, MAX_POINTS: 5,
 	MIN_THICKNESS: 1, FLAT_PADDING: 0.02,
 	POINT_PIXELS: 8, PICK_PIXELS: 10, EDGE_PICK_PIXELS: 5,
-	COLOR: 0xffc45e, HOVER_COLOR: 0xffffff, FACE_OPACITY: 0.12,
+	COLOR: 0xffc45e, SELECTED_COLOR: 0x66d9ff, HOVER_COLOR: 0xffffff, FACE_OPACITY: 0.12,
 	FINE_MOVE: 0.1, MOVE_EPSILON: 1e-8,
+	BOX_DRAG_PIXELS: 3, SCALE_PIVOT_PIXELS: 8, SCALE_DRAG_PIXELS: 120,
+	MIN_SCALE: 0.01, MAX_SCALE: 100,
 };
-let state = null, display = null, drag = null, hover = null, finishing = false;
+let state = null, display = null, drag = null, marquee = null, hover = null, finishing = false;
 let resolution = [2, 2, 2];
 const history = new WeakMap();
 const active = () => Modes.edit && Toolbox.selected?.id == 'dew_cage';
@@ -45,6 +47,7 @@ function weightsAt(point, box, counts) {
 }
 function fit() {
 	if (drag) finish(false);
+	if (marquee) finishMarquee(false);
 	const items = selection();
 	clearDisplay(); state = null;
 	if (!active() || !items.length) return false;
@@ -85,7 +88,7 @@ function fit() {
 		}
 	}
 	for (const item of items) item.bindings = item.base.map(p => weightsAt(p, box, counts));
-	state = {binding: {items, rest, counts, edges, faces, signature: signature(items), project: Project.uuid}, controls: clonePoints(rest)};
+	state = {binding: {items, rest, counts, edges, faces, signature: signature(items), project: Project.uuid}, controls: clonePoints(rest), selected:new Set()};
 	buildDisplay();
 	return true;
 }
@@ -122,15 +125,23 @@ function updateDisplay() {
 	const lines = display.lines.geometry.attributes.position;
 	state.binding.edges.flat().forEach((id,i) => { const p=state.controls[id]; lines.setXYZ(i,p.x,p.y,p.z); }); lines.needsUpdate = true;
 	display.surface.geometry.computeBoundingSphere(); display.surface.updateMatrixWorld(true);
-	const selected = drag?.ids || hover?.ids || [];
-	const color = new THREE.Color(CAGE.COLOR), white = new THREE.Color(CAGE.HOVER_COLOR);
+	const highlighted = drag?.ids || hover?.ids || [];
+	const color = new THREE.Color(CAGE.COLOR), selectedColor = new THREE.Color(CAGE.SELECTED_COLOR), white = new THREE.Color(CAGE.HOVER_COLOR);
 	const colors = display.points.geometry.attributes.color;
-	state.controls.forEach((p,i) => { const c = selected.includes(i) ? white : color; colors.setXYZ(i,c.r,c.g,c.b); }); colors.needsUpdate = true;
-	display.highlight.visible = selected.length == 4;
+	state.controls.forEach((p,i) => { const c = highlighted.includes(i) ? white : state.selected.has(i) ? selectedColor : color; colors.setXYZ(i,c.r,c.g,c.b); }); colors.needsUpdate = true;
+	const face = highlighted.length == 4 && state.binding.faces.find(ids => ids.every(id => highlighted.includes(id)));
+	display.highlight.visible = !!face;
 	if (display.highlight.visible) {
 		const buffer = display.highlight.geometry.attributes.position;
-		selected.forEach((id,i) => {const p=state.controls[id]; buffer.setXYZ(i,p.x,p.y,p.z);}); buffer.needsUpdate=true;
+		face.forEach((id,i) => {const p=state.controls[id]; buffer.setXYZ(i,p.x,p.y,p.z);}); buffer.needsUpdate=true;
 	}
+}
+function screenPoints(preview, points = state.controls) {
+	const rect = preview.canvas.getBoundingClientRect();
+	return points.map(p => {
+		const q = p.clone().project(preview.camera);
+		return new THREE.Vector3(rect.left+(q.x+1)*rect.width/2, rect.top+(1-q.y)*rect.height/2,q.z);
+	});
 }
 function rayAt(preview, event) {
 	const r = preview.canvas.getBoundingClientRect();
@@ -140,11 +151,7 @@ function rayAt(preview, event) {
 }
 function pick(preview, event) {
 	if (!state || !display) return null;
-	const rect = preview.canvas.getBoundingClientRect(), mouse = new THREE.Vector3(event.clientX,event.clientY,0);
-	const screen = state.controls.map(p => {
-		const q = p.clone().project(preview.camera);
-		return new THREE.Vector3(rect.left+(q.x+1)*rect.width/2, rect.top+(1-q.y)*rect.height/2,q.z);
-	});
+	const mouse = new THREE.Vector3(event.clientX,event.clientY,0), screen = screenPoints(preview);
 	let best = null, distance = CAGE.PICK_PIXELS, depth = Infinity;
 	screen.forEach((p,i) => {
 		if (p.z < -1 || p.z > 1) return;
@@ -164,6 +171,50 @@ function pick(preview, event) {
 	return hit ? {ids:state.binding.faces[Math.floor(hit.faceIndex/2)]} : null;
 }
 
+function selectPoints(ids) {
+	if (!state) return;
+	state.selected = new Set(ids.filter(id => state.controls[id]));
+	updateDisplay();
+}
+function beginMarquee(preview, event, handle) {
+	if (!state || drag || marquee || !PointerTarget.requestTarget(PointerTarget.types.gizmo_transform)) return false;
+	const element = document.createElement('div'); element.className = 'selection_rectangle dew_cage_marquee';
+	Object.assign(element.style,{position:'fixed',zIndex:'100',display:'none'});
+	document.body.appendChild(element);
+	marquee = {preview, element, before:[...state.selected], start:{clientX:event.clientX,clientY:event.clientY},
+		mode:event.altKey ? 'subtract' : event.shiftKey ? 'add' : 'replace',
+		handle:handle?.ids || [], moved:false, controls_enabled:preview.controls.enabled};
+	preview.controls.stopMovement(); preview.controls.enabled = false;
+	Preview.selected = preview; hover = null; updateDisplay();
+	return true;
+}
+function marqueeSelection(ids) {
+	const selected = new Set(marquee.mode == 'replace' ? [] : marquee.before);
+	ids.forEach(id => marquee.mode == 'subtract' ? selected.delete(id) : selected.add(id));
+	selectPoints([...selected]);
+}
+function moveMarquee(event) {
+	const {preview,start,element} = marquee, rect = preview.canvas.getBoundingClientRect();
+	if (!marquee.moved && Math.hypot(event.clientX-start.clientX,event.clientY-start.clientY) < CAGE.BOX_DRAG_PIXELS) return;
+	marquee.moved = true;
+	const x = Math.clamp(event.clientX,rect.left,rect.right), y = Math.clamp(event.clientY,rect.top,rect.bottom);
+	const left = Math.min(start.clientX,x), top = Math.min(start.clientY,y), right = Math.max(start.clientX,x), bottom = Math.max(start.clientY,y);
+	Object.assign(element.style,{display:'block',left:left+'px',top:top+'px',width:(right-left)+'px',height:(bottom-top)+'px'});
+	// Include hidden/back points, so one rectangle can select both sides of a section.
+	const ids = [];
+	screenPoints(preview).forEach((p,i) => {if (p.z >= -1 && p.z <= 1 && p.x >= left && p.x <= right && p.y >= top && p.y <= bottom) ids.push(i);});
+	marqueeSelection(ids);
+	Blockbench.setCursorTooltip(state.selected.size+' cage points | Shift add | Alt subtract | Esc cancel');
+}
+function finishMarquee(keep = true) {
+	if (!marquee) return;
+	if (!keep) selectPoints(marquee.before);
+	else if (!marquee.moved) marqueeSelection(marquee.handle);
+	marquee.element.remove(); marquee.preview.controls.enabled = marquee.controls_enabled;
+	marquee = null; PointerTarget.endTarget(PointerTarget.types.gizmo_transform);
+	Blockbench.setCursorTooltip(); updateDisplay();
+}
+
 function applyControls() {
 	const {binding,controls} = state;
 	const offsets = controls.map((p,i) => p.clone().sub(binding.rest[i]));
@@ -181,9 +232,15 @@ function applyControls() {
 }
 
 function begin(preview, event, ids) {
-	if (!state || drag || !PointerTarget.requestTarget(PointerTarget.types.gizmo_transform)) return false;
-	const origin = new THREE.Vector3(); ids.forEach(id => origin.add(state.controls[id])); origin.divideScalar(ids.length);
-	drag = {preview, ids:ids.slice(), before:clonePoints(state.controls), origin,
+	if (!state || drag || marquee || !ids.length) return false;
+	const operation = BarItems.dew_cage_mode.value == 'scale' ? 'scale' : 'move';
+	if (operation == 'scale' && ids.length < 2) {
+		Blockbench.showQuickMessage('Select at least two cage points to scale'); return false;
+	}
+	if (!PointerTarget.requestTarget(PointerTarget.types.gizmo_transform)) return false;
+	selectPoints(ids);
+	const origin = new THREE.Box3().setFromPoints(ids.map(id => state.controls[id])).getCenter(new THREE.Vector3());
+	drag = {preview, ids:ids.slice(), before:clonePoints(state.controls), origin, operation,
 		start:{clientX:event.clientX,clientY:event.clientY}, axis:BarItems.dew_cage_axis.value,
 		controls_enabled:preview.controls.enabled, started:false, pointerId:event.pointerId};
 	preview.controls.stopMovement(); preview.controls.enabled = false;
@@ -198,9 +255,32 @@ function moveBy(delta) {
 	drag.ids.forEach(id => state.controls[id].add(delta));
 	applyControls();
 }
+function scaleBy(factor) {
+	if (!drag || !state || !Number.isFinite(factor)) return;
+	factor = Math.clamp(factor,CAGE.MIN_SCALE,CAGE.MAX_SCALE);
+	state.controls = clonePoints(drag.before);
+	for (const id of drag.ids) {
+		for (const axis of ['x','y','z']) {
+			if (drag.axis == 'view' || drag.axis == axis) state.controls[id][axis] = drag.origin[axis] + (drag.before[id][axis]-drag.origin[axis])*factor;
+		}
+	}
+	if (!drag.started && !state.controls.some((p,i) => p.distanceToSquared(drag.before[i]) > CAGE.MOVE_EPSILON)) return;
+	if (!drag.started) {Undo.initEdit({elements:state.binding.items.map(item => item.mesh)}); drag.started=true;}
+	applyControls();
+}
 function pointerMove(event) {
 	if (!drag) return;
 	const {preview,origin,axis,start} = drag;
+	if (drag.operation == 'scale') {
+		const pivot = screenPoints(preview,[origin])[0], dx = start.clientX-pivot.x, dy = start.clientY-pivot.y;
+		const radiusSquared = dx*dx+dy*dy;
+		let amount = radiusSquared < CAGE.SCALE_PIVOT_PIXELS**2 ? (event.clientX-start.clientX)/CAGE.SCALE_DRAG_PIXELS :
+			((event.clientX-start.clientX)*dx+(event.clientY-start.clientY)*dy)/radiusSquared;
+		if (event.shiftKey) amount *= CAGE.FINE_MOVE;
+		scaleBy(1+amount);
+		Blockbench.setCursorTooltip('Scale cage: '+(axis == 'view' ? 'uniform' : axis.toUpperCase())+' | X/Y/Z constrain | Shift fine | Esc cancel');
+		return;
+	}
 	const normal = preview.camera.getWorldDirection(new THREE.Vector3());
 	const direction = axis == 'view' ? null : new THREE.Vector3().setComponent('xyz'.indexOf(axis),1);
 	if (direction) normal.addScaledVector(direction,-normal.dot(direction));
@@ -223,8 +303,8 @@ function finish(keep = true) {
 	try {
 		const changed = state.controls.some((p,i) => p.distanceToSquared(previous.before[i]) > CAGE.MOVE_EPSILON);
 		if (previous.started && keep && changed) {
-			const entry = Undo.finishEdit('Deform cage');
-			if (entry) history.set(entry, {binding:state.binding, before:previous.before, after:clonePoints(state.controls)});
+			const entry = Undo.finishEdit(previous.operation == 'scale' ? 'Scale cage' : 'Deform cage');
+			if (entry) history.set(entry, {binding:state.binding, before:previous.before, after:clonePoints(state.controls), selected:[...state.selected]});
 		} else {
 			state.controls = clonePoints(previous.before);
 			if (previous.started) Undo.cancelEdit(true);
@@ -244,13 +324,15 @@ function restore(entry, side) {
 	if (!active() || finishing) return;
 	const saved = history.get(entry);
 	if (!saved || saved.binding.project != Project.uuid || saved.binding.signature != signature(selection()) || saved.binding.items.some(item => !Mesh.all.includes(item.mesh))) {fit(); return;}
-	state = {binding:saved.binding, controls:clonePoints(saved[side])};
+	if (marquee) finishMarquee(false);
+	state = {binding:saved.binding, controls:clonePoints(saved[side]), selected:new Set(saved.selected)};
 	resolution = state.binding.counts.slice();
 	resolution.forEach((value,i) => BarItems['dew_cage_'+'xyz'[i]].set(String(value)));
 	buildDisplay();
 }
 function clear() {
 	if (drag) finish(false);
+	if (marquee) finishMarquee(false);
 	clearDisplay(); state = null; Blockbench.setCursorTooltip();
 }
 function previewFor(event) { return Preview.all.find(p => p.canvas == event.target); }
@@ -262,42 +344,59 @@ document.addEventListener('pointerdown', event => {
 	const preview = previewFor(event); if (!preview) return;
 	consume(event);
 	const handle = pick(preview,event);
-	if (handle) begin(preview,event,handle.ids);
+	if (BarItems.dew_cage_mode.value == 'select' || !handle) beginMarquee(preview,event,handle);
+	else {
+		if (!handle.ids.every(id => state.selected.has(id))) selectPoints(handle.ids);
+		begin(preview,event,[...state.selected]);
+	}
 }, true);
 document.addEventListener('pointermove', event => {
 	if (!active()) return;
 	if (drag) {consume(event); pointerMove(event); return;}
+	if (marquee) {consume(event); moveMarquee(event); return;}
 	const preview = previewFor(event);
 	const next = preview ? pick(preview,event) : null;
 	if (JSON.stringify(next?.ids) != JSON.stringify(hover?.ids)) {hover=next;updateDisplay();}
-	if (preview) preview.canvas.style.cursor = next ? 'grab' : 'default';
+	if (preview) preview.canvas.style.cursor = BarItems.dew_cage_mode.value == 'select' ? 'crosshair' : next ? 'grab' : 'default';
 }, true);
 document.addEventListener('pointerup', event => {
-	if (!drag || event.button != 0) return;
-	consume(event); finish(true);
+	if ((!drag && !marquee) || event.button != 0) return;
+	consume(event);
+	if (marquee) {moveMarquee(event);finishMarquee(true);}
+	else finish(true);
 }, true);
-document.addEventListener('pointercancel', () => finish(false), true);
-document.addEventListener('mousemove', event => {if (drag) consume(event);}, true);
+function cancelGesture() {finish(false);finishMarquee(false);}
+document.addEventListener('pointercancel', cancelGesture, true);
+document.addEventListener('mousemove', event => {if (drag || marquee) consume(event);}, true);
 document.addEventListener('keydown', event => {
-	if (!drag) return;
+	if (!drag && !marquee) return;
 	const key = event.key.toLowerCase();
-	if (key == 'escape' || ((event.ctrlKey || event.metaKey) && key == 'z')) {consume(event);finish(false);}
-	else if (['x','y','z'].includes(key) && !event.ctrlKey && !event.altKey) {
+	if (key == 'escape' || ((event.ctrlKey || event.metaKey) && key == 'z')) {consume(event);cancelGesture();}
+	else if (drag && ['x','y','z'].includes(key) && !event.ctrlKey && !event.altKey) {
 		consume(event); drag.axis = drag.axis == key ? 'view' : key;
-		Blockbench.setCursorTooltip('Cage movement: ' + drag.axis.toUpperCase());
+		Blockbench.setCursorTooltip('Cage '+drag.operation+': ' + drag.axis.toUpperCase());
 	} else if (!['shift','control','alt','meta'].includes(key)) consume(event);
 }, true);
-window.addEventListener('blur', () => finish(false));
+window.addEventListener('blur', cancelGesture);
 Blockbench.on('update_selection', () => {
-	if (active() && !drag && !finishing && (!state || state.binding.signature != signature(selection()))) fit();
+	if (active() && !drag && !marquee && !finishing && (!state || state.binding.signature != signature(selection()))) fit();
 });
-Blockbench.on('finished_edit', () => {if (active() && !drag && !finishing) fit();});
+Blockbench.on('finished_edit', () => {if (active() && !drag && !marquee && !finishing) fit();});
 Blockbench.on('undo', ({entry}) => restore(entry,'before'));
 Blockbench.on('redo', ({entry}) => restore(entry,'after'));
 Blockbench.on('unselect_project', clear);
 Blockbench.on('select_project', () => {if (active()) fit();});
 
 BARS.defineActions(function() {
+	new BarSelect('dew_cage_mode', {
+		name:'Cage mode', description:'Select: drag a box, Shift adds, Alt subtracts. Move or Scale: drag selected points together. Scaling uses the center of the selected points.',
+		category:'tools', value:'move', options:{move:'Move',select:'Select',scale:'Scale'},
+		onChange({value}) {
+			cancelGesture();
+			BarItems.dew_cage_axis.options.view = value == 'scale' ? 'Uniform' : 'View plane';
+			BarItems.dew_cage_axis.set(BarItems.dew_cage_axis.value);
+		},
+	});
 	for (let axis=0;axis<3;axis++) {
 		const letter = 'xyz'[axis];
 		new BarSelect('dew_cage_'+letter, {
@@ -308,7 +407,7 @@ BARS.defineActions(function() {
 		});
 	}
 	new BarSelect('dew_cage_axis', {
-		name:'Cage movement', description:'Drag in the view plane or along a world axis. X/Y/Z also constrain while dragging.',
+		name:'Cage axis', description:'Move in the view plane or scale uniformly, or constrain to a world axis. X/Y/Z also constrain while dragging.',
 		category:'tools', value:'view', options:{view:'View plane',x:'X axis',y:'Y axis',z:'Z axis'},
 	});
 	new Action('dew_cage_refit', {
@@ -316,7 +415,7 @@ BARS.defineActions(function() {
 		icon:'fit_screen', category:'tools', condition:() => active(), click:fit,
 	});
 	new Tool('dew_cage', {
-		name:'Deform Cage', description:'Fit a cage around selected mesh vertices. Drag points, edges or faces; Shift for fine movement, X/Y/Z to constrain, Esc to cancel.',
+		name:'Deform Cage', description:'Fit a cage around selected mesh vertices. Select mode box-selects points; Move and Scale act on the selection. Shift for fine movement, X/Y/Z to constrain, Esc to cancel.',
 		icon:'view_in_ar', category:'tools', transformerMode:'hidden', selectElements:false, toolbar:'dew_cage',
 		modes:['edit'], condition:() => Modes.edit && Format.meshes && Mesh.selected.length > 0,
 		onSelect() {if (!fit()) Blockbench.showQuickMessage('Select a mesh or mesh vertices to fit a cage');},
@@ -324,4 +423,4 @@ BARS.defineActions(function() {
 	});
 });
 
-Object.assign(window, {DEWCage:{CAGE,fit,setResolution,weightsAt,pick,begin,moveBy,finish,getState:()=>state,getDrag:()=>drag}});
+Object.assign(window, {DEWCage:{CAGE,fit,setResolution,weightsAt,pick,selectPoints,begin,moveBy,scaleBy,finish,getState:()=>state,getDrag:()=>drag,getMarquee:()=>marquee}});

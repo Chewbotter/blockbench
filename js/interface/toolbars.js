@@ -924,7 +924,7 @@ export const BARS = {
 		})
 		Toolbars.dew_cage = new Toolbar({
 			id: 'dew_cage', no_wrap: true,
-			children: ['dew_cage_x', 'dew_cage_y', 'dew_cage_z', '_', 'dew_cage_axis', 'dew_cage_refit'],
+			children: ['dew_cage_mode', 'dew_cage_x', 'dew_cage_y', 'dew_cage_z', '_', 'dew_cage_axis', 'dew_cage_refit'],
 		});
 		Toolbars.vertex_snap = new Toolbar({
 			id: 'vertex_snap',
