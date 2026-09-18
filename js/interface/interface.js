@@ -733,17 +733,16 @@ onVueSetup(function() {
 					if (selection_mode == 'edge') {
 						let total = 0, selected = 0;
 						Mesh.selected.forEach(mesh => {
-							let processed_lines = [];
+							let processed_lines = new Set();
 							mesh.forAllFaces(face => {
 								let vertices = face.getSortedVertices();
 								vertices.forEach((vkey, i) => {
 									let vkey2 = vertices[i+1] || vertices[0];
-									if (!processed_lines.find(processed => processed.includes(vkey) && processed.includes(vkey2))) {
-										processed_lines.push([vkey, vkey2]);
-										total += 1;
-									}
+									// Count shared edges once without searching every edge already visited on each drag step.
+									processed_lines.add(JSON.stringify(vkey < vkey2 ? [vkey, vkey2] : [vkey2, vkey]));
 								})
 							})
+							total += processed_lines.size;
 							selected += mesh.getSelectedEdges().length;
 						})
 						this.selection_info = tl('status_bar.selection.edges', `${selected} / ${total}`);

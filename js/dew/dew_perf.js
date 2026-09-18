@@ -3,12 +3,12 @@
 // face mesh ran at 7 frames a second. Moves, rotations, scales and vertex drags change positions only, so after a
 // full rebuild the buffer layout is cached and the next update with unchanged topology writes positions and flat
 // normals straight into the existing typed arrays. A full rebuild still happens whenever faces or their vertex
-// lists change, when smoothing or a weight view needs per-vertex normals or colours, and once at the end of every
-// edit (finished_edit), so a cached quad sort order is never stale for longer than one drag.
+// lists change, when a moved quad changes its sorted order, when smoothing or a weight view needs per-vertex
+// normals or colours, and once at the end of every edit (finished_edit).
 import { THREE } from "../lib/libs";
 
 export const PERF = {
-	FULL_REBUILD_ON_FINISH: true,	// re-run the stock rebuild after each edit, so sort orders and colours catch up
+	FULL_REBUILD_ON_FINISH: true,	// re-run the stock rebuild after each edit to refresh all derived display data
 };
 export const perf_stats = {fast: 0, full: 0};	// counters for the tests and the probe
 
@@ -26,7 +26,7 @@ function buildCache(element) {
 	let {mesh, faces, vertices} = element;
 	let face_keys = [], face_verts = [], face_start = [], face_sorted = [];
 	let slot = 0;
-	let vertex_slots = new Map();
+	let vertex_slots = new Map(), vertex_positions = new Map();
 	for (let fkey in faces) {
 		let face = faces[fkey];
 		if (face.vertices.length <= 2) continue;
@@ -34,15 +34,18 @@ function buildCache(element) {
 		face_keys.push(fkey);
 		face_verts.push(face.vertices.slice());
 		face_start.push(slot);
-		face_sorted.push(face.vertices.length == 4 ? face.getSortedVertices().slice(0, 3) : face.vertices.slice(0, 3));
+		face_sorted.push(face.getSortedVertices().slice());
 		face.vertices.forEach(vkey => {
-			if (!vertex_slots.has(vkey)) vertex_slots.set(vkey, []);
+			if (!vertex_slots.has(vkey)) {
+				vertex_slots.set(vkey, []);
+				vertex_positions.set(vkey, vertices[vkey].slice());
+			}
 			vertex_slots.get(vkey).push(slot++);
 		});
 	}
 	if (mesh.geometry.attributes.position.count != slot) return null;
 	return {
-		face_keys, face_verts, face_start, face_sorted, vertex_slots,
+		face_keys, face_verts, face_start, face_sorted, vertex_slots, vertex_positions,
 		vertex_keys: Object.keys(vertices),
 		outline_order: mesh.outline.vertex_order.slice(),
 		turn_order: mesh.turn_edges ? mesh.turn_edges.vertex_order.slice() : null,
@@ -79,13 +82,27 @@ function fastUpdate(element, cache) {
 	let position = mesh.geometry.attributes.position, normal = mesh.geometry.attributes.normal;
 	if (!position || !normal || position.count != normal.count) return false;
 	let pos = position.array, nor = normal.array;
+	let moved = new Set();
 	for (let [vkey, slots] of cache.vertex_slots) {
 		let v = vertices[vkey];
 		if (!v) return false;
+		let previous = cache.vertex_positions.get(vkey);
+		if (v[0] != previous[0] || v[1] != previous[1] || v[2] != previous[2]) {
+			moved.add(vkey);
+			previous[0] = v[0]; previous[1] = v[1]; previous[2] = v[2];
+		}
 		for (let s of slots) { pos[s * 3] = v[0]; pos[s * 3 + 1] = v[1]; pos[s * 3 + 2] = v[2]; }
 	}
 	// Flat normal per face from its first three sorted vertices, the same three getNormal uses
 	for (let f = 0; f < cache.face_keys.length; f++) {
+		let keys = cache.face_verts[f];
+		if (keys.length == 4 && keys.some(vkey => moved.has(vkey))) {
+			let sorted = element.faces[cache.face_keys[f]].getSortedVertices();
+			// A zero-width extrusion becomes a quad on the first move. Other deformations can also change
+			// its boundary/diagonal without changing face.vertices. Rebuild indices, outlines and normals
+			// together now, then resume the fast path on subsequent moves with the new layout.
+			if (sorted.some((vkey, i) => vkey != cache.face_sorted[f][i])) return false;
+		}
 		let [a, b, c] = cache.face_sorted[f].map(vkey => vertices[vkey]);
 		let ax = b[0] - a[0], ay = b[1] - a[1], az = b[2] - a[2];
 		let bx = c[0] - a[0], by = c[1] - a[1], bz = c[2] - a[2];
