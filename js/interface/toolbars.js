@@ -765,6 +765,7 @@ export const BARS = {
 				'pivot_tool',
 				'vertex_snap_tool',
 				'stretch_tool',
+				'dew_cage',
 				'dew_tile_select',
 				'dew_whole_block',
 				'dew_tile_brush',
@@ -921,6 +922,10 @@ export const BARS = {
 				'image_onion_skin_view',
 			]
 		})
+		Toolbars.dew_cage = new Toolbar({
+			id: 'dew_cage', no_wrap: true,
+			children: ['dew_cage_x', 'dew_cage_y', 'dew_cage_z', '_', 'dew_cage_axis', 'dew_cage_refit'],
+		});
 		Toolbars.vertex_snap = new Toolbar({
 			id: 'vertex_snap',
 			no_wrap: true,
