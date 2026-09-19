@@ -31,6 +31,13 @@ function signature(items) {
 }
 
 // Piecewise trilinear interpolation: even a larger lattice needs just eight weights per mesh vertex.
+function cellWeights(fraction) {
+	const weights = [];
+	for (let z = 0; z <= 1; z++) for (let y = 0; y <= 1; y++) for (let x = 0; x <= 1; x++) {
+		weights.push((x ? fraction[0] : 1 - fraction[0]) * (y ? fraction[1] : 1 - fraction[1]) * (z ? fraction[2] : 1 - fraction[2]));
+	}
+	return weights;
+}
 function weightsAt(point, box, counts) {
 	const cell = [], fraction = [];
 	for (let axis = 0; axis < 3; axis++) {
@@ -39,12 +46,23 @@ function weightsAt(point, box, counts) {
 		cell[axis] = Math.min(Math.floor(t), counts[axis] - 2);
 		fraction[axis] = t - cell[axis];
 	}
-	const ids = [], weights = [];
+	const ids = [];
 	for (let z = 0; z <= 1; z++) for (let y = 0; y <= 1; y++) for (let x = 0; x <= 1; x++) {
 		ids.push(indexAt(cell[0] + x, cell[1] + y, cell[2] + z, counts));
-		weights.push((x ? fraction[0] : 1 - fraction[0]) * (y ? fraction[1] : 1 - fraction[1]) * (z ? fraction[2] : 1 - fraction[2]));
 	}
-	return {ids, weights};
+	return {ids, weights:cellWeights(fraction), fraction};
+}
+function smoothScaleWeights(vertexBinding, selected) {
+	const {ids,weights,fraction} = vertexBinding;
+	const picked = ids.map(id => selected.has(id));
+	// Ease only across selection boundaries. Keeping the other axes linear preserves round rings
+	// and ordinary scaling inside fully selected cells, instead of rounding every cage coordinate.
+	const eased = fraction.map((t,axis) => {
+		const step = 1 << axis;
+		const transition = picked.some((value,i) => !(i & step) && value != picked[i+step]);
+		return transition ? t*t*(3-2*t) : t;
+	});
+	return eased.every((t,i) => t == fraction[i]) ? weights : cellWeights(eased);
 }
 function fit() {
 	if (drag) finish(false);
@@ -275,17 +293,25 @@ function finishMarquee(keep = true) {
 
 function applyControls() {
 	const {binding,controls} = state;
-	const offsets = controls.map((p,i) => p.clone().sub(binding.rest[i]));
+	const offsets = controls.map((p,i) => p.clone().sub(drag.before[i]));
 	const point = new THREE.Vector3();
-	for (const item of binding.items) {
+	binding.items.forEach((item,itemIndex) => {
+		const snapshot = drag.items[itemIndex];
 		item.keys.forEach((key,i) => {
-			point.copy(item.base[i]);
-			const {ids,weights} = item.bindings[i];
-			for (let j=0;j<8;j++) point.addScaledVector(offsets[ids[j]],weights[j]);
+			point.copy(snapshot.base[i]);
+			if (drag.operation == 'scale' && drag.ids.length == controls.length) {
+				// A whole-cage scale also scales any curvature left by earlier smooth edits.
+				for (const axis of ['x','y','z']) {
+					if (drag.axis == 'view' || drag.axis == axis) point[axis] = drag.origin[axis]+(point[axis]-drag.origin[axis])*drag.scaleFactor;
+				}
+			} else {
+				const {ids,weights} = item.bindings[i], influence = snapshot.weights?.[i] || weights;
+				for (let j=0;j<8;j++) point.addScaledVector(offsets[ids[j]],influence[j]);
+			}
 			point.applyMatrix4(item.inverse).toArray(item.mesh.vertices[key]);
 		});
 		item.mesh.preview_controller.updateGeometry(item.mesh);
-	}
+	});
 	updateDisplay();
 }
 
@@ -298,7 +324,13 @@ function begin(preview, event, ids, axis = 'view', fromGizmo = false) {
 	if (!PointerTarget.requestTarget(PointerTarget.types.gizmo_transform)) return false;
 	selectPoints(ids);
 	const origin = new THREE.Box3().setFromPoints(ids.map(id => state.controls[id])).getCenter(new THREE.Vector3());
-	drag = {preview, ids:ids.slice(), before:clonePoints(state.controls), origin, operation, fromGizmo,
+	const smooth = operation == 'scale' && BarItems.dew_cage_smooth.value;
+	// Start from the current mesh on every drag. Switching interpolation must not rewrite past edits.
+	const items = state.binding.items.map(item => ({
+		base:item.keys.map(key => new THREE.Vector3().fromArray(item.mesh.vertices[key]).applyMatrix4(item.mesh.mesh.matrixWorld)),
+		weights:smooth ? item.bindings.map(vertexBinding => smoothScaleWeights(vertexBinding,state.selected)) : null,
+	}));
+	drag = {preview, ids:ids.slice(), before:clonePoints(state.controls), origin, operation, fromGizmo, items, smooth,
 		gizmoLength:preview.calculateControlScale(origin)*settings.control_size.value*CAGE.GIZMO_SIZE,
 		start:{clientX:event.clientX,clientY:event.clientY}, axis,
 		controls_enabled:preview.controls.enabled, started:false, pointerId:event.pointerId};
@@ -317,6 +349,7 @@ function moveBy(delta) {
 function scaleBy(factor) {
 	if (!drag || !state || !Number.isFinite(factor)) return;
 	factor = Math.clamp(factor,CAGE.MIN_SCALE,CAGE.MAX_SCALE);
+	drag.scaleFactor = factor;
 	state.controls = clonePoints(drag.before);
 	for (const id of drag.ids) {
 		for (const axis of ['x','y','z']) {
@@ -363,7 +396,7 @@ function finish(keep = true) {
 	try {
 		const changed = state.controls.some((p,i) => p.distanceToSquared(previous.before[i]) > CAGE.MOVE_EPSILON);
 		if (previous.started && keep && changed) {
-			const entry = Undo.finishEdit(previous.operation == 'scale' ? 'Scale cage' : 'Deform cage');
+			const entry = Undo.finishEdit(previous.operation == 'scale' ? (previous.smooth ? 'Smooth scale cage' : 'Scale cage') : 'Deform cage');
 			if (entry) history.set(entry, {binding:state.binding, before:previous.before, after:clonePoints(state.controls), selected:[...state.selected]});
 		} else {
 			state.controls = clonePoints(previous.before);
@@ -457,6 +490,12 @@ BARS.defineActions(function() {
 		name:'Cage mode', description:'Select: drag a box, Shift adds, Alt subtracts. Move or Scale: use the axis handles, or drag selected points directly for free movement or uniform scaling.',
 		category:'tools', value:'move', options:{move:'Move',select:'Select',scale:'Scale'},
 		onChange() {cancelGesture();gizmoHover=null;hover=null;updateDisplay();},
+	});
+	new Toggle('dew_cage_smooth', {
+		name:'Smooth Scale', description:'Curve the taper between selected and unselected cage points. Applies to the next scale drag; existing edits stay as they are.',
+		icon:'show_chart', category:'tools', default:false,
+		condition:() => active() && BarItems.dew_cage_mode.value == 'scale',
+		onChange:cancelGesture,
 	});
 	for (let axis=0;axis<3;axis++) {
 		const letter = 'xyz'[axis];
