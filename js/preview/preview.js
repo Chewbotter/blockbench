@@ -461,7 +461,8 @@ export class Preview {
 					objects.push(mesh.pathLine);
 				}
 			} else if (element instanceof Locator) {
-				objects.push(mesh.sprite);
+				element.preview_controller.updateWindowSize(element, this);
+				objects.push(mesh.locator_marker);
 			} else if (element instanceof ArmatureBone) {
 				if (Toolbox.selected.id == 'weight_brush' && !(event.altKey || Pressing.overrides.alt)) return;
 				objects.push(mesh.children[0]);

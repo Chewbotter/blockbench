@@ -98,8 +98,46 @@ new Property(Locator, 'boolean', 'locked');
 OutlinerElement.registerType(Locator, 'locator');
 
 
-const map = new THREE.TextureLoader().load( 'assets/locator.png' );
-map.magFilter = map.minFilter = THREE.NearestFilter;
+const LOCATOR_ARROW = {
+	PIXELS: 44,
+	HEAD_START: 0.62,
+	SHAFT_HALF_WIDTH: 0.09,
+	HEAD_HALF_WIDTH: 0.27,
+	DEPTH: 0.1,
+	SIDE_SHADE: 0.55,
+	SELECTED_ORDER: 100,
+};
+let locator_scene = null;
+const locator_view_position = new THREE.Vector3();
+function hookLocatorRender() {
+	if (locator_scene === Canvas.scene) return;
+	locator_scene = Canvas.scene;
+	const previous = Canvas.scene.onBeforeRender;
+	Canvas.scene.onBeforeRender = function(renderer, scene, camera, ...rest) {
+		previous.call(this, renderer, scene, camera, ...rest);
+		if (!camera.preview) return;
+		for (const locator of Locator.all) {
+			if (locator.mesh?.visible) locator.preview_controller.updateWindowSize(locator, camera.preview);
+		}
+	};
+}
+
+function createLocatorArrow() {
+	// Tail at the pivot, tip along local +X, the game's hinge/hinger rotation axis.
+	const {HEAD_START: h, SHAFT_HALF_WIDTH: s, HEAD_HALF_WIDTH: w, DEPTH: d} = LOCATOR_ARROW;
+	const shape = new THREE.Shape();
+	shape.moveTo(0, -s);
+	for (const [x, y] of [[h, -s], [h, -w], [1, 0], [h, w], [h, s], [0, s]]) shape.lineTo(x, y);
+	shape.closePath();
+	const geometry = new THREE.ExtrudeGeometry(shape, {depth: d, steps: 1, bevelEnabled: false});
+	geometry.translate(0, 0, -d / 2);
+	const materials = [1, LOCATOR_ARROW.SIDE_SHADE].map(shade => new THREE.MeshBasicMaterial({
+		color: gizmo_colors.r.clone().multiplyScalar(shade), depthWrite: false,
+	}));
+	const arrow = new THREE.Mesh(geometry, materials);
+	arrow.no_export = true;
+	return arrow;
+}
 
 new NodePreviewController(Locator, {
 	setup(element) {
@@ -111,19 +149,16 @@ new NodePreviewController(Locator, {
 		mesh.visible = element.visibility;
 		mesh.rotation.order = Format.euler_order;
 
-		let material = new THREE.SpriteMaterial({
-			map,
-			alphaTest: 0.1,
-			sizeAttenuation: false
-		});
-		let sprite = new THREE.Sprite(material);
-		sprite.name = element.uuid;
-		sprite.type = element.type;
-		sprite.isElement = true;
-		mesh.add(sprite);
-		mesh.sprite = sprite;
+		const arrow = createLocatorArrow();
+		arrow.name = element.uuid;
+		arrow.type = element.type;
+		arrow.isElement = true;
+		mesh.add(arrow);
+		mesh.locator_marker = arrow;
 
+		hookLocatorRender();
 		this.updateTransform(element);
+		this.updateSelection(element);
 
 		this.dispatchEvent('setup', {element});
 	},
@@ -134,15 +169,34 @@ new NodePreviewController(Locator, {
 	updateSelection(element) {
 		let {mesh} = element;
 
-		mesh.sprite.material.color.set(element.selected ? gizmo_colors.outline : CustomTheme.data.colors.text);
-		mesh.sprite.material.depthTest = !element.selected;
-		mesh.renderOrder = element.selected ? 100 : 0;
+		const arrow = mesh.locator_marker;
+		arrow.material.forEach((material, i) => {
+			material.color.copy(element.selected ? gizmo_colors.outline : gizmo_colors.r);
+			if (i) material.color.multiplyScalar(LOCATOR_ARROW.SIDE_SHADE);
+			material.depthTest = !element.selected;
+		});
+		arrow.renderOrder = element.selected ? LOCATOR_ARROW.SELECTED_ORDER : 0;
 
 		this.dispatchEvent('update_selection', {element});
 	},
-	updateWindowSize(element) {
-		let size = 0.4 * Preview.selected.camera.fov / Preview.selected.height;
-		element.mesh.sprite.scale.set(size, size, size);
+	updateWindowSize(element, preview = Preview.selected) {
+		if (!preview?.height) return;
+		const {camera} = preview;
+		const {mesh} = element;
+		mesh.getWorldPosition(locator_view_position).applyMatrix4(camera.matrixWorldInverse);
+		// Scale the preview child only. The saved locator retains its original transform.
+		let size = LOCATOR_ARROW.PIXELS * 2 / (preview.height * camera.projectionMatrix.elements[5]);
+		if (camera.isPerspectiveCamera) size *= Math.abs(locator_view_position.z);
+		mesh.locator_marker.scale.setScalar(Math.max(size, 1e-7));
+		mesh.locator_marker.updateMatrixWorld(true);
+	},
+	remove(element) {
+		const arrow = element.mesh?.locator_marker;
+		if (arrow) {
+			arrow.geometry.dispose();
+			arrow.material.forEach(material => material.dispose());
+		}
+		NodePreviewController.prototype.remove.call(this, element);
 	}
 })
 
