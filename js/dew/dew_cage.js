@@ -16,6 +16,7 @@ let state = null, display = null, drag = null, marquee = null, hover = null, giz
 let resolution = [2, 2, 2];
 const history = new WeakMap();
 const active = () => Modes.edit && Toolbox.selected?.id == 'dew_cage';
+const transformMode = () => BarItems.dew_cage_mode.value == 'smooth_scale' ? 'scale' : BarItems.dew_cage_mode.value;
 const clonePoints = points => points.map(p => p.clone());
 const indexAt = (x, y, z, counts) => (z * counts[1] + y) * counts[0] + x;
 
@@ -149,7 +150,7 @@ function hookGizmoRender() {
 }
 function updateGizmo(preview = Preview.selected) {
 	if (!display || !state || !preview) return;
-	const mode = BarItems.dew_cage_mode.value;
+	const mode = transformMode();
 	const ids = [...state.selected];
 	const visible = Canvas.show_gizmos && !marquee && ids.length >= (mode == 'scale' ? 2 : 1);
 	const origin = ids.length ? new THREE.Box3().setFromPoints(ids.map(id => state.controls[id])).getCenter(new THREE.Vector3()) : new THREE.Vector3();
@@ -169,7 +170,7 @@ function updateGizmo(preview = Preview.selected) {
 function pickGizmo(preview,event) {
 	if (!display || !display.root.visible) return null;
 	updateGizmo(preview);
-	const gizmo = display.gizmos[BarItems.dew_cage_mode.value];
+	const gizmo = display.gizmos[transformMode()];
 	if (!gizmo?.root.visible) return null;
 	return rayAt(preview,event).intersectObjects(gizmo.pickers,false)[0]?.object.name || null;
 }
@@ -317,14 +318,14 @@ function applyControls() {
 
 function begin(preview, event, ids, axis = 'view', fromGizmo = false) {
 	if (!state || drag || marquee || !ids.length) return false;
-	const operation = BarItems.dew_cage_mode.value == 'scale' ? 'scale' : 'move';
+	const operation = transformMode() == 'scale' ? 'scale' : 'move';
 	if (operation == 'scale' && ids.length < 2) {
 		Blockbench.showQuickMessage('Select at least two cage points to scale'); return false;
 	}
 	if (!PointerTarget.requestTarget(PointerTarget.types.gizmo_transform)) return false;
 	selectPoints(ids);
 	const origin = new THREE.Box3().setFromPoints(ids.map(id => state.controls[id])).getCenter(new THREE.Vector3());
-	const smooth = operation == 'scale' && BarItems.dew_cage_smooth.value;
+	const smooth = BarItems.dew_cage_mode.value == 'smooth_scale';
 	// Start from the current mesh on every drag. Switching interpolation must not rewrite past edits.
 	const items = state.binding.items.map(item => ({
 		base:item.keys.map(key => new THREE.Vector3().fromArray(item.mesh.vertices[key]).applyMatrix4(item.mesh.mesh.matrixWorld)),
@@ -487,15 +488,9 @@ Blockbench.on('select_project', () => {if (active()) fit();});
 
 BARS.defineActions(function() {
 	new BarSelect('dew_cage_mode', {
-		name:'Cage mode', description:'Select: drag a box, Shift adds, Alt subtracts. Move or Scale: use the axis handles, or drag selected points directly for free movement or uniform scaling.',
-		category:'tools', value:'move', options:{move:'Move',select:'Select',scale:'Scale'},
+		name:'Cage mode', description:'Select: drag a box, Shift adds, Alt subtracts. Move, Scale or Smooth Scale: use the axis handles or drag selected points directly. Smooth Scale curves the taper between selected and unselected points.',
+		category:'tools', value:'move', options:{move:'Move',select:'Select',scale:'Scale',smooth_scale:'Smooth Scale'},
 		onChange() {cancelGesture();gizmoHover=null;hover=null;updateDisplay();},
-	});
-	new Toggle('dew_cage_smooth', {
-		name:'Smooth Scale', description:'Curve the taper between selected and unselected cage points. Applies to the next scale drag; existing edits stay as they are.',
-		icon:'show_chart', category:'tools', default:false,
-		condition:() => active() && BarItems.dew_cage_mode.value == 'scale',
-		onChange:cancelGesture,
 	});
 	for (let axis=0;axis<3;axis++) {
 		const letter = 'xyz'[axis];
@@ -519,4 +514,4 @@ BARS.defineActions(function() {
 	});
 });
 
-Object.assign(window, {DEWCage:{CAGE,fit,setResolution,weightsAt,pick,pickGizmo,selectPoints,begin,moveBy,scaleBy,finish,getState:()=>state,getDrag:()=>drag,getMarquee:()=>marquee,getGizmo:()=>display?.gizmos[BarItems.dew_cage_mode.value]}});
+Object.assign(window, {DEWCage:{CAGE,fit,setResolution,weightsAt,pick,pickGizmo,selectPoints,begin,moveBy,scaleBy,finish,getState:()=>state,getDrag:()=>drag,getMarquee:()=>marquee,getGizmo:()=>display?.gizmos[transformMode()]}});
