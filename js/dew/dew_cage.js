@@ -10,8 +10,9 @@ export const CAGE = {
 	FINE_MOVE: 0.1, MOVE_EPSILON: 1e-8,
 	BOX_DRAG_PIXELS: 3, SCALE_PIVOT_PIXELS: 8, SCALE_DRAG_PIXELS: 120,
 	MIN_SCALE: 0.01, MAX_SCALE: 100,
+	GIZMO_SIZE: 0.74, GIZMO_ORDER: 1003,
 };
-let state = null, display = null, drag = null, marquee = null, hover = null, finishing = false;
+let state = null, display = null, drag = null, marquee = null, hover = null, gizmoHover = null, finishing = false;
 let resolution = [2, 2, 2];
 const history = new WeakMap();
 const active = () => Modes.edit && Toolbox.selected?.id == 'dew_cage';
@@ -95,9 +96,64 @@ function fit() {
 function clearDisplay() {
 	if (!display) return;
 	Canvas.scene.remove(display.root);
+	Canvas.gizmos.remove(display.root);
 	display.root.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); });
 	display.surface.geometry.dispose(); display.surface.material.dispose();
-	display = null; hover = null;
+	display = null; hover = null; gizmoHover = null;
+}
+// Borrow the stock handle shapes, with owned geometry/materials and only the three single-axis handles.
+// The stock TransformControls edits model elements; cage transforms keep their own bindings and undo.
+function createGizmo(type) {
+	const source = Transformer.children.find(child => child instanceof type);
+	const root = new THREE.Group(), handles = [], pickers = [];
+	for (const [children, target] of [[source.handles.children,handles],[source.pickers.children,pickers]]) {
+		for (const object of children) {
+			if (!['X','Y','Z'].includes(object.name)) continue;
+			const parameters = {depthTest:false,depthWrite:false,transparent:true,visible:target == handles};
+			const material = object.isLine ? new THREE.LineBasicMaterial(parameters) : new THREE.MeshBasicMaterial({...parameters,side:THREE.DoubleSide});
+			const child = object.isLine ? new THREE.Line(object.geometry.clone(),material) : new THREE.Mesh(object.geometry.clone(),material);
+			child.name = object.name; child.renderOrder = CAGE.GIZMO_ORDER; child.frustumCulled = false;
+			root.add(child); target.push(child);
+		}
+	}
+	return {root,handles,pickers};
+}
+let hookedScene = null;
+function hookGizmoRender() {
+	if (hookedScene == Canvas.scene) return;
+	hookedScene = Canvas.scene;
+	const previous = Canvas.scene.onBeforeRender;
+	Canvas.scene.onBeforeRender = function(renderer,scene,camera,...rest) {
+		previous.call(this,renderer,scene,camera,...rest);
+		// Size for the camera actually rendering, including orthographic and split views.
+		if (display) updateGizmo(camera.preview);
+	};
+}
+function updateGizmo(preview = Preview.selected) {
+	if (!display || !state || !preview) return;
+	const mode = BarItems.dew_cage_mode.value;
+	const ids = [...state.selected];
+	const visible = Canvas.show_gizmos && !marquee && ids.length >= (mode == 'scale' ? 2 : 1);
+	const origin = ids.length ? new THREE.Box3().setFromPoints(ids.map(id => state.controls[id])).getCenter(new THREE.Vector3()) : new THREE.Vector3();
+	for (const [key,gizmo] of Object.entries(display.gizmos)) {
+		gizmo.root.visible = visible && mode == key;
+		if (!gizmo.root.visible) continue;
+		gizmo.root.position.copy(origin);
+		gizmo.root.scale.setScalar(preview.calculateControlScale(origin)*settings.control_size.value*CAGE.GIZMO_SIZE);
+		const highlighted = drag ? drag.axis.toUpperCase() : gizmoHover;
+		for (const child of gizmo.handles) {
+			const colors = Canvas.gizmo_colors;
+			child.material.color.copy(child.name == highlighted ? colors.gizmo_hover : colors[['r','g','b']['XYZ'.indexOf(child.name)]]);
+		}
+		gizmo.root.updateMatrixWorld(true);
+	}
+}
+function pickGizmo(preview,event) {
+	if (!display || !display.root.visible) return null;
+	updateGizmo(preview);
+	const gizmo = display.gizmos[BarItems.dew_cage_mode.value];
+	if (!gizmo?.root.visible) return null;
+	return rayAt(preview,event).intersectObjects(gizmo.pickers,false)[0]?.object.name || null;
 }
 function buildDisplay() {
 	clearDisplay();
@@ -115,8 +171,9 @@ function buildDisplay() {
 	highlight.geometry.setAttribute('position', new THREE.Float32BufferAttribute(12,3)); highlight.geometry.setIndex([0,1,2,0,2,3]);
 	points.renderOrder = 1002; lines.renderOrder = 1001; highlight.renderOrder = 1000;
 	points.frustumCulled = lines.frustumCulled = highlight.frustumCulled = false;
-	root.add(lines, highlight, points); Canvas.scene.add(root);
-	display = {root, points, lines, surface, highlight}; updateDisplay();
+	const gizmos = {move:createGizmo(THREE.TransformGizmoTranslate),scale:createGizmo(THREE.TransformGizmoScale)};
+	root.add(lines, highlight, points, gizmos.move.root, gizmos.scale.root); Canvas.scene.add(root); Canvas.gizmos.push(root);
+	display = {root, points, lines, surface, highlight, gizmos}; hookGizmoRender(); updateDisplay();
 }
 function updateDisplay() {
 	if (!display || !state) return;
@@ -135,6 +192,7 @@ function updateDisplay() {
 		const buffer = display.highlight.geometry.attributes.position;
 		face.forEach((id,i) => {const p=state.controls[id]; buffer.setXYZ(i,p.x,p.y,p.z);}); buffer.needsUpdate=true;
 	}
+	updateGizmo();
 }
 function screenPoints(preview, points = state.controls) {
 	const rect = preview.canvas.getBoundingClientRect();
@@ -231,7 +289,7 @@ function applyControls() {
 	updateDisplay();
 }
 
-function begin(preview, event, ids) {
+function begin(preview, event, ids, axis = 'view', fromGizmo = false) {
 	if (!state || drag || marquee || !ids.length) return false;
 	const operation = BarItems.dew_cage_mode.value == 'scale' ? 'scale' : 'move';
 	if (operation == 'scale' && ids.length < 2) {
@@ -240,11 +298,12 @@ function begin(preview, event, ids) {
 	if (!PointerTarget.requestTarget(PointerTarget.types.gizmo_transform)) return false;
 	selectPoints(ids);
 	const origin = new THREE.Box3().setFromPoints(ids.map(id => state.controls[id])).getCenter(new THREE.Vector3());
-	drag = {preview, ids:ids.slice(), before:clonePoints(state.controls), origin, operation,
-		start:{clientX:event.clientX,clientY:event.clientY}, axis:BarItems.dew_cage_axis.value,
+	drag = {preview, ids:ids.slice(), before:clonePoints(state.controls), origin, operation, fromGizmo,
+		gizmoLength:preview.calculateControlScale(origin)*settings.control_size.value*CAGE.GIZMO_SIZE,
+		start:{clientX:event.clientX,clientY:event.clientY}, axis,
 		controls_enabled:preview.controls.enabled, started:false, pointerId:event.pointerId};
 	preview.controls.stopMovement(); preview.controls.enabled = false;
-	Preview.selected = preview; hover = null; updateDisplay();
+	Preview.selected = preview; hover = null; gizmoHover = null; updateDisplay();
 	return true;
 }
 function moveBy(delta) {
@@ -271,7 +330,7 @@ function scaleBy(factor) {
 function pointerMove(event) {
 	if (!drag) return;
 	const {preview,origin,axis,start} = drag;
-	if (drag.operation == 'scale') {
+	if (drag.operation == 'scale' && (!drag.fromGizmo || axis == 'view')) {
 		const pivot = screenPoints(preview,[origin])[0], dx = start.clientX-pivot.x, dy = start.clientY-pivot.y;
 		const radiusSquared = dx*dx+dy*dy;
 		let amount = radiusSquared < CAGE.SCALE_PIVOT_PIXELS**2 ? (event.clientX-start.clientX)/CAGE.SCALE_DRAG_PIXELS :
@@ -294,8 +353,9 @@ function pointerMove(event) {
 	const delta = current.sub(first);
 	if (direction) delta.copy(direction.multiplyScalar(delta.dot(direction)));
 	if (event.shiftKey) delta.multiplyScalar(CAGE.FINE_MOVE);
-	moveBy(delta);
-	Blockbench.setCursorTooltip('Cage: ' + (axis == 'view' ? 'view plane' : axis.toUpperCase()) + ' | X/Y/Z constrain | Shift fine | Esc cancel');
+	if (drag.operation == 'scale') scaleBy(1+delta[axis]/drag.gizmoLength);
+	else moveBy(delta);
+	Blockbench.setCursorTooltip('Cage '+drag.operation+': ' + (axis == 'view' ? 'view plane' : axis.toUpperCase()) + ' | X/Y/Z constrain | Shift fine | Esc cancel');
 }
 function finish(keep = true) {
 	if (!drag) return;
@@ -343,6 +403,8 @@ document.addEventListener('pointerdown', event => {
 	if (!active() || event.button != 0) return;
 	const preview = previewFor(event); if (!preview) return;
 	consume(event);
+	const axis = pickGizmo(preview,event);
+	if (axis) {begin(preview,event,[...state.selected],axis.toLowerCase(),true);return;}
 	const handle = pick(preview,event);
 	if (BarItems.dew_cage_mode.value == 'select' || !handle) beginMarquee(preview,event,handle);
 	else {
@@ -355,9 +417,11 @@ document.addEventListener('pointermove', event => {
 	if (drag) {consume(event); pointerMove(event); return;}
 	if (marquee) {consume(event); moveMarquee(event); return;}
 	const preview = previewFor(event);
-	const next = preview ? pick(preview,event) : null;
+	const axis = preview ? pickGizmo(preview,event) : null;
+	if (gizmoHover != axis) {gizmoHover = axis; updateGizmo(preview);}
+	const next = preview && !axis ? pick(preview,event) : null;
 	if (JSON.stringify(next?.ids) != JSON.stringify(hover?.ids)) {hover=next;updateDisplay();}
-	if (preview) preview.canvas.style.cursor = BarItems.dew_cage_mode.value == 'select' ? 'crosshair' : next ? 'grab' : 'default';
+	if (preview) preview.canvas.style.cursor = BarItems.dew_cage_mode.value == 'select' ? 'crosshair' : axis || next ? 'grab' : 'default';
 }, true);
 document.addEventListener('pointerup', event => {
 	if ((!drag && !marquee) || event.button != 0) return;
@@ -374,6 +438,7 @@ document.addEventListener('keydown', event => {
 	if (key == 'escape' || ((event.ctrlKey || event.metaKey) && key == 'z')) {consume(event);cancelGesture();}
 	else if (drag && ['x','y','z'].includes(key) && !event.ctrlKey && !event.altKey) {
 		consume(event); drag.axis = drag.axis == key ? 'view' : key;
+		updateGizmo(drag.preview);
 		Blockbench.setCursorTooltip('Cage '+drag.operation+': ' + drag.axis.toUpperCase());
 	} else if (!['shift','control','alt','meta'].includes(key)) consume(event);
 }, true);
@@ -389,13 +454,9 @@ Blockbench.on('select_project', () => {if (active()) fit();});
 
 BARS.defineActions(function() {
 	new BarSelect('dew_cage_mode', {
-		name:'Cage mode', description:'Select: drag a box, Shift adds, Alt subtracts. Move or Scale: drag selected points together. Scaling uses the center of the selected points.',
+		name:'Cage mode', description:'Select: drag a box, Shift adds, Alt subtracts. Move or Scale: use the axis handles, or drag selected points directly for free movement or uniform scaling.',
 		category:'tools', value:'move', options:{move:'Move',select:'Select',scale:'Scale'},
-		onChange({value}) {
-			cancelGesture();
-			BarItems.dew_cage_axis.options.view = value == 'scale' ? 'Uniform' : 'View plane';
-			BarItems.dew_cage_axis.set(BarItems.dew_cage_axis.value);
-		},
+		onChange() {cancelGesture();gizmoHover=null;hover=null;updateDisplay();},
 	});
 	for (let axis=0;axis<3;axis++) {
 		const letter = 'xyz'[axis];
@@ -406,10 +467,6 @@ BARS.defineActions(function() {
 			onChange({value}) {const counts=resolution.slice();counts[axis]=Number(value);setResolution(counts);},
 		});
 	}
-	new BarSelect('dew_cage_axis', {
-		name:'Cage axis', description:'Move in the view plane or scale uniformly, or constrain to a world axis. X/Y/Z also constrain while dragging.',
-		category:'tools', value:'view', options:{view:'View plane',x:'X axis',y:'Y axis',z:'Z axis'},
-	});
 	new Action('dew_cage_refit', {
 		name:'Refit Cage', description:'Fit a fresh cage around the current selection, keeping all mesh edits',
 		icon:'fit_screen', category:'tools', condition:() => active(), click:fit,
@@ -423,4 +480,4 @@ BARS.defineActions(function() {
 	});
 });
 
-Object.assign(window, {DEWCage:{CAGE,fit,setResolution,weightsAt,pick,selectPoints,begin,moveBy,scaleBy,finish,getState:()=>state,getDrag:()=>drag,getMarquee:()=>marquee}});
+Object.assign(window, {DEWCage:{CAGE,fit,setResolution,weightsAt,pick,pickGizmo,selectPoints,begin,moveBy,scaleBy,finish,getState:()=>state,getDrag:()=>drag,getMarquee:()=>marquee,getGizmo:()=>display?.gizmos[BarItems.dew_cage_mode.value]}});

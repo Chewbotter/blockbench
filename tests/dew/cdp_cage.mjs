@@ -23,10 +23,10 @@ try {
 			for(const indices of [[0,2,3,1],[4,5,7,6],[0,1,5,4],[2,6,7,3],[0,4,6,2],[1,3,7,5]]) {
 				const vertices=indices.map(i=>v[i]);m.addFaces(new MeshFace(m,{vertices,texture:false,uv:Object.fromEntries(vertices.map((key,i)=>[key,[[0,0],[16,0],[16,16],[0,16]][i]]))}));
 			}
-			m.init();m.select();BarItems.selection_mode.set('object');updateSelection();BarItems.dew_cage.select();DEWCage.setResolution([2,2,2]);BarItems.dew_cage_axis.set('view');BarItems.dew_cage_mode.change('move');
+			m.init();m.select();BarItems.selection_mode.set('object');updateSelection();BarItems.dew_cage.select();DEWCage.setResolution([2,2,2]);BarItems.dew_cage_mode.change('move');
 			const p=Preview.selected;p.controls.target.set(0,0,0);p.camera.position.set(64,48,80);p.controls.update();p.render();
 		};
-		window.beginTest = ids => DEWCage.begin(Preview.selected,{clientX:500,clientY:300,pointerId:1},ids);
+		window.beginTest = (ids,axis='view') => DEWCage.begin(Preview.selected,{clientX:500,clientY:300,pointerId:1},ids,axis);
 		window.changeTest = (ids,delta) => {beginTest(ids);DEWCage.moveBy(new THREE.Vector3(...delta));DEWCage.finish(true);};
 		window.near = (a,b) => a.length==b.length&&a.every((value,i)=>Math.abs(value-b[i])<1e-6);
 		window.corners = () => DEWCage.getState().controls.map(p=>p.toArray());
@@ -66,10 +66,10 @@ try {
 	const screen=await ev(`(()=>{const p=Preview.selected;p.render();const q=DEWCage.getState().controls[7].clone().project(p.camera),r=p.canvas.getBoundingClientRect();return{x:r.left+(q.x+1)*r.width/2,y:r.top+(1-q.y)*r.height/2};})()`);
 	check('screen picking finds the visible cage corner',await ev(`DEWCage.pick(Preview.selected,{clientX:${screen.x},clientY:${screen.y}}).ids.join()=='7'`));
 	const beforeMouse=await ev('JSON.stringify(m.vertices)');
-	await ev(`BarItems.dew_cage_axis.set('x');true`);
 	await send('Input.dispatchMouseEvent',{type:'mouseMoved',...screen});
 	await send('Input.dispatchMouseEvent',{type:'mousePressed',...screen,button:'left',buttons:1,clickCount:1});
 	check('real pointer press starts a cage drag',await ev('!!DEWCage.getDrag()'));
+	await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'x',bubbles:true}));true`);
 	for(const delta of [10,20])await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:screen.x+delta,y:screen.y-delta,button:'left',buttons:1});
 	check('real mouse drag deforms proportionally and leaves selection intact',await ev(`(()=>{let before=JSON.parse(${JSON.stringify(beforeMouse)}),a=m.vertices[v[7]],b=before[v[7]],center=m.vertices[v[8]];return a.some((n,i)=>Math.abs(n-b[i])>0.01)&&near(center,a.map((n,i)=>(n-b[i])/8))&&m.selected;})()`));
 	check('axis-constrained mouse drag changes only that world coordinate',await ev(`(()=>{let before=JSON.parse(${JSON.stringify(beforeMouse)});return v.every(k=>m.vertices[k][1]==before[k][1]&&m.vertices[k][2]==before[k][2]);})()`));
@@ -114,13 +114,13 @@ try {
 	await ev(`BarItems.dew_cage_mode.change('scale');true`);
 	await press(cornerClick);await release(cornerClick);
 	check('scaling requires at least two selected points',await ev(`!DEWCage.getDrag() && near(corners()[7],[8,8,8]) && Preview.selected.controls.enabled`));
-	check('axis scaling widens the top row symmetrically while the bottom row stays fixed',await ev(`(()=>{fixture();DEWCage.selectPoints([2,3,6,7]);BarItems.dew_cage_mode.change('scale');BarItems.dew_cage_axis.set('x');beginTest([2,3,6,7]);DEWCage.scaleBy(2);DEWCage.finish();return near(corners()[2],[-16,8,-8])&&near(corners()[3],[16,8,-8])&&near(corners()[6],[-16,8,8])&&near(corners()[7],[16,8,8])&&[0,1,4,5].every(i=>Math.abs(corners()[i][0])==8)&&near(m.vertices[v[8]],[0,0,0])&&near(m.vertices[v[9]],[13.5625,7,7]);})()`));
+	check('axis scaling widens the top row symmetrically while the bottom row stays fixed',await ev(`(()=>{fixture();DEWCage.selectPoints([2,3,6,7]);BarItems.dew_cage_mode.change('scale');beginTest([2,3,6,7],'x');DEWCage.scaleBy(2);DEWCage.finish();return near(corners()[2],[-16,8,-8])&&near(corners()[3],[16,8,-8])&&near(corners()[6],[-16,8,8])&&near(corners()[7],[16,8,8])&&[0,1,4,5].every(i=>Math.abs(corners()[i][0])==8)&&near(m.vertices[v[8]],[0,0,0])&&near(m.vertices[v[9]],[13.5625,7,7]);})()`));
 	check('scale undo and redo restore both cage geometry and the point selection',await ev(`(()=>{let scaled=JSON.stringify(m.vertices),handles=JSON.stringify(corners());Undo.undo();let undone=near(corners()[2],[-8,8,-8])&&selectedPoints()=='2,3,6,7';Undo.redo();return undone&&JSON.stringify(m.vertices)==scaled&&JSON.stringify(corners())==handles&&selectedPoints()=='2,3,6,7'&&Undo.history[Undo.index-1].action=='Scale cage';})()`));
 	check('scaling uses the selected bounding center even with unevenly spaced points',await ev(`(()=>{fixture();DEWCage.setResolution([3,2,2]);changeTest([1],[2,0,0]);BarItems.dew_cage_mode.change('scale');beginTest([0,1,2]);DEWCage.scaleBy(2);DEWCage.finish();return near(corners()[0],[-16,-8,-8])&&near(corners()[1],[4,-8,-8])&&near(corners()[2],[16,-8,-8])&&near(corners()[3],[-8,8,-8]);})()`));
-	check('scaling a flat selected row along its zero-extent axis creates no edit or invalid vertices',await ev(`(()=>{fixture();BarItems.dew_cage_mode.change('scale');BarItems.dew_cage_axis.set('y');let n=Undo.index,before=JSON.stringify(m.vertices);beginTest([2,3,6,7]);DEWCage.scaleBy(2);DEWCage.finish();return Undo.index==n&&JSON.stringify(m.vertices)==before&&Object.values(m.vertices).flat().every(Number.isFinite);})()`));
+	check('scaling a flat selected row along its zero-extent axis creates no edit or invalid vertices',await ev(`(()=>{fixture();BarItems.dew_cage_mode.change('scale');let n=Undo.index,before=JSON.stringify(m.vertices);beginTest([2,3,6,7],'y');DEWCage.scaleBy(2);DEWCage.finish();return Undo.index==n&&JSON.stringify(m.vertices)==before&&Object.values(m.vertices).flat().every(Number.isFinite);})()`));
 	check('Escape rolls back a group scale without changing the selection',await ev(`(()=>{fixture();BarItems.dew_cage_mode.change('scale');let before=JSON.stringify(m.vertices),n=Undo.index;beginTest([2,3,6,7]);DEWCage.scaleBy(1.8);document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return JSON.stringify(m.vertices)==before&&Undo.index==n&&selectedPoints()=='2,3,6,7'&&!DEWCage.getDrag();})()`));
 	// Real group move and scale preserve the selected group when a single member is grabbed.
-	await ev(`fixture();DEWCage.selectPoints([2,3,6,7]);BarItems.dew_cage_axis.set('x');true`);await sleep(200);
+	await ev(`fixture();DEWCage.selectPoints([2,3,6,7]);true`);await sleep(200);
 	const groupCorner=(await ev('cageScreen()'))[7];
 	await press(groupCorner);await move({x:groupCorner.x+25,y:groupCorner.y});await release({x:groupCorner.x+25,y:groupCorner.y});
 	check('dragging one selected point moves the entire selected group',await ev(`(()=>{let s=DEWCage.getState(),d=s.controls[7].clone().sub(s.binding.rest[7]);return selectedPoints()=='2,3,6,7'&&d.length()>0.01&&[2,3,6,7].every(i=>s.controls[i].clone().sub(s.binding.rest[i]).distanceTo(d)<1e-6)&&[0,1,4,5].every(i=>s.controls[i].equals(s.binding.rest[i]));})()`));
@@ -131,7 +131,39 @@ try {
 	await press(scaleStart);await move(scaleEnd);await release(scaleEnd);
 	check('real Scale drag expands selected points uniformly about their center',await ev(`(()=>{let s=DEWCage.getState(),factor=s.controls[7].x/8;return selectedPoints()=='0,1,2,3,4,5,6,7'&&Math.abs(factor-1.5)<0.03&&s.controls.every((p,i)=>p.distanceTo(s.binding.rest[i].clone().multiplyScalar(factor))<1e-6)&&near(m.vertices[v[8]],[0,0,0]);})()`));
 	check('changing resolution clears old point IDs and preserves the scaled geometry',await ev(`(()=>{let before=JSON.stringify(m.vertices);DEWCage.setResolution([2,3,2]);return DEWCage.getState().selected.size==0&&JSON.stringify(m.vertices)==before;})()`));
-	await ev(`DEWCage.selectPoints([2,3,8,9]);true`);
+
+	check('axis dropdown is removed while cage resolution selectors remain',await ev(`!BarItems.dew_cage_axis && ['dew_cage_x','dew_cage_y','dew_cage_z'].every(id=>Toolbars.dew_cage.children.some(t=>t.id==id))`));
+	check('move and scale gizmos have only X/Y/Z handles and own their resources',await ev(`(()=>{
+		fixture();DEWCage.selectPoints([2,3,6,7]);let ok=true;
+		for(let mode of ['move','scale']){BarItems.dew_cage_mode.change(mode);let g=DEWCage.getGizmo();let source=Transformer.children.find(c=>c instanceof (mode=='move'?THREE.TransformGizmoTranslate:THREE.TransformGizmoScale));
+			ok&&=g.root.visible&&near(g.root.position.toArray(),[0,8,0])&&g.handles.length==6&&g.pickers.map(p=>p.name).sort().join()=='X,Y,Z'&&g.handles.every(h=>['X','Y','Z'].includes(h.name)&&source.handles.children.every(s=>h.geometry!=s.geometry&&h.material!=s.material));}
+		return ok;
+	})()`));
+	await ev(`window.gizmoPoint=(axis,amount=1)=>{let p=Preview.selected;p.render();let g=DEWCage.getGizmo(),r=p.canvas.getBoundingClientRect(),q=g.root.position.clone();q[axis]+=g.root.scale.x*amount;q.project(p.camera);return{x:r.left+(q.x+1)*r.width/2,y:r.top+(1-q.y)*r.height/2};};true`);
+	for(const mode of ['move','scale']) for(const axis of ['x','y','z']) {
+		await ev(`fixture();DEWCage.selectPoints([0,1,2,3,4,5,6,7]);BarItems.dew_cage_mode.change('${mode}');true`);await sleep(150);
+		const start=await ev(`gizmoPoint('${axis}',0.95)`),end=await ev(`gizmoPoint('${axis}',1.35)`);
+		check(`${mode} gizmo ${axis.toUpperCase()} handle is pickable`,await ev(`DEWCage.pickGizmo(Preview.selected,{clientX:${start.x},clientY:${start.y}})=='${axis.toUpperCase()}'`));
+		const initial=await ev('JSON.stringify(m.vertices)'),initialUndo=await ev('Undo.index');
+		await press(start);
+		check(`${mode} gizmo ${axis.toUpperCase()} press retains the selected group and uses its axis`,await ev(`DEWCage.getDrag()?.fromGizmo && DEWCage.getDrag().axis=='${axis}' && selectedPoints()=='0,1,2,3,4,5,6,7'`));
+		await move(end);await release(end);
+		check(`${mode} gizmo ${axis.toUpperCase()} changes only that axis and records one edit`,await ev(`(()=>{let s=DEWCage.getState(),axis='${axis}',others=['x','y','z'].filter(a=>a!=axis);let changed=s.controls[7][axis]-s.binding.rest[7][axis];return Math.abs(changed)>0.1&&s.controls.every((p,i)=>others.every(a=>Math.abs(p[a]-s.binding.rest[i][a])<1e-6))&&(${JSON.stringify(mode)}=='move'?s.controls.every((p,i)=>Math.abs(p[axis]-s.binding.rest[i][axis]-changed)<1e-6):near(m.vertices[v[8]],[0,0,0])&&Math.abs(s.controls[0][axis]+s.controls[7][axis])<1e-6)&&Undo.index==${initialUndo+1}&&!DEWCage.getDrag()&&Preview.selected.controls.enabled;})()`));
+		await ev('Undo.undo();true');
+		check(`${mode} gizmo ${axis.toUpperCase()} undo restores geometry and pivot`,await ev(`JSON.stringify(m.vertices)==${JSON.stringify(initial)}&&near(DEWCage.getGizmo().root.position.toArray(),[0,0,0])`));
+	}
+	await ev(`fixture();DEWCage.selectPoints([2,3,6,7]);true`);await sleep(150);
+	const cancelStart=await ev(`gizmoPoint('x')`),cancelEnd=await ev(`gizmoPoint('x',1.4)`);
+	await press(cancelStart);await move(cancelEnd);await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));true`);await release(cancelEnd);
+	check('Escape cancels a gizmo drag and retains the selected row',await ev(`selectedPoints()=='2,3,6,7'&&near(corners()[7],[8,8,8])&&near(DEWCage.getGizmo().root.position.toArray(),[0,8,0])&&Preview.selected.controls.enabled`));
+	check('gizmo tracks zoom and supports orthographic camera picking',await ev(`(()=>{
+		let p=Preview.selected,g=DEWCage.getGizmo();p.render();let base=g.root.scale.x,origin=g.root.position.clone(),oldCamera=p.camera.position.clone();
+		p.camera.position.copy(origin).add(oldCamera.clone().sub(origin).multiplyScalar(2));p.controls.update();p.render();let resized=Math.abs(g.root.scale.x/base-2)<0.03;
+		p.setProjectionMode(true,true);p.render();let point=gizmoPoint('x');let hit=DEWCage.pickGizmo(p,{clientX:point.x,clientY:point.y});
+		p.setProjectionMode(false,true);p.camera.position.copy(oldCamera);p.controls.update();p.render();return resized&&hit=='X';
+	})()`));
+	check('Select mode and empty selections hide gizmos; refit removes old gizmos',await ev(`(()=>{BarItems.dew_cage_mode.change('select');let root=Canvas.scene.children.find(c=>c.name=='Cage preview');let hidden=root.children.filter(c=>c.type=='Group').every(c=>!c.visible);BarItems.dew_cage_mode.change('move');DEWCage.selectPoints([]);hidden&&=!DEWCage.getGizmo().root.visible;DEWCage.fit();return hidden&&!Canvas.gizmos.includes(root)&&Canvas.gizmos.filter(c=>c.name=='Cage preview').length==1;})()`));
+	await ev(`DEWCage.selectPoints([2,3,6,7]);BarItems.dew_cage_mode.change('scale');true`);
 	// Inspect the actual tool presentation without opening a window for the user.
 	await send('Page.enable');
 	const capture=await send('Page.captureScreenshot',{format:'png'});
