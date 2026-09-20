@@ -820,6 +820,19 @@
 	div.nslide.editing {
 		cursor: text;
 	}
+	/* Cage point counts: the axis letter sits left of a narrow one-digit value. The hover
+	   arrows are absolute and the left one always lands on the node's left edge, so the label
+	   is wide enough to hold the letter clear of it rather than under it. */
+	.tool.nslide_tool.dew_cage_points > .nslide {
+		width: 38px;
+	}
+	.tool.nslide_tool.dew_cage_points > label.dew_cage_axis {
+		min-width: 30px;
+		margin: 0;
+		padding: 0 3px 0 0;
+		line-height: 28px;
+		text-align: right;
+	}
 	.numeric_input.is_colored::before {
 		content: "";
 		position: absolute;

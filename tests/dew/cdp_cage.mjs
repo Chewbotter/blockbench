@@ -45,7 +45,20 @@ try {
 	check('UVs, face lists and material suffix are preserved',await ev(`(()=>{let original=JSON.parse(${JSON.stringify(base)}),now=m.getSaveCopy();return JSON.stringify(now.faces)==JSON.stringify(original.faces)&&now.name==original.name;})()`));
 	check('Escape cancels the current drag without an undo entry',await ev(`(()=>{let before=JSON.stringify(m.vertices),c=JSON.stringify(corners()),n=Undo.history.length;beginTest([0]);DEWCage.moveBy(new THREE.Vector3(-8,0,0));document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return !DEWCage.getDrag()&&JSON.stringify(m.vertices)==before&&JSON.stringify(corners())==c&&Undo.history.length==n&&Preview.selected.controls.enabled;})()`));
 	check('click without movement adds no undo entry',await ev(`(()=>{let n=Undo.history.length;beginTest([0]);DEWCage.finish(true);return Undo.history.length==n;})()`));
-	check('resolution controls add a middle row while preserving current geometry',await ev(`(()=>{let before=JSON.stringify(m.vertices);BarItems.dew_cage_y.change('3');return DEWCage.getState().controls.length==12&&JSON.stringify(m.vertices)==before&&BarItems.dew_cage_y.value=='3';})()`));
+	check('the arrow steps the point count and adds a middle row, geometry preserved',await ev(`(()=>{let before=JSON.stringify(m.vertices);BarItems.dew_cage_y.arrow(1,{});return DEWCage.getState().controls.length==12&&JSON.stringify(m.vertices)==before&&BarItems.dew_cage_y.value==3;})()`));
+	check('the point counts are steppers, not dropdowns',await ev(`['dew_cage_x','dew_cage_y','dew_cage_z'].every(id=>BarItems[id] instanceof NumSlider && BarItems[id].settings.min==2 && BarItems[id].settings.max==5 && BarItems[id].settings.step==1)`));
+	// --color-axis-* is what themes.ts feeds into Canvas.gizmo_colors, so matching the
+	// variable is matching the handle the label stands for.
+	check('each axis letter is drawn in the colour the gizmo takes for that axis',await ev(`['x','y','z'].every(a=>{
+		let l=BarItems['dew_cage_'+a].node.querySelector('label.dew_cage_axis');
+		if (!l || l.textContent!=a.toUpperCase()) return false;
+		let probe=document.createElement('span');probe.style.color='var(--color-axis-'+a+')';
+		document.getElementById('preview').append(probe);
+		let want=getComputedStyle(probe).color;probe.remove();
+		return want && getComputedStyle(l).color==want;
+	})`));
+	check('the arrows clamp at both ends instead of wrapping',await ev(`(()=>{let s=BarItems.dew_cage_z;DEWCage.setResolution([2,2,5]);s.arrow(1,{});let top=DEWCage.getState().binding.counts[2]==5&&s.value==5;DEWCage.setResolution([2,2,2]);s.arrow(-1,{});return top&&DEWCage.getState().binding.counts[2]==2&&s.value==2;})()`));
+	check('a slider reads back the resolution a refit chose',await ev(`(()=>{DEWCage.setResolution([4,2,2]);DEWCage.setResolution([0,99,3]);return BarItems.dew_cage_x.value==2&&BarItems.dew_cage_y.value==5&&BarItems.dew_cage_z.value==3;})()`));
 	check('a middle row bends the center while end rows stay fixed',await ev(`(()=>{fixture();DEWCage.setResolution([2,3,2]);let before=JSON.parse(JSON.stringify(m.vertices));changeTest([2,3,8,9],[8,0,0]);return near(m.vertices[v[8]],[8,0,0])&&v.slice(0,8).every(k=>near(m.vertices[k],before[k]));})()`));
 	check('resolution bounds remain valid and finite on flat selections',await ev(`(()=>{fixture();BarItems.selection_mode.set('vertex');m.getSelectedVertices(true).replace(v.slice(0,4));updateSelection();DEWCage.setResolution([0,99,3]);let s=DEWCage.getState();changeTest([0],[0,0,4]);return s.binding.counts.join()==[2,5,3].join()&&Object.values(m.vertices).flat().every(Number.isFinite);})()`));
 	check('component selection changes only selected vertices',await ev(`(()=>{fixture();BarItems.selection_mode.set('vertex');m.getSelectedVertices(true).replace([v[0],v[7],v[8]]);updateSelection();let before=JSON.parse(JSON.stringify(m.vertices));changeTest([7],[8,0,0]);return near(m.vertices[v[8]],[1,0,0])&&v.filter(k=>![v[0],v[7],v[8]].includes(k)).every(k=>near(before[k],m.vertices[k]));})()`));
@@ -132,7 +145,7 @@ try {
 	check('real Scale drag expands selected points uniformly about their center',await ev(`(()=>{let s=DEWCage.getState(),factor=s.controls[7].x/8;return selectedPoints()=='0,1,2,3,4,5,6,7'&&Math.abs(factor-1.5)<0.03&&s.controls.every((p,i)=>p.distanceTo(s.binding.rest[i].clone().multiplyScalar(factor))<1e-6)&&near(m.vertices[v[8]],[0,0,0]);})()`));
 	check('changing resolution clears old point IDs and preserves the scaled geometry',await ev(`(()=>{let before=JSON.stringify(m.vertices);DEWCage.setResolution([2,3,2]);return DEWCage.getState().selected.size==0&&JSON.stringify(m.vertices)==before;})()`));
 
-	check('axis dropdown is removed while cage resolution selectors remain',await ev(`!BarItems.dew_cage_axis && ['dew_cage_x','dew_cage_y','dew_cage_z'].every(id=>Toolbars.dew_cage.children.some(t=>t.id==id))`));
+	check('axis dropdown is removed while cage resolution steppers remain',await ev(`!BarItems.dew_cage_axis && ['dew_cage_x','dew_cage_y','dew_cage_z'].every(id=>Toolbars.dew_cage.children.some(t=>t.id==id))`));
 	check('move and scale gizmos have only X/Y/Z handles and own their resources',await ev(`(()=>{
 		fixture();DEWCage.selectPoints([2,3,6,7]);let ok=true;
 		for(let mode of ['move','scale']){BarItems.dew_cage_mode.change(mode);let g=DEWCage.getGizmo();let source=Transformer.children.find(c=>c instanceof (mode=='move'?THREE.TransformGizmoTranslate:THREE.TransformGizmoScale));

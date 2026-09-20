@@ -408,10 +408,28 @@ function finish(keep = true) {
 		Blockbench.setCursorTooltip(); updateDisplay(); updateSelection();
 	} finally {finishing = false;}
 }
+// The sliders read `resolution` through their own get(), so update() is the whole sync.
+function syncResolutionSliders() {
+	for (const letter of 'xyz') BarItems['dew_cage_'+letter]?.update();
+}
+// --color-axis-* is declared twice: once globally as the UI palette (setup.css) and once on
+// #preview as the 3D palette (window.css), and it is the second that themes.ts feeds into
+// Canvas.gizmo_colors. A class like .color_x on a toolbar label therefore picks up the UI red,
+// not the gizmo's. Read the #preview value directly so the letter matches its own handle.
+function paintAxisLabels() {
+	const preview = document.getElementById('preview');
+	if (!preview) return;
+	const style = getComputedStyle(preview);
+	for (const letter of 'xyz') {
+		const label = BarItems['dew_cage_'+letter]?.node.querySelector('label.dew_cage_axis');
+		const color = style.getPropertyValue('--color-axis-'+letter).trim();
+		if (label && color) label.style.color = color;
+	}
+}
 function setResolution(counts) {
 	if (drag) finish(true);
 	resolution = counts.map(value => Math.clamp(Math.round(Number(value) || CAGE.MIN_POINTS), CAGE.MIN_POINTS, CAGE.MAX_POINTS));
-	resolution.forEach((value,i) => BarItems['dew_cage_'+'xyz'[i]]?.set(String(value)));
+	syncResolutionSliders();
 	return fit();
 }
 function restore(entry, side) {
@@ -421,7 +439,7 @@ function restore(entry, side) {
 	if (marquee) finishMarquee(false);
 	state = {binding:saved.binding, controls:clonePoints(saved[side]), selected:new Set(saved.selected)};
 	resolution = state.binding.counts.slice();
-	resolution.forEach((value,i) => BarItems['dew_cage_'+'xyz'[i]].set(String(value)));
+	syncResolutionSliders();
 	buildDisplay();
 }
 function clear() {
@@ -494,12 +512,29 @@ BARS.defineActions(function() {
 	});
 	for (let axis=0;axis<3;axis++) {
 		const letter = 'xyz'[axis];
-		new BarSelect('dew_cage_'+letter, {
+		// A slider rather than a dropdown: the value is on show, and the hover arrows step it
+		// between MIN_POINTS and MAX_POINTS. `get` reads the live resolution, so update() alone
+		// puts every slider back in step after a refit or an undo.
+		const slider = new NumSlider('dew_cage_'+letter, {
 			name:letter.toUpperCase()+' cage points', description:'Number of cage points along '+letter.toUpperCase()+'. Refits the cage around the current shape.',
-			category:'tools', value:'2',
-			options:Object.fromEntries(Array.from({length:CAGE.MAX_POINTS-CAGE.MIN_POINTS+1},(_,i) => [String(i+CAGE.MIN_POINTS),letter.toUpperCase()+': '+(i+CAGE.MIN_POINTS)])),
-			onChange({value}) {const counts=resolution.slice();counts[axis]=Number(value);setResolution(counts);},
+			category:'tools',
+			settings:{min:CAGE.MIN_POINTS, max:CAGE.MAX_POINTS, step:1, default:CAGE.MIN_POINTS},
+			get:() => resolution[axis],
+			onChange(value) {const counts=resolution.slice();counts[axis]=value;setResolution(counts);},
 		});
+		const label = document.createElement('label');
+		label.className = 'f_left toolbar_label dew_cage_axis';
+		label.textContent = letter.toUpperCase();
+		slider.node.classList.add('has_label','dew_cage_points');
+		slider.node.prepend(label);
+	}
+	paintAxisLabels();
+	// A theme rewrites the axis variables, and themes.ts dispatches no event, so ride its own
+	// update. The labels are repainted from the same values it hands the gizmo.
+	if (typeof CustomTheme != 'undefined' && !CustomTheme.updateColors.dew_cage_wrapped) {
+		const stock = CustomTheme.updateColors.bind(CustomTheme);
+		CustomTheme.updateColors = function(...args) {const r = stock(...args); paintAxisLabels(); return r;};
+		CustomTheme.updateColors.dew_cage_wrapped = true;
 	}
 	new Action('dew_cage_refit', {
 		name:'Refit Cage', description:'Fit a fresh cage around the current selection, keeping all mesh edits',
