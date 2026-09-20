@@ -512,7 +512,7 @@ BARS.defineActions(function() {
 	});
 	for (let axis=0;axis<3;axis++) {
 		const letter = 'xyz'[axis];
-		// A slider rather than a dropdown: the value is on show, and the hover arrows step it
+		// A slider rather than a dropdown: the value is on show and its own stepper changes it
 		// between MIN_POINTS and MAX_POINTS. `get` reads the live resolution, so update() alone
 		// puts every slider back in step after a refit or an undo.
 		const slider = new NumSlider('dew_cage_'+letter, {
@@ -527,6 +527,25 @@ BARS.defineActions(function() {
 		label.textContent = letter.toUpperCase();
 		slider.node.classList.add('has_label','dew_cage_points');
 		slider.node.prepend(label);
+		// The stock arrows are horizontal, appear only on hover and are placed by an inline
+		// margin off the node centre, which put the left one over the axis letter. These sit
+		// in the row as an up/down pair, always visible, and drive the same arrow() step.
+		const stepper = document.createElement('div');
+		stepper.className = 'dew_cage_stepper';
+		for (const [direction, icon] of [[1,'arrow_drop_up'],[-1,'arrow_drop_down']]) {
+			const button = document.createElement('div');
+			button.className = 'dew_cage_step';
+			const glyph = document.createElement('i');
+			glyph.className = 'material-icons notranslate';
+			glyph.textContent = icon;
+			button.append(glyph);
+			button.addEventListener('mousedown', event => {
+				event.preventDefault(); event.stopPropagation();
+				slider.arrow(direction, event);
+			});
+			stepper.append(button);
+		}
+		slider.node.append(stepper);
 	}
 	paintAxisLabels();
 	// A theme rewrites the axis variables, and themes.ts dispatches no event, so ride its own
@@ -544,7 +563,10 @@ BARS.defineActions(function() {
 		name:'Deform Cage', description:'Fit a cage around selected mesh vertices. Select mode box-selects points; Move and Scale act on the selection. Shift for fine movement, X/Y/Z to constrain, Esc to cancel.',
 		icon:'view_in_ar', category:'tools', transformerMode:'hidden', selectElements:false, toolbar:'dew_cage',
 		modes:['edit'], condition:() => Modes.edit && Format.meshes && Mesh.selected.length > 0,
-		onSelect() {if (!fit()) Blockbench.showQuickMessage('Select a mesh or mesh vertices to fit a cage');},
+		// Nothing writes a slider's text until something changes it, so a freshly shown toolbar
+		// had three blank boxes. Paint the values (and the letters, in case #preview was not up
+		// when the bar was built) every time the tool comes out.
+		onSelect() {syncResolutionSliders();paintAxisLabels();if (!fit()) Blockbench.showQuickMessage('Select a mesh or mesh vertices to fit a cage');},
 		onUnselect() {clear();Preview.all.forEach(p => p.canvas.style.cursor='');},
 	});
 });

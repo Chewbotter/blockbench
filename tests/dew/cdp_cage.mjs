@@ -59,6 +59,30 @@ try {
 	})`));
 	check('the arrows clamp at both ends instead of wrapping',await ev(`(()=>{let s=BarItems.dew_cage_z;DEWCage.setResolution([2,2,5]);s.arrow(1,{});let top=DEWCage.getState().binding.counts[2]==5&&s.value==5;DEWCage.setResolution([2,2,2]);s.arrow(-1,{});return top&&DEWCage.getState().binding.counts[2]==2&&s.value==2;})()`));
 	check('a slider reads back the resolution a refit chose',await ev(`(()=>{DEWCage.setResolution([4,2,2]);DEWCage.setResolution([0,99,3]);return BarItems.dew_cage_x.value==2&&BarItems.dew_cage_y.value==5&&BarItems.dew_cage_z.value==3;})()`));
+	check('each count carries an up/down stepper, not the stock hover arrows',await ev(`['x','y','z'].every(a=>{
+		let n=BarItems['dew_cage_'+a].node, steps=n.querySelectorAll('.dew_cage_stepper > .dew_cage_step');
+		if (steps.length!=2) return false;
+		let probe=document.createElement('div');probe.className='nslide_arrow na_left';n.append(probe);
+		let suppressed=getComputedStyle(probe).display=='none';probe.remove();
+		let box=n.querySelector('.nslide').getBoundingClientRect(), bar=steps[0].getBoundingClientRect();
+		// Stacked beside the number, not across it.
+		return suppressed && bar.left>=box.right-1 && steps[1].getBoundingClientRect().top>=bar.bottom-1;
+	})`));
+	check('clicking the stepper steps the count up and back down',await ev(`(()=>{
+		DEWCage.setResolution([2,2,2]);
+		let n=BarItems.dew_cage_y.node, steps=n.querySelectorAll('.dew_cage_step');
+		steps[0].dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));
+		let up=DEWCage.getState().binding.counts[1], shown_up=n.querySelector('.nslide').textContent;
+		steps[1].dispatchEvent(new MouseEvent('mousedown',{bubbles:true}));
+		return up==3 && shown_up=='3' && DEWCage.getState().binding.counts[1]==2 && n.querySelector('.nslide').textContent=='2';
+	})()`));
+	// The sliders only ever wrote their text from a change, so a freshly shown bar was blank.
+	check('the values are on show the moment the tool is selected',await ev(`(()=>{
+		DEWCage.setResolution([3,2,4]);
+		for (let a of 'xyz') BarItems['dew_cage_'+a].jq_inner.text('');
+		BarItems.move_tool.select(); BarItems.dew_cage.select();
+		return ['x','y','z'].every((a,i)=>BarItems['dew_cage_'+a].node.querySelector('.nslide').textContent==String([3,2,4][i]));
+	})()`));
 	check('a middle row bends the center while end rows stay fixed',await ev(`(()=>{fixture();DEWCage.setResolution([2,3,2]);let before=JSON.parse(JSON.stringify(m.vertices));changeTest([2,3,8,9],[8,0,0]);return near(m.vertices[v[8]],[8,0,0])&&v.slice(0,8).every(k=>near(m.vertices[k],before[k]));})()`));
 	check('resolution bounds remain valid and finite on flat selections',await ev(`(()=>{fixture();BarItems.selection_mode.set('vertex');m.getSelectedVertices(true).replace(v.slice(0,4));updateSelection();DEWCage.setResolution([0,99,3]);let s=DEWCage.getState();changeTest([0],[0,0,4]);return s.binding.counts.join()==[2,5,3].join()&&Object.values(m.vertices).flat().every(Number.isFinite);})()`));
 	check('component selection changes only selected vertices',await ev(`(()=>{fixture();BarItems.selection_mode.set('vertex');m.getSelectedVertices(true).replace([v[0],v[7],v[8]]);updateSelection();let before=JSON.parse(JSON.stringify(m.vertices));changeTest([7],[8,0,0]);return near(m.vertices[v[8]],[1,0,0])&&v.filter(k=>![v[0],v[7],v[8]].includes(k)).every(k=>near(before[k],m.vertices[k]));})()`));
