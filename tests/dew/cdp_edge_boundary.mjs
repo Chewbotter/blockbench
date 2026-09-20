@@ -20,11 +20,12 @@ const ev = async expression => {
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const check = (label, value) => { assert.ok(value, label); checks++; console.log('PASS ' + label); };
-async function click(point) {
+// CDP modifier bits: Alt 1, Ctrl 2, Meta 4, Shift 8.
+async function click(point, modifiers = 0) {
 	const [x, y] = await ev(`(() => { const p = Preview.selected, s = new THREE.Vector3(${point}).project(p.camera), r = p.canvas.getBoundingClientRect(); return [r.left+(s.x+1)*r.width/2, r.top+(1-s.y)*r.height/2]; })()`);
-	await send('Input.dispatchMouseEvent', {type: 'mouseMoved', x, y});
-	await send('Input.dispatchMouseEvent', {type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1});
-	await send('Input.dispatchMouseEvent', {type: 'mouseReleased', x, y, button: 'left', clickCount: 1});
+	await send('Input.dispatchMouseEvent', {type: 'mouseMoved', x, y, modifiers});
+	await send('Input.dispatchMouseEvent', {type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1, modifiers});
+	await send('Input.dispatchMouseEvent', {type: 'mouseReleased', x, y, button: 'left', clickCount: 1, modifiers});
 	await sleep(120);
 }
 try {
@@ -74,15 +75,26 @@ try {
 	await ev('Undo.undo(); BarItems.dew_edge_boundary.select(); true');
 	check('bbmodel face serialization retains quad and diagonal', await ev(`(() => { let m=__fixture.m, copy=m.getSaveCopy(), restored=new Mesh(copy); return JSON.stringify(__triangles(restored))==__before && Object.values(restored.faces)[0].vertices.length==4; })()`));
 	check('folded pair joins without changing its triangles', await ev(`(() => { let {m,v}=__make(12); let before=JSON.stringify(__triangles(m)), r=DEWQuads.toggleEdgeBoundary(m,v[0],v[2]); return !r.error && JSON.stringify(__triangles(m))==before; })()`));
-	for (const [label, change] of [
-		['texture boundary', `f[0].texture='texture-a'; f[1].texture='texture-b'`],
-		['UV seam', `let t=new Texture({name:'seam'}).add(false); f.forEach(x=>x.texture=t.uuid); f[1].uv[v[0]]=[99,99]`],
-		['different smoothing groups', `f[1].smoothing_group=8`],
-		['inconsistent winding', `f[1].invert()`],
-		['nonmanifold edge', `m.addFaces(new MeshFace(m,f[0]))`],
+	// Ctrl forces past the three texture rules only. The geometric rules decide whether the
+	// quad can exist at all, so they must still reject when forced.
+	for (const [label, change, forceable] of [
+		['texture boundary', `f[0].texture='texture-a'; f[1].texture='texture-b'`, true],
+		['UV seam', `let t=new Texture({name:'seam'}).add(false); f.forEach(x=>x.texture=t.uuid); f[1].uv[v[0]]=[99,99]`, true],
+		['different smoothing groups', `f[1].smoothing_group=8`, true],
+		['inconsistent winding', `f[1].invert()`, false],
+		['nonmanifold edge', `m.addFaces(new MeshFace(m,f[0]))`, false],
 	]) {
 		check(label + ' is rejected without an undo entry or mesh change', await ev(`(() => { let {m,v}=__make(), f=Object.values(m.faces); ${change}; let before=JSON.stringify(m.getUndoCopy()), n=Undo.history.length; let r=DEWQuads.toggleEdgeBoundary(m,v[0],v[2]); return !!r.error && JSON.stringify(m.getUndoCopy())==before && Undo.history.length==n; })()`));
+		check(label + (forceable ? ' joins when forced' : ' is still rejected when forced'), await ev(`(() => { let {m,v}=__make(), f=Object.values(m.faces); ${change}; let r=DEWQuads.toggleEdgeBoundary(m,v[0],v[2],true); let faces=Object.values(m.faces); return ${forceable ? `!r.error && faces.length==1 && faces[0].vertices.length==4` : `!!r.error`}; })()`));
 	}
+	check('a forced join keeps the first triangle uvs and is undoable', await ev(`(() => {
+		let {m,v}=__make(), f=Object.values(m.faces);
+		let t=new Texture({name:'seam3'}).add(false); f.forEach(x=>x.texture=t.uuid); f[1].uv[v[0]]=[99,99];
+		let before=JSON.stringify(m.getUndoCopy()), kept=JSON.stringify(f[0].uv[v[0]]);
+		let r=DEWQuads.toggleEdgeBoundary(m,v[0],v[2],true), quad=Object.values(m.faces)[0];
+		let held = JSON.stringify(quad.uv[v[0]])==kept;
+		Undo.undo(); return !r.error && held && JSON.stringify(m.getUndoCopy())==before;
+	})()`));
 	check('rig vertex weights survive join, split and undo', await ev(`(() => {
 		let {m,v}=__make(), arm=new Armature({name:'rig'}).init(), bone=new ArmatureBone({name:'joint'}).addTo(arm).init();
 		m.addTo(arm); v.forEach((key,i)=>bone.setVertexWeight(m,key,(i+1)/4));
@@ -90,6 +102,22 @@ try {
 		let a=DEWQuads.toggleEdgeBoundary(m,v[0],v[2]), b=DEWQuads.toggleEdgeBoundary(m,v[0],v[2]);
 		Undo.undo(); return !a.error && !b.error && v.every((k,i)=>bone.getVertexWeight(m,k)==before[i]);
 	})()`));
+	// The wiring from the real event is the part most likely to break: Ctrl must reach
+	// onCanvasClick rather than being swallowed by a preview handler.
+	await ev(`(() => {
+		Mesh.all.slice().forEach(m => m.remove());
+		let {m,v} = __make(), f = Object.values(m.faces);
+		let t = new Texture({name:'seam.click'}).add(false); f.forEach(x => x.texture = t.uuid); f[1].uv[v[0]] = [99,99];
+		window.__fixture = {m,v}; m.select(); updateSelection();
+		BarItems.dew_edge_boundary.select(); Preview.selected.render(); return true;
+	})()`);
+	await sleep(200);
+	await click([16,0,16]);
+	check('a plain click still refuses the seam in the viewport', await ev(`Object.values(__fixture.m.faces).length == 2`));
+	await click([16,0,16], 2);
+	check('Ctrl click joins the seam in the viewport', await ev(`(() => { let f=Object.values(__fixture.m.faces); return f.length==1 && f[0].vertices.length==4; })()`));
+	await ev('Undo.undo()');
+	check('undo restores the two triangles after a forced click', await ev(`Object.values(__fixture.m.faces).length == 2`));
 	check('no renderer exceptions', errors.length == 0);
 	console.log('RESULT: PASS (' + checks + ' checks)');
 } finally { ws.close(); }

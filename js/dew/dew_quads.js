@@ -205,7 +205,9 @@ BARS.defineActions(function() {
 
 // Explicitly join/split a boundary, keeping the same rendered triangles. Unlike the bulk
 // importer cleanup this never welds vertices: rig weights keep their original vertex keys.
-export function toggleEdgeBoundary(mesh, a, b) {
+// `force` (Ctrl) skips the three texture rules for modelling before the unwrap exists. The
+// geometric rules always stand: they decide whether the quad can exist, not how it reads.
+export function toggleEdgeBoundary(mesh, a, b, force = false) {
 	let adjacent = [], diagonal = null;
 	for (let [key, face] of Object.entries(mesh.faces)) {
 		let vs = face.getSortedVertices();
@@ -226,14 +228,18 @@ export function toggleEdgeBoundary(mesh, a, b) {
 			return {error: 'Only the edge between two triangles or a quad diagonal can be toggled'};
 		}
 		let [[k1, f1], [k2, f2]] = adjacent;
-		if (f1.texture !== f2.texture) return {error: 'This edge separates different textures'};
-		for (let property in MeshFace.properties) {
-			if (property != 'vertices' && property != 'uv' && JSON.stringify(f1[property]) !== JSON.stringify(f2[property])) {
-				return {error: 'This edge separates different face settings, such as smoothing groups'};
+		// The quad keeps f1's texture, face settings and uvs, so a forced join across any of
+		// these reads wrong on f2's half until the mesh is unwrapped again.
+		if (!force) {
+			if (f1.texture !== f2.texture) return {error: 'This edge separates different textures. Hold Ctrl to join anyway'};
+			for (let property in MeshFace.properties) {
+				if (property != 'vertices' && property != 'uv' && JSON.stringify(f1[property]) !== JSON.stringify(f2[property])) {
+					return {error: 'This edge separates different face settings, such as smoothing groups. Hold Ctrl to join anyway'};
+				}
 			}
-		}
-		if (f1.getTexture() && (!sameUV(f1.uv[a], f2.uv[a]) || !sameUV(f1.uv[b], f2.uv[b]))) {
-			return {error: 'This edge is a UV seam; joining it would change the texture'};
+			if (f1.getTexture() && (!sameUV(f1.uv[a], f2.uv[a]) || !sameUV(f1.uv[b], f2.uv[b]))) {
+				return {error: 'This edge is a UV seam; joining it would change the texture. Hold Ctrl to join anyway'};
+			}
 		}
 		let c = f1.vertices.find(v => v != a && v != b), d = f2.vertices.find(v => v != a && v != b);
 		if (!c || !d || c == d) return {error: 'These triangles do not form a four-corner face'};
@@ -270,7 +276,7 @@ export function toggleEdgeBoundary(mesh, a, b) {
 BARS.defineActions(function() {
 	new Tool('dew_edge_boundary', {
 		name: 'Edge Boundary',
-		description: 'Click a triangle edge to join a quad, or an orange quad diagonal to split it into triangles',
+		description: 'Click a triangle edge to join a quad, or an orange quad diagonal to split it into triangles. Hold Ctrl to join across a texture or UV seam',
 		icon: 'border_inner',
 		category: 'tools',
 		transformerMode: 'hidden',
@@ -301,7 +307,7 @@ BARS.defineActions(function() {
 				if (d < distance) { best = edge; distance = d; }
 			}
 			if (!best) return;
-			let result = toggleEdgeBoundary(mesh, ...best);
+			let result = toggleEdgeBoundary(mesh, ...best, data.event.ctrlKey);
 			if (result.error) Blockbench.showQuickMessage(result.error, QUADS.MESSAGE_TIME);
 		},
 		onSelect() { Mesh.selected.forEach(mesh => mesh.preview_controller.updateSelection(mesh)); },
