@@ -72,15 +72,42 @@ function surfaceUnderCursor(preview, event: MouseEvent): THREE.Vector3 {
 }
 
 /**
+ * Centre of the visible geometry inside the camera frustum, or null when the view is empty.
+ * Bounding boxes, not vertices: this runs as an orbit starts and a scene can be large.
+ */
+function viewCenter(preview): THREE.Vector3 {
+	let camera = preview.camera;
+	camera.updateMatrixWorld();
+	let frustum = new THREE.Frustum().setFromProjectionMatrix(
+		new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+	);
+	let box = new THREE.Box3(), found = false;
+	for (let element of Outliner.elements) {
+		// Helpers marked export = false (the scale figure, the mannequin) are not what you are
+		// looking at, and the tile tools already ignore them.
+		if (element.visibility === false || element.export === false) continue;
+		let mesh = element.mesh;
+		if (!mesh || !mesh.isMesh || !mesh.geometry || !mesh.visible) continue;
+		mesh.updateMatrixWorld();
+		if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+		let bounds = mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
+		if (bounds.isEmpty() || !frustum.intersectsBox(bounds)) continue;
+		box.union(bounds); found = true;
+	}
+	return found ? box.getCenter(new THREE.Vector3()) : null;
+}
+
+/**
  * Called as an orbit begins. With nothing selected there was no rule at all: the pivot kept
  * whatever it was last left at, by an old selection, a pan, or the view the file opened in, which
- * is why orbiting felt like it came from nowhere. Pivot on what is under the cursor instead.
- * A selection still wins, and over empty space the old behaviour stands.
+ * is why orbiting felt like it came from nowhere. In order: the surface under the cursor, then
+ * the centre of whatever is in view. A selection still wins over both, and with an empty view
+ * there is nothing sensible to pick, so the pivot is left as it was.
  */
 function pivotUnderCursor(preview, event: MouseEvent): boolean {
 	if (!settings.orbit_around_selection.value) return false;
 	if (Modes.display || hasSelection()) return false;
-	let point = surfaceUnderCursor(preview, event);
+	let point = surfaceUnderCursor(preview, event) || viewCenter(preview);
 	return point ? setPivotDepth(preview, point) : false;
 }
 
@@ -88,4 +115,4 @@ Blockbench.on('update_selection', updateOrbitPivots);
 
 // Global rather than an import: OrbitControls is evaluated before this module, and importing
 // either way round would reorder the bundle (see the note at the top of the file).
-Object.assign(window, {OrbitPivot: {updateOrbitPivots, pivotUnderCursor, surfaceUnderCursor, setPivotDepth, MIN_PIVOT_DISTANCE}});
+Object.assign(window, {OrbitPivot: {updateOrbitPivots, pivotUnderCursor, surfaceUnderCursor, viewCenter, setPivotDepth, MIN_PIVOT_DISTANCE}});

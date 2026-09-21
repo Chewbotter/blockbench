@@ -116,9 +116,34 @@ try {
 	await orbitAt(onDeep);
 	check('a cube further away gives the deeper pivot', await ev(`Math.abs(pivotDepth() - 112) < 3`));
 
-	const before_empty = await ev(`pivotDepth()`);
+	// Over empty space there is no surface to pivot on, so fall back to what is in view. Both
+	// cubes are visible, spanning z -8..72, so their combined centre sits at z 32: depth 88.
 	await orbitAt(onEmpty);
-	check('over empty space the pivot is left alone', await ev(`Math.abs(pivotDepth() - ${before_empty}) < 0.001`));
+	check('over empty space the pivot falls back to the centre of what is in view', await ev(`Math.abs(pivotDepth() - 88) < 3`));
+	check('the view centre ignores the depth of things out of frame', await ev(`(() => {
+		// Look at the deep cube alone: the close one is behind the camera now.
+		let p = Preview.selected;
+		p.camera.position.set(-16, 0, 40); p.controls.target.set(-16, 0, 0);
+		p.controls.update(); p.render();
+		let center = OrbitPivot.viewCenter(p);
+		return center && Math.abs(center.z - 0) < 2 && Math.abs(center.x + 16) < 2;
+	})()`));
+	check('an empty view leaves the pivot alone', await ev(`(() => {
+		let p = Preview.selected;
+		// Point the camera away from everything.
+		p.camera.position.set(0, 0, 400); p.controls.target.set(0, 0, 500);
+		p.camera.lookAt(new THREE.Vector3(0, 0, 900)); p.camera.updateMatrixWorld(); p.render();
+		let before = p.controls.target.clone();
+		let moved = OrbitPivot.pivotUnderCursor(p, {clientX: -1000, clientY: -1000});
+		return OrbitPivot.viewCenter(p) === null && moved === false && p.controls.target.equals(before);
+	})()`));
+	// Put the view back for the checks that follow.
+	await ev(`(() => {
+		let p = Preview.selected;
+		p.camera.position.set(0,0,120); p.controls.target.set(0,0,0);
+		p.camera.lookAt(new THREE.Vector3(0,0,0)); p.controls.update(); p.render(); return true;
+	})()`);
+	await sleep(150);
 
 	check('a selection still wins over the cursor', await ev(`(() => {
 		unselectAllElements(); close_cube.select(); updateSelection();
