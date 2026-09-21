@@ -310,6 +310,7 @@ export const MenuBar = {
 			new MenuSeparator('editing_mode'),
 			'proportional_editing',
 			'mirror_modeling',
+			{name: 'Live Mirror', id: 'dew_live_mirror', icon: 'flip', children: ['dew_mirror_x', 'dew_mirror_y', 'dew_mirror_z', '_', 'dew_mirror_discard', 'dew_mirror_copy', 'dew_mirror_combine', '_', 'dew_mirror_lock_seam']},
 			new MenuSeparator('selection'),
 			'select_window',
 			'select_all',
