@@ -7,6 +7,12 @@ import { PointerTarget } from "../../interface/pointer_target";
 import { selectSplinePoints } from "../transform";
 import { TransformerModule } from "./transform_modules";
 
+// Fork: see edgeOnRotate below
+export const ROTATE_GIZMO = {
+	EDGE_ON_DEG: 25,	// a rotate ring whose plane is within this of edge-on to the camera is dragged along its line on screen
+};
+window.ROTATE_GIZMO = ROTATE_GIZMO;
+
  ( function () {
 
 	'use strict';
@@ -1370,6 +1376,7 @@ import { TransformerModule } from "./transform_modules";
 						eye.copy( camPosition ).sub( worldPosition ).normalize();
 						_gizmo[ _mode ].setActivePlane( scope.axis, eye );
 						var planeIntersect = intersectObjects( pointer, [ _gizmo[ _mode ].activePlane ] );
+						scope.edge_on_rotate = edgeOnRotate( pointer );
 
 						scope.last_valid_position.copy(scope.position)
 
@@ -1391,13 +1398,35 @@ import { TransformerModule } from "./transform_modules";
 					}
 				}
 			}
+			// A rotate ring grabbed while it is nearly edge-on to the camera. The angle normally comes from where the
+			// pointer's ray meets the ring's plane, and a ray grazing that plane lands anywhere: a pixel of movement
+			// throws the meeting point far off or behind the camera, which is the spasm. There the ring is a line on
+			// screen, so the drag is read along that line instead: the near side of the ring follows the cursor, an arc
+			// of one ring radius for a radius of travel. Decided once per drag, so it cannot flip halfway.
+			function edgeOnRotate( pointer ) {
+				if ( Toolbox.selected.transformerMode !== 'rotate' || ![ 'X', 'Y', 'Z' ].includes( scope.axis ) ) return null;
+				let camera = scope.camera;
+				let view = camera.isOrthographicCamera ? camera.getWorldDirection( new THREE.Vector3() ).negate() : eye.clone();
+				let normal = new THREE.Vector3( scope.axis == 'X' ? 1 : 0, scope.axis == 'Y' ? 1 : 0, scope.axis == 'Z' ? 1 : 0 ).applyEuler( worldRotation );
+				let facing = normal.dot( view );
+				if ( Math.abs( facing ) > Math.sin( Math.degToRad( ROTATE_GIZMO.EDGE_ON_DEG ) ) ) return null;
+				// The near point of the ring, and the way a positive turn carries it
+				let near = view.clone().addScaledVector( normal, - facing ).normalize();
+				let travel = new THREE.Vector3().crossVectors( normal, near );
+				let rect = scope.canvas.getBoundingClientRect();
+				let toScreen = v => { let p = v.clone().project( camera ); return new THREE.Vector2( p.x * rect.width / 2, - p.y * rect.height / 2 ); };
+				let centre = toScreen( worldPosition ), along = toScreen( worldPosition.clone().addScaledVector( travel, scope.scale.x ) ).sub( centre );
+				let radius = along.length();
+				if ( !( radius > 1 ) ) return null;
+				return { start: new THREE.Vector2( pointer.clientX, pointer.clientY ), direction: along.divideScalar( radius ), radius };
+			}
 			function onPointerMove( event ) {
 
 				if ( !scope.visible || scope.axis === null || _dragging === false || ( event.button !== undefined && event.button !== 0 ) ) return;
 
 				var pointer = event.changedTouches ? event.changedTouches[ 0 ] : event;
 				var planeIntersect = intersectObjects( pointer, [ _gizmo[ _mode ].activePlane ] );
-				if (!planeIntersect) return;
+				if (!planeIntersect && !scope.edge_on_rotate) return;
 
 				event.stopPropagation();
 
@@ -1413,9 +1442,14 @@ import { TransformerModule } from "./transform_modules";
 					axisNumberB = getAxisNumber(axisB)
 				}
 
-				point.copy( planeIntersect.point );
+				if (planeIntersect) point.copy( planeIntersect.point );
 
-				if (Toolbox.selected.transformerMode !== 'rotate') {
+				if (scope.edge_on_rotate) {
+					let travelled = new THREE.Vector2( pointer.clientX, pointer.clientY ).sub( scope.edge_on_rotate.start ).dot( scope.edge_on_rotate.direction );
+					// An absolute angle within +-180 like the plane's atan2 gives, since the modules work from differences
+					angle = Math.trimDeg( Math.radToDeg( travelled / scope.edge_on_rotate.radius ) );
+
+				} else if (Toolbox.selected.transformerMode !== 'rotate') {
 					point.sub( offset );
 					if (!Modes.display) {
 						point.removeEuler(worldRotation)
@@ -1464,6 +1498,7 @@ import { TransformerModule } from "./transform_modules";
 				document.removeEventListener( "mouseup", onPointerUp );
 				PointerTarget.endTarget();
 				scope.was_clicked = false;
+				scope.edge_on_rotate = null;
 
 				document.removeEventListener( "mousemove", onPointerMove );
 				document.removeEventListener( "touchmove", onPointerMove );

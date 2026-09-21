@@ -622,6 +622,14 @@ export class Preview {
 			})
 		}
 		let intersects = this.raycaster.intersectObjects(objects, false);
+		// Animate mode: the bone nearest the pointer wins over a mesh in front of it, and a near miss still takes it
+		// (js/dew/dew_bone_pick.js). A keyframe handle on the motion trail keeps its turn.
+		// @ts-expect-error
+		if (Modes.animate && typeof DEWBonePick != 'undefined' && !intersects.some(hit => hit.object.isKeyframe)) {
+			// @ts-expect-error
+			let bone = DEWBonePick.nearestBone(this, event) as OutlinerElement;
+			if (bone) return {type: 'element', event, intersects, face: undefined, element: bone};
+		}
 		if (intersects.length == 0) return false;
 
 		let depth_offset = Preview.selected.calculateControlScale(intersects[0].point);
