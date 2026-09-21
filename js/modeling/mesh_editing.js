@@ -14,6 +14,7 @@ import { extrudeMeshSelection } from './mesh/extrude';
 import './mesh/smoothing_groups';
 import './mesh/chamfer';
 import { PointerTarget } from '../interface/pointer_target';
+import { getSpatialInterval } from './transform';
 
 export function uncorruptMesh() {
 	for (let mesh of Mesh.selected) {
@@ -541,7 +542,6 @@ BARS.defineActions(function() {
 					}
 				}
 			})
-			UVEditor.setAutoSize(null, true, faces_to_autouv);
 			Undo.finishEdit('Create mesh face')
 			Canvas.updateView({elements: Mesh.selected, element_aspects: {geometry: true, uv: true, faces: true}, selection: true})
 		}
@@ -764,9 +764,14 @@ BARS.defineActions(function() {
 		icon: 'upload',
 		category: 'edit',
 		keybind: new Keybind({key: 'e', shift: true}),
-		condition: {modes: ['edit'], features: ['meshes'], selected: {mesh: true}, method: () => (Mesh.selected[0] && Mesh.selected[0].getSelectedVertices().length)},
+		condition: {
+			modes: ['edit'],
+			features: ['meshes'],
+			selected: {mesh: true, spline: false, armature_bone: false},
+			method: () => (Mesh.selected[0] && Mesh.selected[0].getSelectedVertices().length)
+		},
 		click() {
-			function runEdit(amended, extend = 1, direction_mode, even_extend) {
+			function runEdit(amended, extend = getSpatialInterval(), direction_mode, even_extend) {
 				Undo.initEdit({elements: Mesh.selected, selection: true}, amended);
 
 				Mesh.selected.forEach(mesh => extrudeMeshSelection(mesh, extend, direction_mode, even_extend));
@@ -776,7 +781,7 @@ BARS.defineActions(function() {
 			runEdit();
 
 			Undo.amendEdit({
-				extend: {type: 'num_slider', value: 1, label: 'edit.extrude_mesh_selection.extend', interval_type: 'position'},
+				extend: {type: 'num_slider', value: getSpatialInterval(), label: 'edit.extrude_mesh_selection.extend', interval_type: 'position'},
 				direction_mode: {type: 'select', label: 'edit.extrude_mesh_selection.direction', options: {
 					outwards: 'edit.extrude_mesh_selection.direction.outwards',
 					average: 'edit.extrude_mesh_selection.direction.average',
@@ -798,7 +803,7 @@ BARS.defineActions(function() {
 		category: 'edit',
 		condition: {modes: ['edit'], features: ['meshes'], method: () => (Mesh.selected[0] && Mesh.selected[0].getSelectedFaces().length)},
 		click() {
-			function runEdit(amended, extend = 1) {
+			function runEdit(amended, extend = getSpatialInterval()) {
 				Undo.initEdit({elements: Mesh.selected, selection: true}, amended);
 
 				Mesh.selected.forEach(mesh => {
@@ -947,8 +952,6 @@ BARS.defineActions(function() {
 
 						if (vertices.length == 2) delete mesh.faces[selected_face_keys[face_index]];
 					})
-
-					UVEditor.setAutoSize(null, true, new_face_keys);
 				})
 				Undo.finishEdit('Solidify mesh selection');
 				Canvas.updateView({elements: Mesh.selected, element_aspects: {geometry: true, uv: true, faces: true}, selection: true});
@@ -956,7 +959,7 @@ BARS.defineActions(function() {
 			runEdit();
 
 			Undo.amendEdit({
-				thickness: {type: 'num_slider', value: 1, label: 'edit.solidify_mesh_selection.thickness', interval_type: 'position'},
+				thickness: {type: 'num_slider', value: getSpatialInterval(), label: 'edit.solidify_mesh_selection.thickness', interval_type: 'position'},
 			}, form => {
 				runEdit(true, form.thickness);
 			})
@@ -968,6 +971,7 @@ BARS.defineActions(function() {
 		keybind: new Keybind({key: 'i', shift: true}),
 		condition: {modes: ['edit'], features: ['meshes'], method: () => (Mesh.selected[0] && Mesh.selected[0].getSelectedVertices().length >= 3)},
 		click() {
+			const vec1 = new THREE.Vector3();
 			function runEdit(amended, offset = 50) {
 				Undo.initEdit({elements: Mesh.selected, selection: true}, amended);
 				Mesh.selected.forEach(mesh => {
@@ -976,7 +980,7 @@ BARS.defineActions(function() {
 					original_vertices = original_vertices.slice();
 					let new_vertices;
 					let selected_face_keys = mesh.getSelectedFaces();
-					let selected_faces = selected_face_keys.map(fkey => mesh.faces[fkey]);
+					let selected_faces = selected_face_keys.map(fkey => mesh.faces[fkey]).filter(face => face.vertices.length >= 3);
 					let modified_face_keys = selected_face_keys.slice();
 	
 					new_vertices = mesh.addVertices(...original_vertices.map(vkey => {
@@ -1017,12 +1021,24 @@ BARS.defineActions(function() {
 	
 					// Move Faces
 					selected_faces.forEach(face => {
-						face.vertices.forEach((key, index) => {
-							face.vertices[index] = new_vertices[original_vertices.indexOf(key)];
-							let uv = face.uv[key];
-							delete face.uv[key];
-							face.uv[face.vertices[index]] = uv;
-						})
+						// Calculate new UVs for new vertex positions before modifying face.
+						const new_uvs = {}
+						for (const vertex_key of face.vertices) {
+							const new_vertex_key = new_vertices[original_vertices.indexOf(vertex_key)];
+							const new_vertex_position = mesh.vertices[new_vertex_key];
+							new_uvs[new_vertex_key] = face.localToUV(vec1.fromArray(new_vertex_position));
+						}
+						// Save original UVs before modification (needed for side quads)
+						const old_uvs = {...face.uv}
+						// Modify face after calculating UVs
+						face.vertices.forEach((vertex_key, index) => {
+							const new_vertex_key = new_vertices[original_vertices.indexOf(vertex_key)];
+							face.vertices[index] = new_vertex_key;
+							delete face.uv[vertex_key];
+							face.uv[new_vertex_key] = new_uvs[new_vertex_key];
+						});
+						// Attach saved data for side quad creation
+						face._old_uvs = old_uvs
 					})
 	
 					// Create extra quads on sides
@@ -1043,8 +1059,8 @@ BARS.defineActions(function() {
 							let new_face_uv = {
 								[a]: face.uv[a],
 								[b]: face.uv[b],
-								[new_face_vertices[2]]: face.uv[a],
-								[new_face_vertices[3]]: face.uv[b],
+								[new_face_vertices[2]]: face._old_uvs[original_vertices[new_vertices.indexOf(a)]],
+								[new_face_vertices[3]]: face._old_uvs[original_vertices[new_vertices.indexOf(b)]],
 							};
 							let new_face = new MeshFace(mesh, mesh.faces[selected_face_keys[face_index]]).extend({
 								vertices: new_face_vertices,
@@ -1071,8 +1087,6 @@ BARS.defineActions(function() {
 						}
 						delete mesh.vertices[b];
 					})
-					UVEditor.setAutoSize(null, true, modified_face_keys);
-
 				})
 				Undo.finishEdit('Extrude mesh selection')
 				Canvas.updateView({elements: Mesh.selected, element_aspects: {geometry: true, uv: true, faces: true}, selection: true})
@@ -1170,7 +1184,6 @@ BARS.defineActions(function() {
 })
 
 Object.assign(window, {
-	sameMeshEdge,
 	ProportionalEdit,
 	autoFixMeshEdit,
 	cleanupOverlappingMeshFaces,

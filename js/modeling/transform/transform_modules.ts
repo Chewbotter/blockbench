@@ -3,7 +3,7 @@ interface TransformContext {
 }
 interface TransformContextMove extends TransformContext {
 	point: THREE.Vector3
-	axis: 'x'|'y'|'z'
+	axis: 'x'|'y'|'z'|'e'
 	axis_number: 0|1|2
 	second_axis?: 'x'|'y'|'z'
 	second_axis_number?: 0|1|2
@@ -21,16 +21,16 @@ interface TransformContextEnd extends TransformContext {
 interface TransformerModuleOptions {
 	priority: number
 	condition: ConditionResolvable
-	use_condition: ConditionResolvable
+	use_condition?: ConditionResolvable
 
 	updateGizmo: (this: TransformerModule) => void
-	onPointerDown: (this: TransformerModule, context: TransformContext) => void
+	onPointerDown?: (this: TransformerModule, context: TransformContext) => void
 	calculateOffset: (this: TransformerModule, context: TransformContextMove) => number
 	calculateSecondOffset?: (this: TransformerModule, context: TransformContextMove) => number | null
-	onStart: (this: TransformerModule, context: TransformContextMove) => void
-	onMove: (this: TransformerModule, context: TransformContextMove) => void
-	onEnd: (this: TransformerModule, context: TransformContextEnd) => void
-	onCancel: (this: TransformerModule, context: TransformContextEnd) => void
+	onStart?: (this: TransformerModule, context: TransformContextMove) => void
+	onMove?: (this: TransformerModule, context: TransformContextMove) => void
+	onEnd?: (this: TransformerModule, context: TransformContextEnd) => void
+	onCancel?: (this: TransformerModule, context: TransformContextEnd) => void
 }
 export interface TransformerModule extends TransformerModuleOptions {}
 

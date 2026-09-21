@@ -1,8 +1,27 @@
 import { ModelLoader } from "../io/model_loader";
+import { Menu, MenuItem, MenuOpenPositionAnchor, MenuOptions } from "./menu"
 import { currentwindow, exposeNativeApisInDevTools } from "../native_apis";
 
+declare global {
+	function factoryResetAndReload(): void
+	interface Window {
+		ErrorLog: {message: string, file: string, line: number}[]
+	}
+}
+export interface BarMenuOptions extends MenuOptions {
+	name?: string
+	icon?: IconString
+	condition?: ConditionResolvable
+}
+/**
+ * Creates a new menu in the menu bar
+ */
 export class BarMenu extends Menu {
-	constructor(id, structure, options = {}) {
+	type: 'bar_menu' = 'bar_menu';
+	name: string
+	icon: IconString
+	label: HTMLElement
+	constructor(id: string, structure: MenuItem[] | ((context: any) => MenuItem[]), options: BarMenuOptions = {}) {
 		super(id, structure, options)
 		MenuBar.menus[id] = this
 		this.type = 'bar_menu'
@@ -17,7 +36,7 @@ export class BarMenu extends Menu {
 		this.name = tl(options.name || `menu.${id}`);
 		this.label = Interface.createElement('li', {class: 'menu_bar_point'}, this.name);
 		this.label.addEventListener('click', (event) => {
-			if (open_menu === this) {
+			if (Menu.open === this) {
 				this.hide()
 			} else {
 				this.open()
@@ -31,20 +50,24 @@ export class BarMenu extends Menu {
 		this.structure = structure;
 		this.highlight_action = null;
 	}
-	open(...args) {
-		super.open(...args);
+	open(position?: MenuOpenPositionAnchor, context?: any): this {
+		super.open(position, context);
 		Blockbench.dispatchEvent('open_bar_menu', {menu: this});
+		return this;
 	}
 	hide() {
 		super.hide();
-		$(this.label).removeClass('opened');
+		this.label.classList.remove('opened');
 		MenuBar.open = undefined;
 		this.highlight_action = null;
 		this.label.classList.remove('highlighted');
 		if (MenuBar.last_opened == this) document.getElementById('mobile_menu_bar')?.remove();
 		return this;
 	}
-	highlight(action) {
+	/**
+	 * Visually highlights an action within the menu, until the user opens the menu
+	 */
+	highlight(action: MenuItem): void {
 		this.highlight_action = action;
 		this.label.classList.add('highlighted');
 	}
@@ -56,10 +79,28 @@ export class BarMenu extends Menu {
 }
 
 export const MenuBar = {
-	menus: {},
-	open: undefined,
+	menus: {} as {
+		file: BarMenu
+		edit: BarMenu
+		transform: BarMenu
+		uv: BarMenu
+		texture: BarMenu
+		animation: BarMenu
+		keyframe: BarMenu
+		display: BarMenu
+		tools: BarMenu
+		view: BarMenu
+		help: BarMenu
+		[id: string]: BarMenu
+	},
+		/**
+	 * @deprecated
+	 */
+	menues: {} as Record<string, Menu>,
+	keys: [] as string[],
+	open: null as Menu | null,
 	last_opened: null,
-	mode_switcher_button: null,
+	mode_switcher_button: null as null | HTMLDivElement,
 	setup() {
 		MenuBar.menues = MenuBar.menus;
 		new BarMenu('file', [
@@ -100,7 +141,7 @@ export const MenuBar = {
 				}
 			},
 			{name: 'menu.file.recent', id: 'recent', icon: 'history',
-				condition() {return isApp && recent_projects.length},
+				condition() {return isApp && recent_projects.length > 0},
 				searchable: true,
 				children() {
 					var arr = []
@@ -188,7 +229,7 @@ export const MenuBar = {
 				'dew_import_rig',
 				'extrude_texture'
 			]},
-			{name: 'generic.export', id: 'export', icon: 'insert_drive_file', condition: () => Project, children: [
+			{name: 'generic.export', id: 'export', icon: 'insert_drive_file', condition: () => !!Project, children: [
 				'export_blockmodel',
 				'export_bedrock',
 				'export_entity',
@@ -222,7 +263,7 @@ export const MenuBar = {
 					icon: 'manage_accounts',
 					condition: () => SettingsProfile.all.findIndex(p => p.condition.type == 'selectable') != -1,
 					children: () => {
-						let list = [
+						let list: MenuItem[] = [
 							{
 								name: 'generic.none',
 								icon: SettingsProfile.selected ? 'far.fa-circle' : 'far.fa-dot-circle',
@@ -273,7 +314,8 @@ export const MenuBar = {
 			'select_window',
 			'select_all',
 			'unselect_all',
-			'invert_selection'
+			'invert_selection',
+			'expand_texture_selection'
 		], {icon: 'edit'})
 		new BarMenu('transform', [
 			'scale',
@@ -288,7 +330,10 @@ export const MenuBar = {
 			{name: 'menu.transform.flip', id: 'flip', icon: 'flip', children: [
 				'flip_x',
 				'flip_y',
-				'flip_z'
+				'flip_z',
+				'flip_in_place_x',
+				'flip_in_place_y',
+				'flip_in_place_z'
 			]},
 			{name: 'menu.transform.center', id: 'center', icon: 'filter_center_focus', children: [
 				'center_x',
@@ -381,6 +426,20 @@ export const MenuBar = {
 			condition: {modes: ['paint']}
 		})
 
+		new BarMenu('paint', [
+			new MenuSeparator('options'),
+			'mirror_painting',
+			'color_erase_mode',
+			'lock_alpha',
+			'painting_grid',
+			'pixel_perfect_drawing',
+			'brush_lock_mode',
+			new MenuSeparator('operations'),
+		], {
+			icon: 'fa-paint-brush',
+			condition: {modes: ['paint']}
+		})
+
 		new BarMenu('animation', [
 			new MenuSeparator('edit_options'),
 			'animation_onion_skin',
@@ -413,10 +472,8 @@ export const MenuBar = {
 			new MenuSeparator('edit'),
 			'add_keyframe',
 			'keyframe_column_create',
-			'select_all',
-			'keyframe_column_select',
 			'reverse_keyframes',
-			{name: 'menu.animation.flip_keyframes', id: 'flip_keyframes', condition: () => Timeline.selected.length, icon: 'flip', children: [
+			{name: 'menu.animation.flip_keyframes', id: 'flip_keyframes', condition: () => Timeline.selected.length > 0, icon: 'flip', children: [
 				'flip_x',
 				'flip_y',
 				'flip_z'
@@ -426,6 +483,11 @@ export const MenuBar = {
 			'round_keyframe_values',
 			'resolve_keyframe_expressions',
 			'delete',
+			new MenuSeparator('select'),
+			'select_all',
+			'keyframe_column_select',
+			'keyframe_select_before_playhead',
+			'keyframe_select_after_playhead',
 		], {
 			icon: 'icon-keyframe',
 			condition: {modes: ['animate']}
@@ -454,8 +516,8 @@ export const MenuBar = {
 		
 		new BarMenu('tools', [
 			new MenuSeparator('overview'),
-			{id: 'main_tools', icon: 'construction', name: 'menu.tools.main_tools', condition: () => Project, children() {
-				let tools = Toolbox.children.filter(tool => tool instanceof Tool && tool.condition !== false);
+			{id: 'main_tools', icon: 'construction', name: 'menu.tools.main_tools', condition: () => !!Project, children() {
+				let tools: Tool[] = Toolbox.children.filter(tool => tool instanceof Tool && tool.condition !== false) as Tool[];
 				tools.forEach(tool => {
 					let old_condition = tool.condition;
 					tool.condition = () => {
@@ -467,15 +529,16 @@ export const MenuBar = {
 				tools.sort((a, b) => {
 					return (a.modes ? modes.indexOf(a.modes[0]) : -1) - (b.modes ? modes.indexOf(b.modes[0]) : -1);
 				})
+				let menu_entries: (Tool|'_')[] = tools;
 				let mode = tools[0].modes?.[0];
 				for (let i = 0; i < tools.length; i++) {
 					if (tools[i].modes?.[0] !== mode) {
 						mode = tools[i].modes?.[0];
-						tools.splice(i, 0, '_');
+						menu_entries.splice(i, 0, '_');
 						i++;
 					}
 				}
-				return tools;
+				return menu_entries;
 			}},
 			'swap_tools',
 			'action_control',
@@ -538,6 +601,7 @@ export const MenuBar = {
 			new MenuSeparator('references'),
 			'bedrock_animation_mode',
 			'preview_scene',
+			'preview_models',
 			'edit_reference_images',
 			new MenuSeparator('model'),
 			'hide_everything_except_selection',
@@ -574,28 +638,36 @@ export const MenuBar = {
 				{name: 'menu.help.plugin_documentation', id: 'plugin_documentation', icon: 'fa-book', click: () => {
 					Blockbench.openLink('https://www.blockbench.net/wiki/docs/plugin');
 				}},
+				'experimental_settings',
 				'open_dev_tools',
-				{name: 'Error Log', condition: () => window.ErrorLog.length, icon: 'error', color: 'red', keybind: {toString: () => window.ErrorLog.length.toString()}, click() {
-					let error_messages = window.ErrorLog.map((error) => {
-						return `${error.message}\n - In .${error.file.split(location.origin).join('')} : ${error.line}`;
-					})
-					let lines = error_messages.slice(0, 64).map((message) => {
-						return Interface.createElement('p', {style: 'word-break: break-word;'}, message);
-					})
-					new Dialog({
-						id: 'error_log',
-						title: 'Error Log',
-						lines,
-						buttons: ['action.copy', 'dialog.close'],
-						confirmIndex: 1,
-						cancelIndex: 1,
-						onButton(index) {
-							if (index == 0) {
-								Clipbench.setText(error_messages.slice(0, 256).join('\n'));
+				{
+					name: 'Error Log',
+					condition: () => window.ErrorLog.length > 0,
+					icon: 'error',
+					color: 'red',
+					keybind: {toString: () => window.ErrorLog.length.toString()} as any,
+					click() {
+						let error_messages = window.ErrorLog.map((error) => {
+							return `${error.message}\n - In .${error.file.split(location.origin).join('')} : ${error.line}`;
+						})
+						let lines = error_messages.slice(0, 64).map((message) => {
+							return Interface.createElement('p', {style: 'word-break: break-word;'}, message);
+						})
+						new Dialog({
+							id: 'error_log',
+							title: 'Error Log',
+							lines,
+							buttons: ['action.copy', 'dialog.close'],
+							confirmIndex: 1,
+							cancelIndex: 1,
+							onButton(index) {
+								if (index == 0) {
+									Clipbench.setText(error_messages.slice(0, 256).join('\n'));
+								}
 							}
-						}
-					}).show();
-				}},
+						}).show();
+					}
+				},
 				{name: 'Expose Native Modules', icon: 'terminal', condition: isApp && (() => {
 					return currentwindow.webContents.isDevToolsOpened();
 				}), click: () => {
@@ -604,7 +676,7 @@ export const MenuBar = {
 				{name: 'menu.help.developer.reset_storage', icon: 'fas.fa-hdd', click: () => {
 					factoryResetAndReload();
 				}},
-				{name: 'menu.help.developer.unlock_projects', id: 'unlock_projects', icon: 'vpn_key', condition: () => ModelProject.all.find(project => project.locked), click() {
+				{name: 'menu.help.developer.unlock_projects', id: 'unlock_projects', icon: 'vpn_key', condition: () => ModelProject.all.some(project => project.locked), click() {
 					ModelProject.all.forEach(project => project.locked = false);
 				}},
 				{
@@ -613,6 +685,7 @@ export const MenuBar = {
 					icon: 'build',
 					condition: () => Mesh.hasSelected(),
 					click() {
+						// @ts-ignore
 						uncorruptMesh();
 					}
 				},
@@ -624,6 +697,7 @@ export const MenuBar = {
 							})
 						})
 					}
+					// @ts-expect-error
 					window.location.reload(true)
 				}},
 				'reload',
@@ -655,7 +729,7 @@ export const MenuBar = {
 			redo_button.addEventListener('click', event => {
 				BarItems.redo.trigger()
 			})
-			let mode_switcher = Interface.createElement('div', {class: 'tool hidden', style: 'margin-left: auto'}, Blockbench.getIconNode('settings'));
+			let mode_switcher = Interface.createElement('div', {class: 'tool hidden', style: 'margin-left: auto'}, Blockbench.getIconNode('settings')) as HTMLDivElement;
 			mode_switcher.addEventListener('click', event => {
 				Modes.mobileModeMenu(mode_switcher, event);
 			})
@@ -672,8 +746,9 @@ export const MenuBar = {
 			header.addEventListener('touchstart', e1 => {
 				convertTouchEvent(e1);
 				let opened, bar, initial;
-				let onMove = e2 => {
+				let onMove = (e2: TouchEvent) => {
 					convertTouchEvent(e2);
+					// @ts-expect-error
 					let y_diff = e2.clientY - e1.clientY;
 					if (y_diff > 16) {
 						if (!opened) {
@@ -687,6 +762,7 @@ export const MenuBar = {
 						for (let node of bar.childNodes) {
 							if (!node.bbOpenMenu) continue;
 							let offset_center = bar.offsetLeft + node.offsetLeft + node.clientWidth/2;
+							// @ts-expect-error
 							if (Math.abs(offset_center - e2.clientX) < 21) {
 								node.bbOpenMenu(e2);
 								break;
@@ -694,12 +770,13 @@ export const MenuBar = {
 						}
 					}
 				}
-				let onStop = e2 => {
+				let onStop = (e2: TouchEvent) => {
 					document.removeEventListener('touchmove', onMove);
 					document.removeEventListener('touchend', onStop);
 					if (bar) {
 						bar.style.marginTop = '0';
 						convertTouchEvent(e2);
+						// @ts-expect-error
 						let y_diff = e2.clientY - e1.clientY;
 						if (y_diff < initial && MenuBar.open) {
 							MenuBar.open.hide()
@@ -711,7 +788,7 @@ export const MenuBar = {
 			})
 		}
 	},
-	openMobile(button, event) {
+	openMobile(button: HTMLElement, event?: Event) {
 		if (document.getElementById('mobile_menu_bar')) {
 			document.getElementById('mobile_menu_bar').remove();
 			return;
@@ -720,7 +797,7 @@ export const MenuBar = {
 		let bar = Interface.createElement('div', {id: 'mobile_menu_bar'}, label);
 		let menu_button_nodes = [];
 		let menu_position;
-		let setSelected = (node, menu) => {
+		let setSelected = (node: HTMLElement, menu: BarMenu) => {
 			menu_button_nodes.forEach(n => n.classList.remove('selected'))
 			node.classList.add('selected');
 			label.innerText = menu.name;
@@ -731,13 +808,14 @@ export const MenuBar = {
 			if (!Condition(menu.condition)) continue;
 
 			let node = Interface.createElement('div', {class: 'tool'}, Blockbench.getIconNode(menu.icon));
-			let openMenu = event => {
+			let openMenu = (event: Event) => {
 				if (MenuBar.last_opened == menu) return;
 				MenuBar.last_opened = MenuBar.open = menu;
 				menu.open(menu_position);
 				setSelected(node, menu);
 			}
 			addEventListeners(node, 'pointerdown touchmove', openMenu);
+			// @ts-expect-error
 			node.bbOpenMenu = openMenu;
 
 			menu_button_nodes.push(node);
@@ -757,7 +835,12 @@ export const MenuBar = {
 		}
 		return bar;
 	},
-	addMenu(menu, position) {
+	/**
+	 * Add a new menu to the menu bar
+	 * @param menu The BarMenu to add
+	 * @param position Specify the position in the menu list where to add insert the menu. Can either be an index in the list of all menus, or the ID of the menu to insert right from.
+	 */
+	addMenu(menu: BarMenu, position?: number | string): void {
 		MenuBar.menus[menu.id] = menu;
 		if (position) {
 			let order = Object.keys(MenuBar.menus);
@@ -771,7 +854,10 @@ export const MenuBar = {
 		}
 		MenuBar.update();
 	},
-	update() {
+	/**
+	 * Update the menu bar
+	 */
+	update(): void {
 		if (!Blockbench.isMobile) {
 			let bar = document.getElementById('menu_bar');
 			bar.replaceChildren();
@@ -786,28 +872,41 @@ export const MenuBar = {
 			}
 		}
 	},
-	addAction(action, path) {
-		if (path) {
-			path = path.split('.')
-			var menu = MenuBar.menus[path.splice(0, 1)[0]]
-			if (menu) {
-				menu.addAction(action, path.join('.'))
-			}
+	/**
+	 * Adds an action to the menu structure
+	 * @param action Action to add
+	 * @param path Path pointing to the location. Use the ID of each level of the menu, or index or group within a level, separated by a point. For example, `file.export.0` places the action at the top position of the Export submenu in the File menu.
+	 */
+	addAction(action: Action, path?: string): void {
+		if (!path) return;
+		let path_segments = path.split('.')
+		var menu = MenuBar.menus[path_segments.splice(0, 1)[0]]
+		if (menu) {
+			menu.addAction(action, path_segments.join('.'))
 		}
 	},
-	removeAction(path) {
-		if (path) {
-			path = path.split('.')
-			var menu = MenuBar.menus[path.splice(0, 1)[0]]
-			if (menu) {
-				menu.removeAction(path.join('.'))
-			}
+	/**
+	 *
+	 * @param path Path pointing to the location. Use the ID of each level of the menu, or index or group within a level, or item ID, separated by a point. For example, `export.export_special_format` removes the action "Export Special Format" from the Export submenu.
+	 */
+	removeAction(path: string): void {
+		if (!path) return;
+		let path_segments = path.split('.')
+		var menu = MenuBar.menus[path_segments.splice(0, 1)[0]]
+		if (menu) {
+			menu.removeAction(path_segments.join('.'))
 		}
 	}
 }
 
 
-Object.assign(window, {
+const global = {
 	BarMenu,
-	MenuBar,
-});
+	MenuBar
+}
+declare global {
+	type BarMenu = import('./menu_bar').BarMenu
+	const BarMenu: typeof global.BarMenu
+	const MenuBar: typeof global.MenuBar
+}
+Object.assign(window, global);
