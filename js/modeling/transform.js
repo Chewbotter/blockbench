@@ -682,6 +682,9 @@ export function rotateOnAxis(modify, axis, slider) {
 
 			// Mesh or spline
 			let normal = axis == 0 ? THREE.NormalX : (axis == 1 ? THREE.NormalY : THREE.NormalZ)
+			// Custom orientation (js/dew/dew_orientation.js): the stock Rotate tool never reached space 3, its menu
+			// has no Normal. The axis is the tilted one, in the mesh's own space, which is the space q is applied in.
+			if (space === 3 && obj instanceof Mesh) normal = normal.clone().applyEuler(obj.getSelectionRotation());
 			let rotWorldMatrix = new THREE.Matrix4();
 			rotWorldMatrix.makeRotationAxis(normal, Math.degToRad(modify(0)))
 			if (space instanceof OutlinerNode || space == 'root') {
@@ -839,7 +842,10 @@ BARS.defineActions(function() {
 			global: true,
 			parent: true,
 			local: true,
-			normal: {condition: () => Mesh.selected.length || SplineMesh.selected.length, name: true}
+			normal: {condition: () => Mesh.selected.length || SplineMesh.selected.length, name: true},
+			// A stored orientation set from the selection or from a bone (js/dew/dew_orientation.js): Normal space with
+			// a frame that stays put, for working down a limb that is not on a world axis
+			custom: {condition: () => Mesh.selected.length, name: 'Custom'}
 		},
 		onChange() {
 			updateSelection();
@@ -852,7 +858,8 @@ BARS.defineActions(function() {
 		options: {
 			global: 'action.transform_space.global',
 			parent: 'action.transform_space.parent',
-			local: 'action.transform_space.local'
+			local: 'action.transform_space.local',
+			custom: {condition: () => Modes.edit && Mesh.selected.length, name: 'Custom'}
 		},
 		onChange() {
 			updateSelection();

@@ -20,6 +20,13 @@ export function getEditTransformSpace() {
 
 	if (Toolbox.selected == BarItems.rotate_tool && Format.rotation_limit) return 2;
 
+	// Custom (js/dew/dew_orientation.js) is Normal space with a stored frame, so it takes Normal's path below.
+	// Rotating whole elements has no such path: without selected vertices the Rotate tool falls back to Local.
+	if (input_space === 'custom') {
+		let has_vertices = Mesh.selected.some(mesh => mesh.getSelectedVertices().length);
+		input_space = (Toolbox.selected.id == 'rotate_tool' && !has_vertices) ? 'local' : 'normal';
+	}
+
 	if (input_space == 'local' && Outliner.selected.length && Outliner.selected[0].getTypeBehavior('rotatable') && (!Format.bone_rig || !Group.first_selected)) {
 		let is_local = true;
 		if (Format.bone_rig) {

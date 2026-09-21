@@ -348,7 +348,10 @@ export const MenuBar = {
 				'toggle_autouv',
 				'toggle_shade',
 				'toggle_mirror_uv'
-			]}
+			]},
+			new MenuSeparator('dew_orientation'),
+			'dew_orient_from_selection',
+			'dew_orient_from_bone',
 
 		], {
 			icon: 'open_with',
