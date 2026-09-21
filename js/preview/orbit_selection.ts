@@ -4,13 +4,24 @@ import { THREE } from '../lib/libs';
 
 /**
  * Orbit pivot. The pivot of every preview slides along its line of sight to the depth of what
- * you are working on: the selection when there is one, otherwise the surface under the cursor
- * at the moment an orbit starts. Sliding along the line of sight means nothing on screen moves,
- * it only changes what the next orbit revolves around.
+ * you are working on: the selection when there is one, otherwise the visible surface in the
+ * middle of the screen at the moment an orbit starts. Sliding along the line of sight means
+ * nothing on screen moves, it only changes what the next orbit revolves around.
+ *
+ * The depth comes from the MIDDLE of the screen, not from under the cursor. The pivot always sits
+ * on the line through the middle of the screen, so a depth taken anywhere else makes a pivot that
+ * is on nothing: with the cursor over a torso behind a forearm, the pivot hung in mid-air at the
+ * torso's depth and the forearm swung across the screen (reported on soldier_male_rigged.bbmodel,
+ * 2026-09-21: after Center View on Selection and a deselect the pivot jumped 4.6 to 6.5 units
+ * behind a face 20 units away). Hidden elements never take part, in any of the steps.
  */
 
 // The pivot never comes closer to the camera than this (a point behind or at the camera is ignored)
 const MIN_PIVOT_DISTANCE = 1;
+// When the very middle of the screen is a gap (between an arm and the body), rays go out in rings
+// around it, as fractions of the half screen, and the first ring that meets a surface decides
+const PIVOT_RINGS = [0.15, 0.35, 0.6];
+const PIVOT_RING_POINTS = 8;
 
 /**
  * Put the pivot at the depth of `point`, measured along the way the camera faces.
@@ -47,28 +58,48 @@ function updateOrbitPivots() {
 	}
 }
 
-/** Nearest visible element surface under the pointer, in world space, or null. */
-function surfaceUnderCursor(preview, event: MouseEvent): THREE.Vector3 {
-	if (!preview?.canvas || !preview.raycaster) return null;
-	let rect = preview.canvas.getBoundingClientRect();
-	if (!rect.width || !rect.height) return null;
-	let mouse = new THREE.Vector2(
-		((event.clientX - rect.left) / rect.width) * 2 - 1,
-		-((event.clientY - rect.top) / rect.height) * 2 + 1
-	);
-	preview.raycaster.setFromCamera(mouse, preview.camera);
+/** The surfaces a pivot may sit on: visible, exported elements with real geometry. */
+function pivotSurfaces(): THREE.Object3D[] {
 	let objects = [];
 	for (let element of Outliner.elements) {
-		// Only real surfaces: no outlines, vertex points or gizmo helpers to pivot on.
-		if (element.visibility === false || element.locked) continue;
+		// Only real surfaces: no outlines, vertex points or gizmo helpers to pivot on. A hidden element
+		// is out entirely, so hiding something takes it out of the camera's reckoning as well, and so is
+		// a helper marked export = false (the scale figure), as the tile tools already treat it.
+		if (element.visibility === false || element.export === false) continue;
 		let mesh = element.mesh;
 		// isMesh, not type: Blockbench overwrites Object3D.type with its own name ('cube',
 		// 'mesh'), so testing for 'Mesh' matched nothing and every raycast came back empty.
 		if (mesh && mesh.isMesh && mesh.geometry && mesh.visible) objects.push(mesh);
 	}
+	return objects;
+}
+
+/**
+ * The visible surface in the middle of the screen, in world space, or null: the point the pivot's
+ * own line meets. When the middle is a gap, the nearest surface of the first ring around it that
+ * meets anything.
+ */
+function surfaceInView(preview): THREE.Vector3 {
+	if (!preview?.camera || !preview.raycaster) return null;
+	let objects = pivotSurfaces();
 	if (!objects.length) return null;
-	let hits = preview.raycaster.intersectObjects(objects, false);
-	return hits.length ? hits[0].point : null;
+	let nearest = (x: number, y: number) => {
+		preview.raycaster.setFromCamera(new THREE.Vector2(x, y), preview.camera);
+		let hits = preview.raycaster.intersectObjects(objects, false);
+		return hits.length ? hits[0] : null;
+	};
+	let centre = nearest(0, 0);
+	if (centre) return centre.point;
+	for (let radius of PIVOT_RINGS) {
+		let best = null;
+		for (let i = 0; i < PIVOT_RING_POINTS; i++) {
+			let angle = i / PIVOT_RING_POINTS * Math.PI * 2;
+			let hit = nearest(Math.cos(angle) * radius, Math.sin(angle) * radius);
+			if (hit && (!best || hit.distance < best.distance)) best = hit;
+		}
+		if (best) return best.point;
+	}
+	return null;
 }
 
 /**
@@ -82,12 +113,7 @@ function viewCenter(preview): THREE.Vector3 {
 		new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
 	);
 	let box = new THREE.Box3(), found = false;
-	for (let element of Outliner.elements) {
-		// Helpers marked export = false (the scale figure, the mannequin) are not what you are
-		// looking at, and the tile tools already ignore them.
-		if (element.visibility === false || element.export === false) continue;
-		let mesh = element.mesh;
-		if (!mesh || !mesh.isMesh || !mesh.geometry || !mesh.visible) continue;
+	for (let mesh of pivotSurfaces() as THREE.Mesh[]) {
 		mesh.updateMatrixWorld();
 		if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
 		let bounds = mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);
@@ -100,14 +126,16 @@ function viewCenter(preview): THREE.Vector3 {
 /**
  * Called as an orbit begins. With nothing selected there was no rule at all: the pivot kept
  * whatever it was last left at, by an old selection, a pan, or the view the file opened in, which
- * is why orbiting felt like it came from nowhere. In order: the surface under the cursor, then
- * the centre of whatever is in view. A selection still wins over both, and with an empty view
- * there is nothing sensible to pick, so the pivot is left as it was.
+ * is why orbiting felt like it came from nowhere. In order: the surface in the middle of the
+ * screen (surfaceInView), then the centre of the boxes of whatever is in view, which is coarse (one
+ * big mesh seen close up answers with its own middle) and so only the last resort. A selection
+ * still wins over both, and with an empty view there is nothing sensible to pick, so the pivot is
+ * left as it was. Where the pointer is plays no part: see the note at the top.
  */
-function pivotUnderCursor(preview, event: MouseEvent): boolean {
+function pivotForOrbit(preview): boolean {
 	if (!settings.orbit_around_selection.value) return false;
 	if (Modes.display || hasSelection()) return false;
-	let point = surfaceUnderCursor(preview, event) || viewCenter(preview);
+	let point = surfaceInView(preview) || viewCenter(preview);
 	return point ? setPivotDepth(preview, point) : false;
 }
 
@@ -115,4 +143,4 @@ Blockbench.on('update_selection', updateOrbitPivots);
 
 // Global rather than an import: OrbitControls is evaluated before this module, and importing
 // either way round would reorder the bundle (see the note at the top of the file).
-Object.assign(window, {OrbitPivot: {updateOrbitPivots, pivotUnderCursor, surfaceUnderCursor, viewCenter, setPivotDepth, MIN_PIVOT_DISTANCE}});
+Object.assign(window, {OrbitPivot: {updateOrbitPivots, pivotForOrbit, surfaceInView, pivotSurfaces, viewCenter, setPivotDepth, MIN_PIVOT_DISTANCE, PIVOT_RINGS, PIVOT_RING_POINTS}});

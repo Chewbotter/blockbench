@@ -17,7 +17,7 @@ const ev = async expression => {
 	return r.result.result.value;
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const check = (label, ok) => { assert.ok(ok, label); checks++; console.log('PASS ' + label); };
+const check = (label, ok, detail) => { assert.ok(ok, label + (detail !== undefined ? ': ' + JSON.stringify(detail) : '')); checks++; console.log('PASS ' + label); };
 try {
 	await send('Runtime.enable');
 	// Two cubes at different depths, so a pivot at the wrong one is obvious.
@@ -96,8 +96,9 @@ try {
 		let p = Preview.selected, canvas = p.canvas;
 		return [[${onClose}, 'close'], [${onDeep}, 'deep']].every(([pt, name]) => {
 			if (document.elementFromPoint(pt.x, pt.y) !== canvas) return false;
-			let hit = OrbitPivot.surfaceUnderCursor(p, {clientX: pt.x, clientY: pt.y});
-			return !!hit && p.raycaster.intersectObjects([window[name + '_cube'].mesh], false).length > 0;
+			let r = canvas.getBoundingClientRect();
+			p.raycaster.setFromCamera(new THREE.Vector2((pt.x - r.left) / r.width * 2 - 1, -((pt.y - r.top) / r.height) * 2 + 1), p.camera);
+			return p.raycaster.intersectObjects([window[name + '_cube'].mesh], false).length > 0;
 		});
 	})()`));
 	const onEmpty = await ev(`JSON.stringify((()=>{let r=Preview.selected.canvas.getBoundingClientRect();return {x:r.left+12,y:r.top+12};})())`);
@@ -109,17 +110,46 @@ try {
 		await sleep(120);
 	};
 
-	// The cursor pivots on the SURFACE under it, not an object centre: front face z 72 from a
-	// camera at z 120 is a depth of 48, where selecting that same cube gives 56.
-	await orbitAt(onClose);
-	check('starting an orbit over a cube pivots on the surface under the cursor', await ev(`Math.abs(pivotDepth() - 48) < 3`));
-	await orbitAt(onDeep);
-	check('a cube further away gives the deeper pivot', await ev(`Math.abs(pivotDepth() - 112) < 3`));
-
-	// Over empty space there is no surface to pivot on, so fall back to what is in view. Both
-	// cubes are visible, spanning z -8..72, so their combined centre sits at z 32: depth 88.
+	// The pivot takes its depth from the MIDDLE of the screen, the line it sits on, not from under the cursor:
+	// a depth taken under the cursor put the pivot in mid-air beside whatever was in the middle (reported on the
+	// soldier, 2026-09-21). Looking straight at the close cube, its front face z 72 from z 120 is a depth of 48,
+	// where selecting that same cube gives its centre, 56. Where the orbit is started from changes nothing.
+	const lookAt = async x => { await ev(`(() => { let p = Preview.selected; p.camera.position.set(${x}, 0, 120); p.controls.target.set(${x}, 0, 60); p.controls.update(); p.render(); return true; })()`); await sleep(120); };
+	await lookAt(16);
+	const aims = {close: await ev(`JSON.stringify(screenOf([16,0,72]))`), deep: await ev(`JSON.stringify(screenOf([-16,0,8]))`), empty: onEmpty};
+	for (let from of ['close', 'deep', 'empty']) {
+		await ev(`(() => { let p = Preview.selected; p.controls.target.set(16, 0, 60); p.controls.update(); return true; })()`);
+		await orbitAt(aims[from]);
+		check('looking at the close cube the pivot sits on its surface, orbit started over ' + from, await ev(`Math.abs(pivotDepth() - 48) < 3`), await ev(`pivotDepth()`));
+	}
+	await lookAt(-16);
+	// Started from the corner of the canvas: from here the close cube projects off it, and a press that lands
+	// outside the canvas does nothing at all (the trap this file already guards against above)
 	await orbitAt(onEmpty);
-	check('over empty space the pivot falls back to the centre of what is in view', await ev(`Math.abs(pivotDepth() - 88) < 3`));
+	check('looking at the deep cube gives the deeper pivot', await ev(`Math.abs(pivotDepth() - 112) < 3`), await ev(`pivotDepth()`));
+
+	// The middle of the screen is a gap: the first ring of rays around it that meets a surface decides. From
+	// x -2 the deep cube's edge (x -8) is just left of the middle and the close cube well to the right.
+	await lookAt(-2);
+	check('with a gap in the middle the centre ray meets nothing', await ev(`(() => { let p = Preview.selected; p.raycaster.setFromCamera(new THREE.Vector2(0, 0), p.camera);
+		return p.raycaster.intersectObjects(OrbitPivot.pivotSurfaces(), false).length == 0; })()`));
+	await orbitAt(onEmpty);
+	check('and the pivot takes the surface nearest the middle', await ev(`Math.abs(pivotDepth() - 112) < 3`), await ev(`pivotDepth()`));
+
+	// A hidden element takes no part at all: hide the deep cube and the same view now finds the close one
+	await ev(`(() => { deep_cube.visibility = false; Canvas.updateVisibility(); Preview.selected.render(); return true; })()`);
+	check('a hidden element is not a pivot surface', await ev(`!OrbitPivot.pivotSurfaces().includes(deep_cube.mesh) && OrbitPivot.pivotSurfaces().includes(close_cube.mesh)`));
+	await orbitAt(onEmpty);
+	check('hiding it takes it out of the orbit: the pivot moves to what is still shown', await ev(`Math.abs(pivotDepth() - 48) < 3`), await ev(`pivotDepth()`));
+	await ev(`(() => { deep_cube.visibility = true; Canvas.updateVisibility(); Preview.selected.render(); return true; })()`);
+
+	// Nothing on any ray: fall back to the boxes of what is in the frustum. From 40 up, looking level, the deep
+	// cube sits at the bottom edge of the frame, outside the widest ring, and the close one is out of frame:
+	// the box centre is the deep cube's own, z 0, a depth of 120.
+	await ev(`(() => { let p = Preview.selected; p.camera.position.set(-16, 40, 120); p.controls.target.set(-16, 40, 60); p.controls.update(); p.render(); return true; })()`);
+	await sleep(120);
+	await orbitAt(onEmpty);
+	check('with no surface near the middle the pivot falls back to the centre of what is in view', await ev(`OrbitPivot.surfaceInView(Preview.selected) === null && Math.abs(pivotDepth() - 120) < 3`), await ev(`JSON.stringify({depth: pivotDepth(), surface: !!OrbitPivot.surfaceInView(Preview.selected), centre: OrbitPivot.viewCenter(Preview.selected)})`));
 	check('the view centre ignores the depth of things out of frame', await ev(`(() => {
 		// Look at the deep cube alone: the close one is behind the camera now.
 		let p = Preview.selected;
@@ -134,7 +164,7 @@ try {
 		p.camera.position.set(0, 0, 400); p.controls.target.set(0, 0, 500);
 		p.camera.lookAt(new THREE.Vector3(0, 0, 900)); p.camera.updateMatrixWorld(); p.render();
 		let before = p.controls.target.clone();
-		let moved = OrbitPivot.pivotUnderCursor(p, {clientX: -1000, clientY: -1000});
+		let moved = OrbitPivot.pivotForOrbit(p);
 		return OrbitPivot.viewCenter(p) === null && moved === false && p.controls.target.equals(before);
 	})()`));
 	// Put the view back for the checks that follow.
@@ -161,7 +191,7 @@ try {
 			unselectAllElements(); close_cube.select(); updateSelection();
 			let unmoved = Math.abs(pivotDepth() - 120) < 2;
 			unselectAllElements(); updateSelection();
-			return unmoved && OrbitPivot.pivotUnderCursor(p, {clientX:0, clientY:0}) === false;
+			return unmoved && OrbitPivot.pivotForOrbit(p) === false;
 		} finally { settings.orbit_around_selection.value = stock; }
 	})()`));
 

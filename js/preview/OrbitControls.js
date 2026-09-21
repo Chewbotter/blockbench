@@ -621,8 +621,8 @@ constructor ( object, preview ) {
 			if (event.which === 1 && Canvas.raycast(event) && !Modes.display) {
 				return;
 			}
-			// With nothing selected, orbit around the surface under the cursor (js/preview/orbit_selection.ts).
-			if (typeof OrbitPivot != 'undefined') OrbitPivot.pivotUnderCursor( scope.preview, event );
+			// With nothing selected, orbit around what is in the middle of the view (js/preview/orbit_selection.ts).
+			if (typeof OrbitPivot != 'undefined') OrbitPivot.pivotForOrbit( scope.preview );
 			handleMouseDownRotate( event );
 
 			state = STATE.ROTATE;
