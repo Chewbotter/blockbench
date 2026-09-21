@@ -475,7 +475,8 @@ export const BARS = {
 				cursor: 'copy',
 				modes: ['edit'],
 				condition: {modes: ['edit']},
-				keybind: new Keybind({key: 'x'}),
+				// X belongs to Deform Cage in this fork; the weld selection mode covers what
+				// vertex snap was for. Rebindable in the keybinding settings as usual.
 				onCanvasClick(data) {
 					Vertexsnap.canvasClick(data)
 				},
@@ -924,7 +925,7 @@ export const BARS = {
 		})
 		Toolbars.dew_cage = new Toolbar({
 			id: 'dew_cage', no_wrap: true,
-			children: ['dew_cage_mode', 'dew_cage_x', 'dew_cage_y', 'dew_cage_z', '_', 'dew_cage_refit'],
+			children: ['dew_cage_mode_move', 'dew_cage_mode_select', 'dew_cage_mode_scale', 'dew_cage_mode_smooth_scale', '_', 'dew_cage_x', 'dew_cage_y', 'dew_cage_z', '_', 'dew_cage_refit'],
 		});
 		Toolbars.vertex_snap = new Toolbar({
 			id: 'vertex_snap',

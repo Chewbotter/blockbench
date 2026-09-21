@@ -32,7 +32,44 @@ try {
 		window.corners = () => DEWCage.getState().controls.map(p=>p.toArray());
 		fixture();
 	})()`);
-	check('tool is in the toolbar and defaults to eight cage points',await ev(`Toolbars.tools.children.some(t=>t.id=='dew_cage') && DEWCage.getState().controls.length==8 && Toolbars.dew_cage.children.some(t=>t.id=='dew_cage_mode')`));
+	check('tool is in the toolbar and defaults to eight cage points',await ev(`Toolbars.tools.children.some(t=>t.id=='dew_cage') && DEWCage.getState().controls.length==8`));
+	check('the four modes are exposed as buttons, with no dropdown left on the bar',await ev(`(()=>{
+		let ids=['move','select','scale','smooth_scale'].map(m=>'dew_cage_mode_'+m);
+		let bar=Toolbars.dew_cage.children.map(t=>t.id);
+		return ids.every(id=>bar.includes(id)) && !bar.includes('dew_cage_mode')
+			&& ids.map(id=>BarItems[id].node.querySelector('span').textContent.trim()).join()=='Move,Select,Scale,Smooth'
+			&& ids.every(id=>!BarItems[id].node.querySelector('.tooltip'));
+	})()`));
+	// Read the node actually on screen, not BarItem.node: getNode clones once that is connected,
+	// so asserting on the template could pass while the visible button never lit.
+	await ev(`window.modeNode=m=>{let i=BarItems['dew_cage_mode_'+m];return i.nodes.find(n=>n.isConnected&&n.getBoundingClientRect().width)||i.node;};
+		window.litModes=()=>['move','select','scale','smooth_scale'].filter(m=>modeNode(m).classList.contains('enabled')).join();true`);
+	check('the visible mode buttons are the ones that light, not a detached template',await ev(`['move','select','scale','smooth_scale'].every(m=>modeNode(m).isConnected)`));
+	check('clicking a mode button switches the mode and lights only that button',await ev(`(()=>{
+		modeNode('scale').click();
+		let a=BarItems.dew_cage_mode.value=='scale'&&litModes()=='scale';
+		modeNode('move').click();
+		return a && BarItems.dew_cage_mode.value=='move' && litModes()=='move';
+	})()`));
+	check('changing the mode from the select alone still lights the right button',await ev(`(()=>{
+		BarItems.dew_cage_mode.change('smooth_scale');
+		let ok=litModes()=='smooth_scale';
+		BarItems.dew_cage_mode.change('move');return ok && litModes()=='move';
+	})()`));
+	// They opened the moment the pointer arrived and covered the control they described.
+	check('the point count sliders carry no tooltip',await ev(`['x','y','z'].every(a=>!BarItems['dew_cage_'+a].node.querySelector('.tooltip'))`));
+	check('X selects Deform Cage and Vertex Snap no longer holds it',await ev(`(()=>{
+		let cage=BarItems.dew_cage.keybind, snap=BarItems.vertex_snap_tool.keybind;
+		return cage.key==88 && !cage.ctrl && !cage.shift && !cage.alt
+			&& (!snap || snap.key==-1) && localStorage.getItem('dew_cage_took_x')=='1';
+	})()`));
+	check('the X migration runs once, so a later rebind is not taken back',await ev(`(()=>{
+		BarItems.vertex_snap_tool.keybind.set({key:88}).save();
+		let again=DEWCage.migrateCageKeybind();
+		let kept=BarItems.vertex_snap_tool.keybind.key==88;
+		BarItems.vertex_snap_tool.keybind.clear();
+		return again===false && kept;
+	})()`));
 	check('identity cage keeps vertices, UVs and topology untouched',await ev(`(()=>{let before=JSON.stringify(m.getSaveCopy());DEWCage.fit();return JSON.stringify(m.getSaveCopy())==before})()`));
 	const base=await ev('JSON.stringify(m.getSaveCopy())');
 	check('one corner pulls the center by one eighth and leaves the opposite corner fixed',await ev(`(()=>{changeTest([7],[8,0,0]);return near(m.vertices[v[7]],[16,8,8])&&near(m.vertices[v[8]],[1,0,0])&&near(m.vertices[v[0]],[-8,-8,-8]);})()`));

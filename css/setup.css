@@ -820,6 +820,24 @@
 	div.nslide.editing {
 		cursor: text;
 	}
+	/* Cage modes as four exposed buttons rather than a dropdown: one click to a mode. The
+	   active one uses the stock .tool.enabled accent. */
+	.tool.dew_cage_mode_button {
+		width: auto;
+		padding: 0 8px;
+		line-height: 28px;
+		color: var(--color-subtle_text);
+	}
+	.tool.dew_cage_mode_button:hover {
+		color: var(--color-light);
+	}
+	.tool.dew_cage_mode_button.enabled {
+		color: var(--color-accent_text);
+	}
+	.tool.dew_cage_mode_button > span {
+		display: block;
+		line-height: 28px;
+	}
 	/* Cage point counts: axis letter, one-digit value, then an up/down stepper, in a row. The
 	   stock hover arrows are hidden: they are horizontal, appear only on hover, and sit at an
 	   inline margin off the node centre that lands the left one on the axis letter. */

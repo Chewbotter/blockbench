@@ -408,6 +408,50 @@ function finish(keep = true) {
 		Blockbench.setCursorTooltip(); updateDisplay(); updateSelection();
 	} finally {finishing = false;}
 }
+// The four modes, shown as buttons and held by the dew_cage_mode select.
+const CAGE_MODES = {move:'Move', select:'Select', scale:'Scale', smooth_scale:'Smooth'};
+const CAGE_MODE_HINTS = {
+	move:'Move the selected cage points. Drag a box in empty space to select',
+	select:'Box-select cage points. Shift adds, Alt subtracts',
+	scale:'Scale the selected cage points about their centre',
+	smooth_scale:'Scale with a curved taper between selected and unselected points',
+};
+// X moves from Vertex Snap to this tool. A source default alone will not do it: Blockbench
+// saves the WHOLE keymap to localStorage (hundreds of entries, not just the user's own
+// changes), and a stored entry overrides the default at construction (actions.ts). So take the
+// key over once, and only while Vertex Snap still holds the stock bare X, leaving a deliberate
+// rebind of either tool alone. The flag makes it one-time, so rebinding afterwards sticks.
+const CAGE_KEY_MIGRATION = 'dew_cage_took_x';
+const VERTEX_SNAP_X = 88;
+function migrateCageKeybind() {
+	try {
+		if (localStorage.getItem(CAGE_KEY_MIGRATION)) return false;
+		localStorage.setItem(CAGE_KEY_MIGRATION, '1');
+		const snap = BarItems.vertex_snap_tool?.keybind, cage = BarItems.dew_cage?.keybind;
+		if (!cage) return false;
+		if (snap && snap.key == VERTEX_SNAP_X && !snap.ctrl && !snap.shift && !snap.alt && !snap.meta) {
+			snap.clear();
+		}
+		cage.set({key: VERTEX_SNAP_X}).save();
+		return true;
+	} catch (error) {
+		console.error('Cage keybind migration skipped', error);
+		return false;
+	}
+}
+// One source of truth: the buttons only light up from the select's value. Every node, not just
+// `node`: BarItem.getNode clones once the original is connected, so a button shown in a second
+// place would keep a stale highlight.
+function syncModeButtons() {
+	const current = BarItems.dew_cage_mode?.value;
+	for (const mode in CAGE_MODES) {
+		const item = BarItems['dew_cage_mode_'+mode];
+		if (!item) continue;
+		for (const node of (item.nodes?.length ? item.nodes : [item.node])) {
+			node.classList.toggle('enabled', mode == current);
+		}
+	}
+}
 // The sliders read `resolution` through their own get(), so update() is the whole sync.
 function syncResolutionSliders() {
 	for (const letter of 'xyz') BarItems['dew_cage_'+letter]?.update();
@@ -505,11 +549,29 @@ Blockbench.on('unselect_project', clear);
 Blockbench.on('select_project', () => {if (active()) fit();});
 
 BARS.defineActions(function() {
+	// The select stays as the one piece of mode state, so transformMode() and anything reading
+	// .value keep working, but it is off the toolbar. The four buttons below are what is shown:
+	// one click to a mode instead of open-the-dropdown-then-pick.
 	new BarSelect('dew_cage_mode', {
 		name:'Cage mode', description:'Select: drag a box, Shift adds, Alt subtracts. Move, Scale or Smooth Scale: use the axis handles or drag selected points directly. Smooth Scale curves the taper between selected and unselected points.',
-		category:'tools', value:'move', options:{move:'Move',select:'Select',scale:'Scale',smooth_scale:'Smooth Scale'},
-		onChange() {cancelGesture();gizmoHover=null;hover=null;updateDisplay();},
+		category:'tools', value:'move', options:CAGE_MODES,
+		onChange() {cancelGesture();gizmoHover=null;hover=null;syncModeButtons();updateDisplay();},
 	});
+	for (const [mode, label] of Object.entries(CAGE_MODES)) {
+		const action = new Action('dew_cage_mode_'+mode, {
+			name:label+' cage points', description:CAGE_MODE_HINTS[mode],
+			icon:'square', category:'tools',
+			click() {if (BarItems.dew_cage_mode.value != mode) BarItems.dew_cage_mode.change(mode);},
+		});
+		// Show the word rather than an icon: four mode glyphs would need learning, and these are
+		// the same four words the dropdown showed.
+		action.node.classList.add('dew_cage_mode_button');
+		action.node.querySelector('.icon, i')?.replaceWith(Object.assign(document.createElement('span'), {textContent:label}));
+		// Same reason as the sliders: an instant tooltip over a button that already says the
+		// word. The longer hint stays in `description`, where the keybinding UI shows it.
+		action.node.querySelector('.tooltip')?.remove();
+	}
+	syncModeButtons();
 	for (let axis=0;axis<3;axis++) {
 		const letter = 'xyz'[axis];
 		// A slider rather than a dropdown: the value is on show and its own stepper changes it
@@ -546,6 +608,9 @@ BARS.defineActions(function() {
 			stepper.append(button);
 		}
 		slider.node.append(stepper);
+		// The stock tooltip shows the instant the pointer lands and covers the control it
+		// describes. The axis letter already says which one this is.
+		slider.node.querySelector('.tooltip')?.remove();
 	}
 	paintAxisLabels();
 	// A theme rewrites the axis variables, and themes.ts dispatches no event, so ride its own
@@ -562,6 +627,7 @@ BARS.defineActions(function() {
 	new Tool('dew_cage', {
 		name:'Deform Cage', description:'Fit a cage around selected mesh vertices. Select mode box-selects points; Move and Scale act on the selection. Shift for fine movement, X/Y/Z to constrain, Esc to cancel.',
 		icon:'view_in_ar', category:'tools', transformerMode:'hidden', selectElements:false, toolbar:'dew_cage',
+		keybind: new Keybind({key:'x'}),
 		modes:['edit'], condition:() => Modes.edit && Format.meshes && Mesh.selected.length > 0,
 		// Nothing writes a slider's text until something changes it, so a freshly shown toolbar
 		// had three blank boxes. Paint the values (and the letters, in case #preview was not up
@@ -569,6 +635,8 @@ BARS.defineActions(function() {
 		onSelect() {syncResolutionSliders();paintAxisLabels();if (!fit()) Blockbench.showQuickMessage('Select a mesh or mesh vertices to fit a cage');},
 		onUnselect() {clear();Preview.all.forEach(p => p.canvas.style.cursor='');},
 	});
+	// Once every module has defined its actions, whatever order they ran in.
+	setTimeout(migrateCageKeybind, 0);
 });
 
-Object.assign(window, {DEWCage:{CAGE,fit,setResolution,weightsAt,pick,pickGizmo,selectPoints,begin,moveBy,scaleBy,finish,getState:()=>state,getDrag:()=>drag,getMarquee:()=>marquee,getGizmo:()=>display?.gizmos[transformMode()]}});
+Object.assign(window, {DEWCage:{CAGE,fit,setResolution,weightsAt,pick,pickGizmo,selectPoints,begin,moveBy,scaleBy,finish,migrateCageKeybind,syncModeButtons,getState:()=>state,getDrag:()=>drag,getMarquee:()=>marquee,getGizmo:()=>display?.gizmos[transformMode()]}});

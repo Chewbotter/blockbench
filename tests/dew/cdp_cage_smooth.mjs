@@ -56,16 +56,17 @@ try {
 	check('axis-constrained smoothing changes only the requested coordinate',await ev(`(()=>{cylinder();BarItems.dew_cage_mode.change('smooth_scale');scaleCage(2,'x');return samples.every(({key,point,t})=>closePoint(m.vertices[key],[point[0]*(1+ease(t)),point[1],point[2]]));})()`));
 	check('a larger cage smooths its transition cell without affecting lower cells',await ev(`(()=>{cylinder();DEWCage.setResolution([2,3,2]);BarItems.dew_cage_mode.change('smooth_scale');scaleCage(2,'view',[4,5,10,11]);return matchesRadius(t=>1+(t<=.5?0:ease((t-.5)*2)));})()`));
 	check('selecting every control point keeps an ordinary uniform scale',await ev(`(()=>{cylinder();BarItems.dew_cage_mode.change('smooth_scale');scaleCage(1.5,'view',[0,1,2,3,4,5,6,7]);return samples.every(({key,point})=>closePoint(m.vertices[key],point.map(n=>n*1.5)));})()`));
-	// Choose Smooth Scale from the actual mode menu, then scale with the actual X handle.
+	// Click the actual Smooth button on the bar, then scale with the actual X handle. This used
+	// to open the mode dropdown and pick from it; the four modes are exposed buttons now.
 	await ev('cylinder();true');await sleep(250);
-	const selector=await ev(`(()=>{let node=BarItems.dew_cage_mode.nodes.find(n=>n.isConnected&&n.getBoundingClientRect().width).querySelector('.bb-select');let r=node.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};})()`);
 	const press=async p=>{await send('Input.dispatchMouseEvent',{type:'mouseMoved',...p});await send('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',buttons:1,clickCount:1});};
 	const move=async p=>send('Input.dispatchMouseEvent',{type:'mouseMoved',...p,button:'left',buttons:1});
 	const release=async p=>send('Input.dispatchMouseEvent',{type:'mouseReleased',...p,button:'left',clickCount:1});
-	await press(selector);await release(selector);
-	const option=await ev(`(()=>{let node=[...document.querySelectorAll('.select_menu li')].find(n=>n.textContent.trim()=='Smooth Scale');let r=node.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};})()`);
-	await press(option);await release(option);
-	check('choosing Smooth Scale in the mode menu shows the scale gizmo and retains point selection',await ev(`BarItems.dew_cage_mode.value=='smooth_scale'&&DEWCage.getGizmo().root.visible&&[...DEWCage.getState().selected].join()=='2,3,6,7'`));
+	const smoothButton=await ev(`(()=>{let node=BarItems.dew_cage_mode_smooth_scale.nodes.find(n=>n.isConnected&&n.getBoundingClientRect().width);let r=node.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2};})()`);
+	await press(smoothButton);await release(smoothButton);
+	check('clicking the Smooth button shows the scale gizmo and retains point selection',await ev(`BarItems.dew_cage_mode.value=='smooth_scale'&&DEWCage.getGizmo().root.visible&&[...DEWCage.getState().selected].join()=='2,3,6,7'`));
+	check('the clicked button is the lit one on screen',await ev(`(()=>{let vis=m=>{let i=BarItems['dew_cage_mode_'+m];return i.nodes.find(n=>n.isConnected&&n.getBoundingClientRect().width)||i.node;};
+		return vis('smooth_scale').classList.contains('enabled')&&!vis('scale').classList.contains('enabled');})()`));
 	const points=await ev(`(()=>{let g=DEWCage.getGizmo();return [.95,1.4].map(t=>projectPoint(g.root.position.clone().add(new THREE.Vector3(g.root.scale.x*t,0,0))));})()`);
 	await press(points[0]);await move(points[1]);await release(points[1]);
 	check('real gizmo scale uses curved falloff and keeps the other coordinates fixed',await ev(`(()=>{let factor=cageCorners()[7][0]/8;return factor>1.1&&samples.every(({key,point,t})=>closePoint(m.vertices[key],[point[0]*(1+(factor-1)*ease(t)),point[1],point[2]]));})()`));
