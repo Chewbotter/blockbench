@@ -728,7 +728,7 @@ BARS.defineActions(() => {
 			vertices: true,
 		},
 		modes: ['edit'],
-		condition: () => Modes.edit,
+		condition: () => Modes.edit && !Modes.block,	// Block Painting counts as Edit for behaviour, not for tools
 		onCanvasMouseMove(data) {
 			if (Mesh.selected[0]) {
 				if (!KnifeToolContext.current && Mesh.selected.length == 1) {

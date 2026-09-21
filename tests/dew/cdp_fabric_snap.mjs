@@ -14,7 +14,7 @@ await send('Runtime.enable');
 
 await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove()); Cube.all.slice().forEach(c => c.remove()); unselectAllElements(); updateSelection(); return true; })()`);
 await sleep(400);
-console.log('A. snap in a DEW scene:', await ev(`JSON.stringify({step: canvasGridSize(), edit_size: Format.edit_size(), user_setting: settings.edit_size.value, limiter: !!Format.cube_size_limiter, toggle: BarItems.dew_prop_snap.value})`));
+console.log('A. snap in a DEW scene:', await ev(`JSON.stringify({step: canvasGridSize(), edit_size: modeOrFormat('edit_size')(), user_setting: settings.edit_size.value, limiter: !!Format.cube_size_limiter, toggle: BarItems.dew_prop_snap.value})`));
 console.log('   expect step 4, edit_size 4, the user setting untouched, limiter true, toggle false');
 
 await ev(`(() => { BarItems.dew_prop_snap.trigger(); return true; })()`);

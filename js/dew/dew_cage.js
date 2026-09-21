@@ -628,7 +628,7 @@ BARS.defineActions(function() {
 		name:'Deform Cage', description:'Fit a cage around selected mesh vertices. Select mode box-selects points; Move and Scale act on the selection. Shift for fine movement, X/Y/Z to constrain, Esc to cancel.',
 		icon:'view_in_ar', category:'tools', transformerMode:'hidden', selectElements:false, toolbar:'dew_cage',
 		keybind: new Keybind({key:'x'}),
-		modes:['edit'], condition:() => Modes.edit && Format.meshes && Mesh.selected.length > 0,
+		modes:['edit'], condition:() => Modes.edit && !Modes.block && Format.meshes && Mesh.selected.length > 0,
 		// Nothing writes a slider's text until something changes it, so a freshly shown toolbar
 		// had three blank boxes. Paint the values (and the letters, in case #preview was not up
 		// when the bar was built) every time the tool comes out.

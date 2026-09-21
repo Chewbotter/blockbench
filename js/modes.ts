@@ -176,6 +176,7 @@ export const Modes = {
 	edit: false,
 	paint: false,
 	pose: false,
+	block: false,	// Block Painting (js/dew/dew_scene.js); Modes.edit stays true there as well
 	mobileModeMenu(button, event) {
 		let entries = [];
 		for (let id in Modes.options) {
@@ -195,6 +196,16 @@ export const Modes = {
 		return menu;
 	}
 };
+/**
+ * A mode can carry the viewport hooks a format can: render_sides, edit_size, buildGrid, cube_size_limiter. The mode's
+ * wins while it is selected, so Block Painting brings its culling, snap step, grid and size rules into any format.
+ * They are assigned onto the Mode after it is made, since the constructor keeps a fixed list of options.
+ */
+export function modeOrFormat(key: string): any {
+	let mode = Mode.selected as any;
+	if (mode && mode[key] !== undefined) return mode[key];
+	return (typeof Format != 'undefined' && Format) ? (Format as any)[key] : undefined;
+}
 onVueSetup(function() {
 	if (!Blockbench.isMobile) {
 		Modes.vue = new Vue({
@@ -220,11 +231,13 @@ onVueSetup(function() {
 
 const global = {
 	Mode,
-	Modes
+	Modes,
+	modeOrFormat
 };
 declare global {
 	const Modes: typeof global.Modes
 	const Mode: typeof global.Mode
+	const modeOrFormat: typeof global.modeOrFormat
 	type Mode = import('./modes').Mode
 }
 

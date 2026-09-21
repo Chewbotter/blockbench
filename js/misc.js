@@ -45,10 +45,10 @@ export const sort_collator = new Intl.Collator(undefined, {numeric: true, sensit
 
 export function canvasGridSize(shift, ctrl) {
 	if (!shift && !ctrl) {
-		// A format may set the step it works in. It reads the setting rather than writing it: a format that
-		// wrote the setting would leave its own value behind for every other project after a crash or a kill.
-		// Holding shift or ctrl still gives the user's own steps.
-		let format_size = typeof Format != 'undefined' && Format ? Format.edit_size : null;
+		// A mode or a format may set the step it works in (Block Painting does). It reads the setting rather than
+		// writing it: whatever wrote the setting would leave its own value behind for every other project after a
+		// crash or a kill. Holding shift or ctrl still gives the user's own steps.
+		let format_size = typeof modeOrFormat == 'function' ? modeOrFormat('edit_size') : null;
 		if (typeof format_size == 'function') format_size = format_size();
 		return 16 / Math.clamp(format_size || settings.edit_size.value, 1, 512)
 	} else if (ctrl && shift) {

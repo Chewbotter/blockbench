@@ -13,7 +13,7 @@ await send('Runtime.enable');
 
 const gridInfo = `(() => three_grid.children.map(c => c.name + ':' + (c.geometry?.attributes?.position?.count ?? '-')).join(' '))()`;
 
-console.log('A. format:', await ev(`JSON.stringify({exists: !!Formats.dew_scene, name: Formats.dew_scene?.name, category: Formats.dew_scene?.category, on_start: Formats.dew_scene?.show_on_start_screen, has_grid_hook: typeof Formats.dew_scene?.buildGrid, free_has_hook: typeof Formats.free.buildGrid})`));
+console.log('A. format:', await ev(`JSON.stringify({exists: !!Formats.dew_scene, name: Formats.dew_scene?.name, category: Formats.dew_scene?.category, on_start: Formats.dew_scene?.show_on_start_screen, has_grid_hook: typeof Modes.options.block?.buildGrid, free_has_hook: typeof Formats.free.buildGrid})`));
 
 console.log('B. new DEW project:', await ev(`(() => { newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	let p = Preview.selected;

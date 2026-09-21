@@ -2,7 +2,7 @@
 // manifest. The contract is BLOCKBENCH_HANDOFF.md sections 3 to 5: the game reads the saved .bbmodel itself, every
 // fabric cube carries `game.material`, every group `game.kind`, and every fabric face owns its own region of the
 // scene's atlas at 1 texel per unit, because the game paints damage into that region at runtime.
-import { DEW } from "./dew_scene";
+import { DEW, BLOCK_MODE, inBlockMode } from "./dew_scene";
 import { fs, PathModule } from "../native_apis";
 
 export const MATERIAL = {
@@ -363,9 +363,10 @@ export function saveToGame() {
 	return path;
 }
 
-// The fabric snap (handoff section 7, item 2): moves and resizes step by a sample (4) in DEW scenes, a cube can
-// not be resized under the minimum (4, or 8 once it is rotated), and a toggle drops to whole units for props.
-// Both hang off the format: canvasGridSize reads Format.edit_size and Cube.resize calls Format.cube_size_limiter.
+// The fabric snap (handoff section 7, item 2): moves and resizes step by a sample (4) in the Block Painting tab, a
+// cube can not be resized under the minimum (4, or 8 once it is rotated), and a toggle drops to whole units for
+// props. Both hang off the tab, in any format: canvasGridSize reads the step through modeOrFormat, and
+// Format.cube_size_limiter answers with the selected mode's limiter first (js/io/format.ts).
 let prop_snap = false;
 export function propSnap() { return prop_snap; }
 function fabricMinimum(cube) {
@@ -391,10 +392,11 @@ const fabric_limiter = {
 		}
 	},
 };
-Object.assign(Formats.dew_scene, {
+// dew_scene.js makes the mode in its own defineActions, which was registered before this one
+BARS.defineActions(() => Object.assign(Modes.options[BLOCK_MODE.ID], {
 	edit_size: () => prop_snap ? 16 : 16 / fabricRules().step,	// canvasGridSize returns 16 / edit_size units
 	cube_size_limiter: fabric_limiter,
-});
+}));
 
 // Panel: the palette from the manifest, the selection's tags, and the atlas usage
 function refreshPanel() {
@@ -424,7 +426,7 @@ export function selectMaterial(name) {
 let material_panel = new Panel('dew_materials', {
 	name: 'Materials',
 	icon: 'texture',
-	condition: () => Format.id == 'dew_scene',
+	condition: inBlockMode,
 	default_position: {slot: 'right_bar', float_position: [0, 0], float_size: [300, 400], height: 380},
 	growable: true,
 	resizable: true,
@@ -496,7 +498,7 @@ function cubeUnder(preview, event) {
 }
 function onMaterialHover(event) {
 	let preview = event.target && event.target.preview;
-	let cube = preview && preview.camera && Format.id == 'dew_scene' ? cubeUnder(preview, event) : null;
+	let cube = preview && preview.camera && inBlockMode() ? cubeUnder(preview, event) : null;
 	if (brush_hover && brush_hover != cube && brush_hover.mesh) brush_hover.preview_controller.updateHighlight(brush_hover, null);
 	brush_hover = cube;
 	if (cube && cube.mesh) cube.preview_controller.updateHighlight(cube, cube);
@@ -510,8 +512,9 @@ BARS.defineActions(function() {
 		transformerMode: 'hidden',
 		selectElements: false,
 		cursor: 'crosshair',
-		modes: ['edit'],
-		condition: () => Modes.edit && Format.id == 'dew_scene',
+		modes: [BLOCK_MODE.ID],
+		switch_mode_by_key: false,	// its key works in the tab only, it never pulls the user into it (keyboard.js)
+		condition: {modes: [BLOCK_MODE.ID]},
 		onCanvasClick(data) {
 			let event = data && data.event;
 			if (!event || event.button !== 0) return;
@@ -540,7 +543,7 @@ BARS.defineActions(function() {
 		description: 'Tag the selected cubes with the picked material and fill their faces',
 		icon: 'format_color_fill',
 		category: 'edit',
-		condition: () => Format.id == 'dew_scene' && Cube.selected.length,
+		condition: () => inBlockMode() && Cube.selected.length,
 		click() {
 			if (!manifest_state.selected) return Blockbench.showQuickMessage('Pick a material in the Materials panel first', MATERIAL.MESSAGE_TIME);
 			applyMaterial(Cube.selected, manifest_state.selected);
@@ -552,7 +555,7 @@ BARS.defineActions(function() {
 		icon: 'chair',
 		category: 'edit',
 		default: false,
-		condition: () => Format.id == 'dew_scene',
+		condition: inBlockMode,
 		onChange(value) {
 			prop_snap = value;
 			Blockbench.showQuickMessage(value ? 'Prop snap: whole units' : `Fabric snap: ${fabricRules().step} units`, MATERIAL.MESSAGE_TIME);
@@ -563,7 +566,7 @@ BARS.defineActions(function() {
 		description: 'Save this scene into the game repo as models/<name>/<Name>.bbmodel',
 		icon: 'save_alt',
 		category: 'file',
-		condition: () => Format.id == 'dew_scene',
+		condition: inBlockMode,
 		click() {
 			let path = saveToGame();
 			if (path) Blockbench.showQuickMessage(`Saved ${path}`, MATERIAL.MESSAGE_TIME);

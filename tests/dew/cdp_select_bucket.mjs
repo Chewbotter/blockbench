@@ -47,7 +47,7 @@ const face = (x, y, z, normal) => `(() => { for (let m of Mesh.all) for (let f o
 
 // floor x 0..128 z 0..64; floor2 x 128..160 z 0..64 (touching); island x 192..224 z 0..32 (gap); wall x 0..64 y 0..32 at z = 0 facing +z
 await ev(`(() => {
-	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
+	newProject(Formats.dew_scene); BarItems.move_tool.select(); Mesh.all.slice().forEach(m => m.remove());
 	let build = (name, axis, depth, sign, u0, v0, nu, nv) => { let m = new Mesh({name, vertices: {}}); let map = {};
 		let vert = p => { let k = p.join(','); return map[k] || (map[k] = m.addVertices(p)[0]); };
 		let axes = {x: ['z', 'y'], y: ['x', 'z'], z: ['x', 'y']}; let [ua, va] = axes[axis];

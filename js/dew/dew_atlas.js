@@ -1,5 +1,5 @@
 // DEW Atlas: a test texture where every tile is its own flat color, for trying out the texture brush
-import { DEW } from "./dew_scene";
+import { DEW, inBlockMode } from "./dew_scene";
 
 const ATLAS = {
 	HUE_STEP: 137.508,			// golden angle, keeps consecutive tiles far apart on the color wheel
@@ -33,7 +33,7 @@ BARS.defineActions(function() {
 		description: 'Create a test atlas where every tile is a different flat color',
 		icon: 'grid_view',
 		category: 'textures',
-		condition: () => Format.id == 'dew_scene',
+		condition: inBlockMode,
 		click() {
 			new Dialog({
 				id: 'create_dew_atlas',

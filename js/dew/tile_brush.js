@@ -1,7 +1,7 @@
 // Tile brush for DEW scenes: paints half-cell square quads onto an axis-aligned work plane.
 // Click or drag places tiles, Ctrl erases. W cycles the plane axis, A / D step it, C cycles the brush size.
 import { THREE } from "../lib/libs";
-import { DEW } from "./dew_scene";
+import { DEW, BLOCK_MODE, inBlockMode } from "./dew_scene";
 
 const BRUSH = {
 	GHOST_COLOR: 0x4ed0ff,
@@ -465,7 +465,7 @@ function removePlaneGrid() {
 // Whole Block shares the plane keys but aims at surfaces, so the grid is just clutter there.
 function updatePlaneGrid() {
 	removePlaneGrid();
-	if (!Toolbox.selected || Toolbox.selected.id != 'dew_tile_brush' || Format.id != 'dew_scene' || !Preview.selected) return;
+	if (!Toolbox.selected || Toolbox.selected.id != 'dew_tile_brush' || !inBlockMode() || !Preview.selected) return;
 	let axis = stroke && !stroke.erase ? stroke.axis : state.axis;
 	let depth = stroke && !stroke.erase ? stroke.depth : state.depth;
 	let lifted = depth + BRUSH.LIFT * facingSign(Preview.selected, axis, depth);
@@ -494,7 +494,7 @@ function updatePlaneGrid() {
 function onHover(event, ctrl_held = event.ctrlKey) {
 	last_hover_event = event;
 	let preview = stroke ? stroke.preview : event.target && event.target.preview;
-	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	if (!preview || !preview.camera || !inBlockMode()) return hideGhost();
 
 	let erasing = stroke ? stroke.erase : ctrl_held;
 	if (erasing) {
@@ -761,7 +761,7 @@ function endPaintStroke() {
 function onPaintHover(event) {
 	last_paint_hover_event = event;
 	let preview = paint_stroke ? paint_stroke.preview : event.target && event.target.preview;
-	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	if (!preview || !preview.camera || !inBlockMode()) return hideGhost();
 	let hit = hitFace(preview, event);
 	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
 	if (!tile) return looseGhost(hit);
@@ -950,7 +950,7 @@ function endSelectStroke() {
 function onSelectHover(event) {
 	last_paint_hover_event = event;
 	let preview = select_stroke ? select_stroke.preview : event.target && event.target.preview;
-	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	if (!preview || !preview.camera || !inBlockMode()) return hideGhost();
 	let hit = hitFace(preview, event);
 	let block = hit && blockTiles(hit.element, hit.face);
 	if (!block || !block.tile) return hideGhost();
@@ -1003,7 +1003,7 @@ function bucketClick(preview, event) {
 function onBucketHover(event) {
 	last_paint_hover_event = event;
 	let preview = event.target && event.target.preview;
-	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	if (!preview || !preview.camera || !inBlockMode()) return hideGhost();
 	let hit = hitFace(preview, event);
 	let tile = hit && describeTile(hit.element, hit.element.faces[hit.face]);
 	if (!tile) return looseGhost(hit);
@@ -1275,7 +1275,7 @@ function endBlockStroke() {
 function onBlockHover(event, ctrl_held = event.ctrlKey) {
 	last_hover_event = event;
 	let preview = block_stroke ? block_stroke.preview : event.target && event.target.preview;
-	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	if (!preview || !preview.camera || !inBlockMode()) return hideGhost();
 	let erase = block_stroke ? block_stroke.erase : (ctrl_held || Pressing.ctrl);
 	// Mid drag the ghost sits on the cell the stroke works on, the block just laid under the cursor. Aimed like
 	// a click it would jump onto the near side of that block, a spot the drag never places.
@@ -1485,7 +1485,7 @@ function endTerrainStroke() {
 function onTerrainHover(event, modifiers = event) {
 	last_paint_hover_event = event;
 	let preview = terrain_stroke ? terrain_stroke.preview : event.target && event.target.preview;
-	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	if (!preview || !preview.camera || !inBlockMode()) return hideGhost();
 	let hit = hitFace(preview, event);
 	if (!hit) return hideGhost();
 	let size = state.size;
@@ -1891,7 +1891,7 @@ function endShaveStroke() {
 function onShaveHover(event) {
 	last_paint_hover_event = event;
 	let preview = shave_stroke ? shave_stroke.preview : event.target && event.target.preview;
-	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	if (!preview || !preview.camera || !inBlockMode()) return hideGhost();
 	let inside = shave_stroke ? shave_stroke.inside : cutsInside();
 	let corner = shaveTarget(preview, event, shave_stroke ? shave_stroke.tiles : hoverTileIndex(), inside);
 	if (!corner) return hideGhost();
@@ -2116,7 +2116,7 @@ function endRampStroke() {
 function onRampHover(event) {
 	last_paint_hover_event = event;
 	let preview = shave_stroke ? shave_stroke.preview : event.target && event.target.preview;
-	if (!preview || !preview.camera || Format.id != 'dew_scene') return hideGhost();
+	if (!preview || !preview.camera || !inBlockMode()) return hideGhost();
 	if (shave_stroke ? shave_stroke.erase : (event.ctrlKey || Pressing.ctrl)) {
 		let hit = hitFace(preview, event);
 		let face = hit && hit.element.faces[hit.face];
@@ -2144,11 +2144,11 @@ BARS.defineActions(function() {
 		description: 'Start a new element with one block on the grid where the camera is looking, at the brush size (C). The tile tools build into it while it is selected',
 		icon: 'view_in_ar',
 		category: 'edit',
-		condition: () => Modes.edit && Format.id == 'dew_scene',
+		condition: {modes: [BLOCK_MODE.ID]},
 		click: addBlockElement,
 	});
 	new Tool('dew_whole_block', {
-		keybind: new Keybind({key: '2'}),	// the number keys pick the tools in DEW scenes
+		keybind: new Keybind({key: '2'}),	// the number keys pick the tools in the Block Painting tab, and only there
 		name: 'Whole Block',
 		description: 'Drop a block into the cell under the cursor, full or half size per C. Drag to lay a run of them. Ctrl takes one out and seals the neighbours it opened. Faces that meet are dropped on both sides. Pick atlas cells in the UV editor to texture every side of new blocks, Alt picks up the cell a tile carries',
 		icon: 'view_in_ar',
@@ -2156,8 +2156,9 @@ BARS.defineActions(function() {
 		transformerMode: 'hidden',
 		selectElements: false,
 		cursor: 'crosshair',
-		modes: ['edit'],
-		condition: () => Modes.edit && Format.id == 'dew_scene',
+		modes: [BLOCK_MODE.ID],
+		switch_mode_by_key: false,	// its key works in the tab only, it never pulls the user into it (keyboard.js)
+		condition: {modes: [BLOCK_MODE.ID]},
 		onCanvasClick(data) {
 			let event = data && data.event;
 			if (!event || event.button !== 0 || block_stroke) return;
@@ -2193,7 +2194,7 @@ BARS.defineActions(function() {
 	});
 
 	new Tool('dew_tile_brush', {
-		keybind: new Keybind({key: '3'}),	// the number keys pick the tools in DEW scenes
+		keybind: new Keybind({key: '3'}),	// the number keys pick the tools in the Block Painting tab, and only there
 		name: 'Tile Brush',
 		description: 'Paint tiles onto the work plane, textured with the atlas cells picked in the UV editor if any. Ctrl erases, Alt takes the plane and facing of the tile under the cursor. W cycles the plane, A / D step it, C cycles the brush size: 1, 2 x 2, 3 x 3 tiles',
 		icon: 'grid_on',
@@ -2201,8 +2202,9 @@ BARS.defineActions(function() {
 		transformerMode: 'hidden',
 		selectElements: false,
 		cursor: 'crosshair',
-		modes: ['edit'],
-		condition: () => Modes.edit && Format.id == 'dew_scene',
+		modes: [BLOCK_MODE.ID],
+		switch_mode_by_key: false,	// its key works in the tab only, it never pulls the user into it (keyboard.js)
+		condition: {modes: [BLOCK_MODE.ID]},
 		onCanvasClick(data) {
 			let event = data && data.event;
 			if (!event || event.button !== 0 || stroke) return;
@@ -2236,7 +2238,7 @@ BARS.defineActions(function() {
 	});
 
 	new Tool('dew_terrain', {
-		keybind: new Keybind({key: '6'}),	// the number keys pick the tools in DEW scenes; 6 is otherwise only the weld selection mode, which stands down here
+		keybind: new Keybind({key: '6'}),	// the number keys pick the tools in the Block Painting tab, and only there; 6 is otherwise only the weld selection mode, which stands down here
 		name: 'Terrain Brush',
 		description: 'Raise ground a step, or lower it with Ctrl. Shift flattens everything a drag touches to the height it started at. The ground around follows as ramps and triangles, no steeper than a step per half cell, and anything standing on the ground stays put. Drag for a ridge or a trench. C cycles the brush size: 1, 2 x 2, 3 x 3 tiles',
 		icon: 'landscape',
@@ -2244,8 +2246,9 @@ BARS.defineActions(function() {
 		transformerMode: 'hidden',
 		selectElements: false,
 		cursor: 'crosshair',
-		modes: ['edit'],
-		condition: () => Modes.edit && Format.id == 'dew_scene',
+		modes: [BLOCK_MODE.ID],
+		switch_mode_by_key: false,	// its key works in the tab only, it never pulls the user into it (keyboard.js)
+		condition: {modes: [BLOCK_MODE.ID]},
 		onCanvasClick(data) {
 			let event = data && data.event;
 			if (!event || event.button !== 0 || event.altKey || terrain_stroke) return;
@@ -2274,7 +2277,7 @@ BARS.defineActions(function() {
 	});
 
 	new Tool('dew_texture_brush', {
-		keybind: new Keybind({key: '4'}),	// the number keys pick the tools in DEW scenes
+		keybind: new Keybind({key: '4'}),	// the number keys pick the tools in the Block Painting tab, and only there
 		name: 'Texture Brush',
 		description: 'Pick a tile of the atlas in the UV editor (drag to pick several), then click or drag over tiles to paint. The pick fills the brush from its upper left, repeating if smaller and cut off if larger. Alt picks up the cell a tile already carries. C cycles the brush size: 1, 2 x 2, 3 x 3 tiles',
 		icon: 'format_paint',
@@ -2282,8 +2285,9 @@ BARS.defineActions(function() {
 		transformerMode: 'hidden',
 		selectElements: false,
 		cursor: 'crosshair',
-		modes: ['edit'],
-		condition: () => Modes.edit && Format.id == 'dew_scene',
+		modes: [BLOCK_MODE.ID],
+		switch_mode_by_key: false,	// its key works in the tab only, it never pulls the user into it (keyboard.js)
+		condition: {modes: [BLOCK_MODE.ID]},
 		onCanvasClick(data) {
 			let event = data && data.event;
 			if (!event || event.button !== 0 || paint_stroke) return;
@@ -2321,8 +2325,9 @@ BARS.defineActions(function() {
 		transformerMode: 'hidden',
 		selectElements: false,
 		cursor: 'crosshair',
-		modes: ['edit'],
-		condition: () => Modes.edit && Format.id == 'dew_scene',
+		modes: [BLOCK_MODE.ID],
+		switch_mode_by_key: false,	// its key works in the tab only, it never pulls the user into it (keyboard.js)
+		condition: {modes: [BLOCK_MODE.ID]},
 		onCanvasClick(data) {
 			let event = data && data.event;
 			if (!event || event.button !== 0 || event.altKey || shave_stroke) return;
@@ -2354,8 +2359,9 @@ BARS.defineActions(function() {
 		transformerMode: 'hidden',
 		selectElements: false,
 		cursor: 'crosshair',
-		modes: ['edit'],
-		condition: () => Modes.edit && Format.id == 'dew_scene',
+		modes: [BLOCK_MODE.ID],
+		switch_mode_by_key: false,	// its key works in the tab only, it never pulls the user into it (keyboard.js)
+		condition: {modes: [BLOCK_MODE.ID]},
 		onCanvasClick(data) {
 			let event = data && data.event;
 			if (!event || event.button !== 0 || event.altKey || shave_stroke) return;
@@ -2382,7 +2388,7 @@ BARS.defineActions(function() {
 	});
 
 	new Tool('dew_tile_select', {
-		keybind: new Keybind({key: '1'}),	// the number keys pick the tools in DEW scenes
+		keybind: new Keybind({key: '1'}),	// the number keys pick the tools in the Block Painting tab, and only there
 		name: 'Tile Select',
 		description: 'Paint to select tiles. Shift adds, Ctrl removes, C cycles the brush size: 1, 2 x 2, 3 x 3 tiles',
 		icon: 'highlight_alt',
@@ -2390,8 +2396,9 @@ BARS.defineActions(function() {
 		transformerMode: 'hidden',
 		selectElements: false,
 		cursor: 'crosshair',
-		modes: ['edit'],
-		condition: () => Modes.edit && Format.id == 'dew_scene',
+		modes: [BLOCK_MODE.ID],
+		switch_mode_by_key: false,	// its key works in the tab only, it never pulls the user into it (keyboard.js)
+		condition: {modes: [BLOCK_MODE.ID]},
 		onCanvasClick(data) {
 			let event = data && data.event;
 			if (!event || event.button !== 0 || event.altKey || select_stroke) return;
@@ -2418,7 +2425,7 @@ BARS.defineActions(function() {
 	});
 
 	new Tool('dew_paint_bucket', {
-		keybind: new Keybind({key: '5'}),	// the number keys pick the tools in DEW scenes
+		keybind: new Keybind({key: '5'}),	// the number keys pick the tools in the Block Painting tab, and only there
 		name: 'Paint Bucket',
 		description: 'Fill the connected tiles of a plane with the picked atlas tiles. Alt picks up the cell a tile already carries. C cycles the brush size: 1, 2 x 2, 3 x 3 tiles',
 		icon: 'format_color_fill',
@@ -2426,8 +2433,9 @@ BARS.defineActions(function() {
 		transformerMode: 'hidden',
 		selectElements: false,
 		cursor: 'crosshair',
-		modes: ['edit'],
-		condition: () => Modes.edit && Format.id == 'dew_scene',
+		modes: [BLOCK_MODE.ID],
+		switch_mode_by_key: false,	// its key works in the tab only, it never pulls the user into it (keyboard.js)
+		condition: {modes: [BLOCK_MODE.ID]},
 		onCanvasClick(data) {
 			let event = data && data.event;
 			if (!event || event.button !== 0) return;
@@ -2548,7 +2556,7 @@ Blockbench.on('unselect_project', () => {
 });
 Blockbench.on('select_project', () => {
 	if (!isDewTool()) return;
-	if (Format.id != 'dew_scene') {
+	if (!inBlockMode()) {
 		BarItems.move_tool.select();
 	} else {
 		updatePlaneGrid();

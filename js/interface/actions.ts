@@ -886,6 +886,8 @@ export class Tool extends Action implements ToolSpecificOptions {
 			var mode = Modes.options[this.modes[i]]
 			if (mode && Condition(mode.condition)) {
 				mode.select()
+				// The tab being available does not make the tool available: its own condition still has the last word
+				if (!BARS.condition(this.condition, this)) return false;
 				this.select()
 				return true;
 			}

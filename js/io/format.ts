@@ -380,7 +380,14 @@ export class ModelFormat implements FormatOptions {
 			ModelFormat.properties[id].reset(this);
 		}
 		this.render_sides = data.render_sides;
-		this.cube_size_limiter = data.cube_size_limiter;
+		// A selected mode's limiter wins over the format's (Block Painting's fabric sizes, see modeOrFormat in
+		// modes.ts). An accessor rather than a call, so the forty places that read Format.cube_size_limiter stay as they are.
+		let own_limiter = data.cube_size_limiter;
+		Object.defineProperty(this, 'cube_size_limiter', {
+			get: () => (typeof Mode != 'undefined' && Mode.selected && (Mode.selected as any).cube_size_limiter) || own_limiter,
+			set: (limiter: CubeSizeLimiter) => { own_limiter = limiter; },
+			enumerable: true, configurable: true,
+		});
 
 		this.codec = data.codec;
 		this.animation_codec = data.animation_codec;

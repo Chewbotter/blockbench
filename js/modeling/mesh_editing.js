@@ -279,9 +279,9 @@ BARS.defineActions(function() {
 			weld: new Keybind({key: '6'}),
 		},
 		icon_mode: true,
-		// Its sub keybinds are the number keys, which DEW scenes give to the tile tools, and both would fire.
-		// The tools set the selection mode they need themselves, so nothing there needs this.
-		condition: () => Modes.edit && Mesh.selected.length && Toolbox.selected.id != 'knife_tool' && Format.id != 'dew_scene',
+		// Its sub keybinds are the number keys, which the Block Painting tab gives to the tile tools, and both would
+		// fire (Modes.edit is true there too). The tools set the selection mode they need themselves.
+		condition: () => Modes.edit && !Modes.block && Mesh.selected.length && Toolbox.selected.id != 'knife_tool',
 		onChange({value}) {
 			if (value == 'cluster') value = 'face';
 			// Welding mode is vertex mode with weld-on-drop, so it shares vertex mode's selection handling
@@ -726,7 +726,7 @@ BARS.defineActions(function() {
 		cursor: 'pointer',
 		raycast_options: {turn_edges: true},
 		modes: ['edit'],
-		condition: () => Modes.edit && Format.meshes,
+		condition: () => Modes.edit && !Modes.block && Format.meshes,
 		keybind: new Keybind({key: '3', shift: true}),
 		onCanvasClick(data) {
 			if (!data || !data.intersects) return;

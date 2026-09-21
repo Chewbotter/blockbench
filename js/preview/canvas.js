@@ -261,9 +261,10 @@ export const Canvas = {
 		three_grid.name = 'grid_group'
 		gizmo_colors.grid.set(parseInt('0x'+CustomTheme.data.colors.grid.replace('#', ''), 16));
 
-		// Formats with their own grid (DEW Scene) replace the default one entirely
-		if (typeof Format.buildGrid == 'function') {
-			Format.buildGrid(three_grid);
+		// A mode or a format with its own grid (Block Painting) replaces the default one entirely
+		let custom_grid = modeOrFormat('buildGrid');
+		if (typeof custom_grid == 'function') {
+			custom_grid(three_grid);
 			scene.add(three_grid);
 			Canvas.side_grids = {x: new THREE.Object3D(), z: new THREE.Object3D()};
 			return;
@@ -691,8 +692,9 @@ export const Canvas = {
 			if (texture.render_sides == 'double') return THREE.DoubleSide;
 		}
 		if (settings.render_sides.value == 'auto') {
-			if (Format && Format.render_sides) {
-				let value = typeof Format.render_sides == 'function' ? Format.render_sides() : Format.render_sides;
+			let render_sides = modeOrFormat('render_sides');
+			if (render_sides) {
+				let value = typeof render_sides == 'function' ? render_sides() : render_sides;
 				if (value == 'front') return THREE.FrontSide;
 				if (value == 'double') return THREE.DoubleSide;
 				if (value == 'back') return THREE.BackSide;

@@ -3,7 +3,7 @@
 // readable by the tile tools: moves snap to the half cell (the format sets the edit size while a DEW scene is
 // open) and rotation is 90 degrees in place, so tiles stay axis aligned and on the grid.
 import { THREE } from "../lib/libs";
-import { DEW } from "./dew_scene";
+import { DEW, inBlockMode } from "./dew_scene";
 import { describeTile, tileUV, PLANE_AXES } from "./tile_brush";
 
 const GROUP = {
@@ -270,7 +270,7 @@ BARS.defineActions(function() {
 		description: 'Remove tiles of other elements that sit exactly where this element has tiles',
 		icon: 'layers_clear',
 		category: 'edit',
-		condition: () => Format.id == 'dew_scene',
+		condition: inBlockMode,
 		click(context) {
 			cullOverlappingFaces(context instanceof Mesh ? context : Mesh.selected[0]);
 		},
@@ -280,7 +280,7 @@ BARS.defineActions(function() {
 		description: 'Move the selected tiles into their own element, to select, duplicate, move or rotate as a unit',
 		icon: 'workspaces',
 		category: 'edit',
-		condition: () => Format.id == 'dew_scene' && Mesh.all.some(mesh => mesh.getSelectedFaces().length),
+		condition: () => inBlockMode() && Mesh.all.some(mesh => mesh.getSelectedFaces().length),
 		click: groupTiles,
 	});
 	new Action('dew_extrude_tiles', {
@@ -288,7 +288,7 @@ BARS.defineActions(function() {
 		description: 'Pull the selected tiles along the way they face, skinning the sides with tiles of the same size',
 		icon: 'open_in_full',
 		category: 'edit',
-		condition: () => Format.id == 'dew_scene' && Mesh.all.some(mesh => mesh.getSelectedFaces().length),
+		condition: () => inBlockMode() && Mesh.all.some(mesh => mesh.getSelectedFaces().length),
 		click() {
 			new Dialog({
 				id: 'dew_extrude_tiles',
@@ -312,7 +312,7 @@ BARS.defineActions(function() {
 		description: 'Turn the selected elements a quarter turn clockwise, in place and on the grid',
 		icon: 'rotate_right',
 		category: 'transform',
-		condition: () => Format.id == 'dew_scene' && Mesh.selected.length,
+		condition: () => inBlockMode() && Mesh.selected.length,
 		click: () => rotateGroup(true),
 	});
 	new Action('dew_rotate_group_ccw', {
@@ -320,7 +320,7 @@ BARS.defineActions(function() {
 		description: 'Turn the selected elements a quarter turn counterclockwise, in place and on the grid',
 		icon: 'rotate_left',
 		category: 'transform',
-		condition: () => Format.id == 'dew_scene' && Mesh.selected.length,
+		condition: () => inBlockMode() && Mesh.selected.length,
 		click: () => rotateGroup(false),
 	});
 });

@@ -121,6 +121,72 @@ export function frameCluster(preview = Preview.selected) {
 
 let hide_back_faces = true;
 
+// Block Painting: a tab beside Edit, Paint and Animate, available in any format with meshes. It holds the tile tools
+// and the Material Brush, their hotkeys (a tool's key only fires where its condition passes, so 1 to 6 pick tile
+// tools here and selection modes in Edit), and the viewport rules the DEW Scene format used to carry: back faces
+// culled, the game grid, the fabric snap and size limits (the last two are assigned in dew_material.js).
+// It counts as Edit for behaviour: Modes.edit stays true, so face highlighting, outlines, the gizmo, undo, delete
+// and duplicate all work as they do there. It does NOT count as Edit for items that name their tab
+// (condition {modes: ['edit']}): those are hidden and their keys dead here unless listed in BLOCK_MODE below.
+// A tool whose condition is a function over Modes.edit has to exclude this tab itself (inBlockMode).
+export const BLOCK_MODE = {
+	ID: 'block',
+	NAME: 'Block Painting',
+	ICON: 'grid_on',
+	DEFAULT_TOOL: 'dew_tile_brush',
+	// Stock bar items that name the Edit tab and are wanted here too: moving what was built, nudging, adding elements
+	ITEMS: ['move_tool', 'resize_tool', 'rotate_tool', 'move_up', 'move_down', 'move_left', 'move_right', 'move_forth', 'move_back', 'add_element', 'add_mesh'],
+	PANELS: ['outliner', 'uv', 'textures', 'element', 'transform'],
+	MENUS: ['mesh', 'uv'],
+};
+export const inBlockMode = () => Modes.id == BLOCK_MODE.ID;
+
+function allowInBlockMode(item) {
+	let modes = item && item.condition && item.condition.modes;
+	if (modes instanceof Array && !modes.includes(BLOCK_MODE.ID)) modes.push(BLOCK_MODE.ID);
+	// A tool's own list is what Tool.trigger walks to find a tab to switch to; usually the same array as the condition's
+	if (item && item.modes instanceof Array && !item.modes.includes(BLOCK_MODE.ID)) item.modes.push(BLOCK_MODE.ID);
+}
+
+BARS.defineActions(function() {
+	let mode = new Mode(BLOCK_MODE.ID, {
+		name: BLOCK_MODE.NAME,
+		icon: BLOCK_MODE.ICON,
+		default_tool: BLOCK_MODE.DEFAULT_TOOL,
+		category: 'navigate',
+		condition: () => !!(Format && Format.edit_mode && Format.meshes),
+		onSelect() {
+			Modes.edit = true;
+			// Panels and menus are made after the bar items, and there is no startup event to wait for. By the first
+			// time the tab is entered everything exists, and the items only matter while it is open. Idempotent.
+			BLOCK_MODE.ITEMS.forEach(id => allowInBlockMode(BarItems[id]));
+			BLOCK_MODE.PANELS.forEach(id => allowInBlockMode(Panels[id]));
+			BLOCK_MODE.MENUS.forEach(id => allowInBlockMode(MenuBar.menus[id]));
+			// The toggle keeps its value across sessions, the flag does not
+			if (BarItems.dew_hide_back_faces) hide_back_faces = BarItems.dew_hide_back_faces.value;
+			Canvas.backfaceUniforms.BACKFACE_TINT.value = DEW.BACKFACE_TINT;
+			Canvas.backfaceUniforms.BACKFACE_COLOR.value.set(DEW.BACKFACE_COLOR);
+		},
+		onUnselect() {
+			delete Modes.edit;	// the next tab sets its own flag, Edit included
+			Canvas.backfaceUniforms.BACKFACE_TINT.value = 0;
+			if (Undo) Undo.closeAmendEditMenu();
+		},
+	});
+	// Viewport hooks, read through modeOrFormat (js/modes.ts). Tiles are drawn only from the side they face, so a
+	// click, the gizmo and the tile tools all reach through a wall seen from behind: the raycaster honours
+	// material.side, so hidden also means unselectable. The export is not affected (export_render_sides).
+	Object.assign(mode, {
+		buildGrid: buildDewGrid,
+		render_sides: () => hide_back_faces ? 'front' : 'double',
+	});
+});
+// The grid belongs to the tab, so it is rebuilt on the way in and on the way out (render sides are refreshed by
+// Mode.select itself)
+Blockbench.on('select_mode', ({mode}) => {
+	if (mode.id == BLOCK_MODE.ID || Modes.previous_id == BLOCK_MODE.ID) Canvas.buildGrid();
+});
+
 new ModelFormat('dew_scene', {
 	name: 'DEW Scene',
 	description: 'Distant Early Warning cluster: game grid, tile brush, glTF export at scale 16',
@@ -143,26 +209,13 @@ new ModelFormat('dew_scene', {
 	animated_textures: true,
 	locators: true,
 	pbr: true,
-	buildGrid: buildDewGrid,	// Canvas.buildGrid uses this instead of the default grid
-	// Tiles are drawn only from the side they face, so a click, the gizmo and the tile tools all reach through
-	// a wall seen from behind. The raycaster honours material.side, so hidden also means unselectable.
-	render_sides: () => hide_back_faces ? 'front' : 'double',
-	export_render_sides: 'double',	// the glb stays double-sided: the handoff calls that correct
-	// Viewport only: the exporter never sees the shader tint
-	// Moves, nudges and UV drags step by a half cell here. canvasGridSize reads this instead of the user's
-	// edit_size setting, which the format used to write and put back on deactivation: a crash or a force-quit
-	// skipped the putting back and left every other project snapping by half cells.
-	edit_size: 16 / DEW.HALF_CELL,
-	onActivation() {
-		// The toggle keeps its value across sessions, the flag does not
-		if (BarItems.dew_hide_back_faces) hide_back_faces = BarItems.dew_hide_back_faces.value;
-		Canvas.backfaceUniforms.BACKFACE_TINT.value = DEW.BACKFACE_TINT;
-		Canvas.backfaceUniforms.BACKFACE_COLOR.value.set(DEW.BACKFACE_COLOR);
-	},
-	onDeactivation() {
-		Canvas.backfaceUniforms.BACKFACE_TINT.value = 0;
-	},
+	// The format is now only a preset: a generic project that opens in the Block Painting tab with the game's
+	// export options, a scale figure and a starter tile. The grid, culling, snap and size limits belong to the tab
+	// (BLOCK_MODE above), so they are there in any format and gone again in this one's Edit tab.
+	export_render_sides: 'double',	// the glb stays double-sided while the tab culls back faces: the handoff calls that correct
 	onSetup(project, new_model) {
+		// New or opened, a DEW scene starts in the tab it was built in
+		if (Modes.options[BLOCK_MODE.ID] && !inBlockMode()) Modes.options[BLOCK_MODE.ID].select();
 		if (!new_model) return;
 		// Stored per project, so the global export scale used by other projects stays untouched
 		project.export_options.gltf = {
@@ -186,7 +239,7 @@ BARS.defineActions(function() {
 		icon: 'accessibility_new',
 		category: 'view',
 		default: true,
-		condition: () => Format.id == 'dew_scene',
+		condition: inBlockMode,
 		onChange(value) {
 			let figures = Cube.all.filter(cube => cube.name == DEW.FIGURE_NAME);
 			if (!figures.length && value) {
@@ -206,7 +259,7 @@ BARS.defineActions(function() {
 		icon: 'flip_to_front',
 		category: 'view',
 		default: true,
-		condition: () => Format.id == 'dew_scene',
+		condition: inBlockMode,
 		onChange(value) {
 			hide_back_faces = value;
 			Canvas.updateRenderSides();
@@ -218,7 +271,7 @@ BARS.defineActions(function() {
 // mesh faces only while the selection mode is not object, elements otherwise, UV faces when that panel has
 // focus. So the key did different things depending on the tool, and tile selections could survive it.
 SharedActions.add('unselect_all', {
-	condition: () => Format.id == 'dew_scene',
+	condition: inBlockMode,
 	priority: 10,
 	run() {
 		Undo.initSelection();

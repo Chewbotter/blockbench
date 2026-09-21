@@ -806,6 +806,10 @@ addEventListeners(document, 'keydown mousedown', function(e) {
 		})
 		if (!used && !Dialog.open) {
 			for (let tool of Tool.all) {
+				// A key nothing else took switches to the tab of a tool bound to it and picks that tool, whatever the
+				// tool's own condition says. That is how 2 started dropping blocks in a generic model. A tool opts out
+				// with switch_mode_by_key: false, and its key then only works in its own tab (the Block Painting tools).
+				if (tool.switch_mode_by_key === false) continue;
 				if (tool.keybind && typeof tool.trigger === 'function' && tool.keybind.isTriggered(e)) {
 					if (tool.switchModeAndSelect(e)) break;
 				}

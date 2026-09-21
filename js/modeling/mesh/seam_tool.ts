@@ -7,7 +7,7 @@ BARS.defineActions(function() {
 		category: 'tools',
 		selectElements: true,
 		modes: ['edit'],
-		condition: () => Modes.edit && Mesh.hasAny(),
+		condition: () => Modes.edit && !Modes.block && Mesh.hasAny(),
 		onCanvasClick(data) {
 			if (!seam_timeout) {
 				seam_timeout = setTimeout(() => {
@@ -36,7 +36,7 @@ BARS.defineActions(function() {
 			divide: true,
 			join: true,
 		},
-		condition: () => Modes.edit && Mesh.hasAny(),
+		condition: () => Modes.edit && !Modes.block && Mesh.hasAny(),
 		onChange({value}) {
 			if (value == 'auto') value = null;
 			Undo.initEdit({elements: Mesh.selected});

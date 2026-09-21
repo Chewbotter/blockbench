@@ -284,7 +284,7 @@ BARS.defineActions(function() {
 		cursor: 'pointer',
 		raycast_options: {turn_edges: true},
 		modes: ['edit'],
-		condition: () => Modes.edit && Format.meshes,
+		condition: () => Modes.edit && !Modes.block && Format.meshes,
 		onCanvasClick(data) {
 			if (!data?.event) return;
 			let preview = Preview.selected;
