@@ -60,9 +60,9 @@ console.log('E. plain click on nothing:', await ev(sel), ' expect 0 faces');
 	for (let i = 0; i < 2; i++) { await mouse('mouseMoved', a, { button: 'none', modifiers: 2 }); await sleep(60); }
 	await mouse('mousePressed', a, { buttons: 1, modifiers: 2 }); await sleep(60);
 	for (let i = 1; i <= 8; i++) { await mouse('mouseMoved', [a[0] + (b[0] - a[0]) * i / 8, a[1] + (b[1] - a[1]) * i / 8], { buttons: 1, modifiers: 2 }); await sleep(40); }
-	const mid = await ev(`new Promise(done => Vue.nextTick(() => done(JSON.stringify({rect_active: !!Preview.selected.sr_move_f, faces_selected: Mesh.all[0].getSelectedFaces().length, uv_faces_drawn: document.querySelectorAll('#uv_frame .mesh_uv_face').length}))))`);
+	const mid = await ev(`new Promise(done => Vue.nextTick(() => done(JSON.stringify({rect_active: !!Preview.selected.selection.sr_move_f, faces_selected: Mesh.all[0].getSelectedFaces().length, uv_faces_drawn: document.querySelectorAll('#uv_frame .mesh_uv_face').length}))))`);
 	await mouse('mouseReleased', b, { modifiers: 2 }); await sleep(400);
-	const after = await ev(`new Promise(done => Vue.nextTick(() => requestAnimationFrame(() => done(JSON.stringify({rect_active: !!Preview.selected.sr_move_f, faces_selected: Mesh.all[0].getSelectedFaces().length, uv_draws_again: document.querySelectorAll('#uv_frame .mesh_uv_face').length > 0, vertices_unique: new Set(Mesh.all[0].getSelectedVertices()).size == Mesh.all[0].getSelectedVertices().length})))))`);
+	const after = await ev(`new Promise(done => Vue.nextTick(() => requestAnimationFrame(() => done(JSON.stringify({rect_active: !!Preview.selected.selection.sr_move_f, faces_selected: Mesh.all[0].getSelectedFaces().length, uv_draws_again: document.querySelectorAll('#uv_frame .mesh_uv_face').length > 0, vertices_unique: new Set(Mesh.all[0].getSelectedVertices()).size == Mesh.all[0].getSelectedVertices().length})))))`);
 	console.log('F. ctrl box mid-drag:', mid, ' expect rect_active true, faces selected, uv_faces_drawn 0');
 	console.log('   on release:', after, ' expect rect_active false, the same faces, uv_draws_again true (how many depends on the display_uv setting), vertices_unique true');
 }

@@ -39,6 +39,8 @@ console.log('   expect 4 faces facing up, 160,160 to 192,192 on y 0, nothing sel
 console.log('   a generic model has none:', await ev(`(() => { newProject(Formats.free); return Mesh.all.length; })()`), ' expect 0');
 
 console.log('C. 16-unit cube export:', await ev(`(async () => {
+	// Back in a DEW scene: the generic project opened just above has no binary encoding set, and compile returns a string
+	newProject(Formats.dew_scene); Mesh.all.slice().forEach(m => m.remove());
 	let m = new Mesh({name: 'cube16', vertices: {}});
 	let P = [[0,0,0],[16,0,0],[16,16,0],[0,16,0],[0,0,16],[16,0,16],[16,16,16],[0,16,16]]; let k = P.map(p => m.addVertices(p)[0]);
 	[[k[0],k[1],k[5],k[4]], [k[3],k[7],k[6],k[2]], [k[0],k[3],k[2],k[1]], [k[4],k[5],k[6],k[7]], [k[0],k[4],k[7],k[3]], [k[1],k[2],k[6],k[5]]].forEach(q => m.addFaces(new MeshFace(m, {vertices: q})));

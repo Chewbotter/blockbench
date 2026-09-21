@@ -1987,7 +1987,7 @@ export class Preview {
 			this.startSelRect(event);
 			// Shift + left drag over nothing is also the camera zoom in the default keymap, and the controls only stand
 			// down when the pointer is over geometry. Park them for the length of the rectangle.
-			if (this.sr_stop_f) {
+			if (this.selection.sr_stop_f) {
 				let controls = this.controls, was_enabled = controls.enabled;
 				controls.enabled = false;
 				let restore = () => { controls.enabled = was_enabled; removeEventListeners(document, 'mouseup touchend', restore); };

@@ -189,7 +189,9 @@ function colorAttribute(geometry, count) {
 	return attribute;
 }
 controller.updateSelection = function(element) {
-	if (Toolbox.selected && Toolbox.selected.id === 'seam_tool') return stockUpdateSelection.call(this, element);
+	if (Toolbox.selected && (Toolbox.selected.id === 'seam_tool' || Toolbox.selected.id === 'weight_brush')) return stockUpdateSelection.call(this, element);
+	// 5.2: an unselected mesh gets no colours, only the constant outline material, which the stock path does cheaply
+	if (!element.selected) return stockUpdateSelection.call(this, element);
 	NodePreviewController.prototype.updateSelection.call(this, element);
 	let mesh = element.mesh;
 	let white = new THREE.Color(0xffffff);
@@ -239,8 +241,9 @@ controller.updateSelection = function(element) {
 	}
 	attribute.needsUpdate = true;
 	mesh.outline.geometry.needsUpdate = true;
+	mesh.outline.material = Canvas.meshOutlineMaterial;	// 5.2 swaps it for the constant outline while unselected
 
-	mesh.vertex_points.visible = ((Mode.selected.id == 'edit' && Mesh.isVertexSelectionMode()) || Toolbox.selected.id == 'knife_tool') && element.selected;
+	mesh.vertex_points.visible =((Mode.selected.id == 'edit' && Mesh.isVertexSelectionMode()) || Toolbox.selected.id == 'knife_tool') && element.selected;
 	if (Toolbox.selected.id == 'weight_brush') mesh.vertex_points.visible = true;
 	if (mesh.turn_edges) {
 		mesh.turn_edges.visible = Mode.selected.id == 'edit' && !!Toolbox.selected.raycast_options?.turn_edges && element.selected;

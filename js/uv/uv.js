@@ -747,7 +747,7 @@ export const UVEditor = {
 		// While a selection rectangle or paint select is running, the selection changes on every mouse move and the
 		// slider refresh in displayTools recomputes uv extents over every selected face each time (170 ms a move on a
 		// 4k face mesh). The release handlers in the preview call loadData once when the drag ends.
-		if (UVEditor.defer_during_area_select && Preview.selected && (Preview.selected.sr_move_f || Preview.selected.paint_move_f)) return this;
+		if (UVEditor.defer_during_area_select && Preview.selected && (Preview.selected.selection.sr_move_f || Preview.selected.paint_move_f)) return this;
 		this.vue.updateTexture();
 		this.displayTools();
 		//this.displayTools();
@@ -4276,7 +4276,7 @@ Interface.definePanels(function() {
 					// A selection rectangle in progress changes the face selection on every mouse move, and redrawing the
 					// selected faces here each time was most of the stall (about 120 ms a move at 1200 faces). The panel
 					// goes blank for the drag and redraws on release.
-					if (UVEditor.defer_during_area_select && Preview.selected && (Preview.selected.sr_move_f || Preview.selected.paint_move_f)) return [];
+					if (UVEditor.defer_during_area_select && Preview.selected && (Preview.selected.selection.sr_move_f || Preview.selected.paint_move_f)) return [];
 					if (this.mode == 'uv' || this.uv_overlay) {
 						if (this.display_uv === 'texture_group') return this.getTextureGroupElements();
 						return (this.display_uv === 'all_elements' || this.mode == 'paint')
