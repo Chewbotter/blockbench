@@ -133,7 +133,7 @@ export const BLOCK_MODE = {
 	ID: 'block',
 	NAME: 'Block Painting',
 	ICON: 'grid_on',
-	DEFAULT_TOOL: 'dew_tile_brush',
+	DEFAULT_TOOL: 'dew_whole_block',	// what the tab opens on the first time in a session (user: whole blocks); after that it remembers
 	// Stock bar items that name the Edit tab and are wanted here too: moving what was built, nudging, adding elements
 	ITEMS: ['move_tool', 'resize_tool', 'rotate_tool', 'move_up', 'move_down', 'move_left', 'move_right', 'move_forth', 'move_back', 'add_element', 'add_mesh'],
 	PANELS: ['outliner', 'uv', 'textures', 'element', 'transform'],
@@ -179,6 +179,9 @@ BARS.defineActions(function() {
 	Object.assign(mode, {
 		buildGrid: buildDewGrid,
 		render_sides: () => hide_back_faces ? 'front' : 'double',
+		// An export made from inside the tab would otherwise copy the culled viewport material into a single-sided
+		// glb; the handoff lists double-sided faces among the things the export got right (js/lib/GLTFExporter.js)
+		export_render_sides: 'double',
 	});
 });
 // The grid belongs to the tab, so it is rebuilt on the way in and on the way out (render sides are refreshed by
@@ -193,6 +196,11 @@ new ModelFormat('dew_scene', {
 	icon: 'grid_on',
 	category: 'general',
 	target: ['Distant Early Warning'],
+	// Retired as a way to start (user, 2026-09-20): environments are built in the Block Painting tab of a generic
+	// model. The format stays registered so the rooms already saved as dew_scene keep opening, in the tab.
+	show_on_start_screen: false,
+	show_in_new_list: false,
+	can_convert_to: false,
 	meshes: true,
 	billboards: true,
 	armature_rig: true,

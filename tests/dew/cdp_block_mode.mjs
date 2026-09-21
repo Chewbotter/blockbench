@@ -58,7 +58,7 @@ check('   a format without meshes does not offer the tab', await ev(`!Condition(
 // A tab remembers its tool for the whole session, so a reused app would come in on whatever the last run left
 await ev(`(() => { let free = ModelProject.all.find(p => p.format.id == 'free'); free.select(); BarItems.move_tool.select(); delete Modes.options.block.tool; Modes.options.block.select(); })()`);
 let inside = await json(state);
-check('B. the tab counts as Edit for behaviour and opens on the Tile Brush', inside.mode == 'block' && inside.edit && inside.block && inside.tool == 'dew_tile_brush', inside);
+check('B. the tab counts as Edit for behaviour and opens on Whole Block', inside.mode == 'block' && inside.edit && inside.block && inside.tool == 'dew_whole_block', inside);
 let block_shown = await json(shown);
 check('   its toolbar is move, resize, rotate and the nine tools, nothing else', JSON.stringify(block_shown.slice().sort()) == JSON.stringify(['move_tool', 'resize_tool', 'rotate_tool', ...BLOCK_TOOLS].sort()), block_shown);
 let leaks = await json(`JSON.stringify(${JSON.stringify(EDIT_ONLY)}.filter(id => BarItems[id] && Condition(BarItems[id].condition)))`);
@@ -97,6 +97,12 @@ let material = await json(`(async () => { let list = DEWMaterial.getMaterials();
 	return JSON.stringify({manifest: true, name, tagged: c.game && c.game[keys.material], atlas: !!DEWMaterial.getAtlas(false), brush: Condition(BarItems.dew_material_brush.condition), apply: Condition(BarItems.dew_apply_material?.condition ?? true)}); })()`);
 if (material.manifest) check('   a material from the game manifest applies to it, brush and panel on hand', material.tagged == material.name && material.atlas && material.brush, material);
 else console.log('SKIP  the game manifest is not readable on this machine');
+let glb = await json(`(async () => { let buf = await Codecs.gltf.compile({encoding: 'binary', animations: false});
+	let length = new DataView(buf).getUint32(12, true);
+	let gltf = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, length)));
+	BarItems.view_mode.set('textured'); BarItems.view_mode.onChange();
+	return JSON.stringify({mode: Modes.id, format: Format.id, culled: Canvas.getRenderSide() == THREE.FrontSide, double_sided: (gltf.materials || []).map(m => !!m.doubleSided)}); })()`);
+check('   a glb exported from inside the tab of a generic model stays double-sided', glb.mode == 'block' && glb.format == 'free' && glb.culled && glb.double_sided.length > 0 && glb.double_sided.every(Boolean), glb);
 
 // E. out to Edit: the rules go with the tab, and each tab keeps its own tool
 await press('2');
@@ -119,6 +125,15 @@ let dew = await json(`(() => { newProject(Formats.dew_scene); return JSON.string
 check('F. a new DEW scene opens in the tab', dew.mode == 'block' && dew.figure && dew.tiles == 1 && dew.export_scale == 16 && dew.front, dew);
 await ev(`Modes.options.edit.select()`);
 check('   and its Edit tab is plain Edit', (await json(view)).front === false);
+// The format is retired as a way to start, and the rooms saved with it still open, in the tab
+let retired = await json(`(() => { let format = Formats.dew_scene;
+	let model = JSON.parse(Codecs.project.compile());
+	let listed = [...document.querySelectorAll('#start_screen .format_entry, #start_screen li')].some(node => /DEW Scene/.test(node.textContent));
+	setupProject(Formats[model.meta.model_format]); Codecs.project.parse(model, '');
+	return JSON.stringify({start: format.show_on_start_screen, new_list: format.show_in_new_list, convert: format.can_convert_to, listed,
+		saved_as: model.meta.model_format, reopened_format: Format.id, reopened_mode: Modes.id, figure: Cube.all.some(c => c.name == DEW.FIGURE_NAME), tiles: Mesh.all.length}); })()`);
+check('   the format is off the start screen, the New list and Convert, and a saved DEW scene still opens in the tab',
+	retired.start === false && retired.new_list === false && retired.convert === false && !retired.listed && retired.saved_as == 'dew_scene' && retired.reopened_format == 'dew_scene' && retired.reopened_mode == 'block' && retired.figure && retired.tiles == 1, retired);
 // G. switching project tabs carries nothing over: the generic project is where it was left, in Paint
 await ev(`(() => { ModelProject.all.find(p => p.format.id == 'free').select(); })()`);
 let back = await json(state);
