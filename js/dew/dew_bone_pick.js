@@ -2,7 +2,8 @@
 // cannot be posed and only answers with a warning. So while animating, a press takes the bone NEAREST the pointer on
 // screen, through whatever is in front of it (bones are drawn over everything anyway), and a near miss still takes it.
 // The mesh is still there to be selected: click where no bone is near. Preview.raycast asks nearestBone first
-// (js/preview/preview.ts), so hover highlighting follows the same rule as the click.
+// (js/preview/preview.ts), so hover highlighting follows the same rule as the click. One thing beats a bone there: a
+// null object (an IK handle) on the ray, since it sits on the bone it drives and would otherwise never be clickable.
 import { THREE } from "../lib/libs";
 
 export const BONE_PICK = {

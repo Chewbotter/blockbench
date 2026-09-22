@@ -622,10 +622,14 @@ export class Preview {
 			})
 		}
 		let intersects = this.raycaster.intersectObjects(objects, false);
-		// Animate mode: the bone nearest the pointer wins over a mesh in front of it, and a near miss still takes it
-		// (js/dew/dew_bone_pick.js). A keyframe handle on the motion trail keeps its turn.
+		// Animate mode: a null object (IK handle) anywhere on the ray wins, then the bone nearest the pointer, over a mesh
+		// in front of either, and a near miss still takes the bone (js/dew/dew_bone_pick.js). A keyframe handle on the
+		// motion trail keeps its turn.
 		// @ts-expect-error
 		if (Modes.animate && typeof DEWBonePick != 'undefined' && !intersects.some(hit => hit.object.isKeyframe)) {
+			let null_hit = intersects.find(hit => hit.object.isElement && hit.object.type == 'null_object');
+			let null_object = null_hit && OutlinerNode.uuids[null_hit.object.name] as OutlinerElement;
+			if (null_object && !null_object.locked) return {type: 'element', event, intersects, face: undefined, element: null_object};
 			// @ts-expect-error
 			let bone = DEWBonePick.nearestBone(this, event) as OutlinerElement;
 			if (bone) return {type: 'element', event, intersects, face: undefined, element: bone};

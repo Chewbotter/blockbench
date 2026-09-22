@@ -59,6 +59,14 @@ await click([armMid[0] + 12, armMid[1] - 12]);
 check('B. a near miss still takes the nearest bone', JSON.stringify(await selected()) == '["arm"]', await selected());
 await click(joint);
 check('C. at a joint the bone that STARTS there wins over the one that ends there and over a zero-length helper', JSON.stringify(await selected()) == '["arm"]', await selected());
+// An IK handle sits ON the bone it drives (and here behind the skin): a click on it must take the handle, not the bone
+await ev(`(() => { let n = new NullObject({name: 'ik', position: boneMid(rig.arm, 0.5)}).init(); window.rig.ik = n; unselectAllElements(); updateSelection(); Preview.selected.render(); return true; })()`);
+await sleep(200);
+await click(armMid);
+check('F. a null object on the bone (and behind the skin) beats the bone under the pointer', JSON.stringify(await selected()) == '["ik"]', await selected());
+await click(rootMid);
+check('   the other bone is still picked where the null object is not on the ray', JSON.stringify(await selected()) == '["root"]', await selected());
+await ev(`(() => { rig.ik.remove(); unselectAllElements(); rig.arm.select(); updateSelection(); return true; })()`);	// back to the state check C left: the arm selected
 await click(far);
 let with_feature = await selected();
 // Control: the same click with the feature off, from the same starting selection, is what stock does
