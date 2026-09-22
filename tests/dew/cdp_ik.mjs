@@ -111,6 +111,15 @@ let f2 = await json(`(() => { let kf = rig.anim.getBoneAnimator(rig.handle).posi
 check('   and the chain follows the handle there', Math.hypot(f2.wrist[0] - f2.target[0], f2.wrist[1] - f2.target[1], f2.wrist[2] - f2.target[2]) < 0.01, f2);
 }
 
+// G. the motion trail's keyframe marker on the hand sits where IK put the hand (the handle still holds F's position key)
+let g = await json(`(() => { key(rig.hand, 'rotation', [20, 0, 0]); BarItems.rotate_tool.select(); unselectAllElements(); rig.hand.select(); updateSelection(); Animator.preview(); Animator.showMotionTrail(); scene.updateMatrixWorld(true);
+	let hand = rig.hand.scene_object.getWorldPosition(new THREE.Vector3());
+	let marker = Animator.motion_trail.children.find(o => o.isKeyframe && o.geometry.attributes.position.count > 0);
+	let at = marker && marker.localToWorld(new THREE.Vector3().fromBufferAttribute(marker.geometry.attributes.position, 0));
+	let rest = new THREE.Vector3().fromArray(rig.wrist);
+	return JSON.stringify({marker_off_hand: at ? +at.distanceTo(hand).toFixed(4) : null, hand_off_rest: +hand.distanceTo(rest).toFixed(3)}); })()`);
+check('G. the motion trail marker of the hand sits where IK put it, not where its own keys would', g.marker_off_hand !== null && g.marker_off_hand < 0.01 && g.hand_off_rest > 1, g);
+
 await sleep(200);
 check('no exception was thrown on the page', errors.length == 0, errors);
 console.log(`all ${passed} passed`);

@@ -184,6 +184,18 @@ export const Animator = {
 					ba.displayFrame(multiplier);
 				}
 			})
+			// Fork: the IK solve as well, so a marker lands where the handles put the bone, not where its own keys alone would.
+			// Handles and poles sit outside the bone's ancestry, so they are displayed here first.
+			NullObject.all.forEach(node => {
+				if (bone_stack.includes(node)) return;
+				let mesh = node.mesh;
+				if (mesh.fix_rotation) mesh.rotation.copy(mesh.fix_rotation);
+				if (mesh.fix_position) mesh.position.copy(mesh.fix_position);
+				animation.getBoneAnimator(node)?.displayFrame(multiplier);
+			})
+			NullObject.all.forEach(node => {
+				if (node.ik_target) animation.getBoneAnimator(node)?.displayIK();
+			})
 			target.mesh.updateWorldMatrix(true, false)
 		}
 
