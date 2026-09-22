@@ -45,9 +45,16 @@ new TransformerModule('animation', {
 		}
 		return true;
 	},
+	calculateSecondOffset(context) {
+		// Plane handles (XY, YZ, XZ) carry a second axis; the Edit module has the same
+		let {point, second_axis, event} = context;
+		if (Toolbox.selected.id !== 'move_tool' || !second_axis) return null;
+		let snap = canvasGridSize(event.shiftKey || Pressing.overrides.shift, event.ctrlOrCmd || Pressing.overrides.ctrl);
+		return Math.round(point[second_axis] / snap) * snap;
+	},
 	calculateOffset(context) {
 		let {point, axis, angle} = context;
-		
+
 		if (!Animation.selected) {
 			Blockbench.showQuickMessage('message.no_animation_selected')
 		}
@@ -144,6 +151,7 @@ new TransformerModule('animation', {
 
 			let offset_vec = new THREE.Vector3();
 			offset_vec[axis] = difference;
+			if (context.second_axis) offset_vec[context.second_axis] = context.second_value - (this.previous_second_value || 0);
 
 			var rotation = new THREE.Quaternion();
 			mesh.parent.getWorldQuaternion(rotation);
@@ -157,6 +165,7 @@ new TransformerModule('animation', {
 
 			let offset_vec = new THREE.Vector3();
 			offset_vec[axis] = difference;
+			if (context.second_axis) offset_vec[context.second_axis] = context.second_value - (this.previous_second_value || 0);
 			offset_vec.applyQuaternion(mesh.quaternion);
 
 			transform_keyframes[0].offset('x', offset_vec.x);

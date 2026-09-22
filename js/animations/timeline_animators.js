@@ -971,11 +971,17 @@ export class NullObjectAnimator extends BoneAnimator {
 			}
 		}
 
-		if (target_original_quaternion) {
+		// The handle's own rotation (fork: keyed with the rotate tool in Animate) turns the target in WORLD space, on top of
+		// the solved or locked orientation, so a hand or foot can be aimed from the handle
+		let handle_euler = null_object.mesh.rotation;
+		let handle_turned = (target instanceof Group || target instanceof ArmatureBone) && (handle_euler.x || handle_euler.y || handle_euler.z);
+		if (target_original_quaternion || handle_turned) {
 			let rotation = get_samples ? new THREE.Euler() : Reusable.euler1;
 			rotation.copy(target.mesh.fix_rotation || target.mesh.rotation);	// the bake wants the rotation from rest, not from the keyed pose
 
-			target.mesh.quaternion.copy(target_original_quaternion);
+			let world_q = target_original_quaternion || target.mesh.getWorldQuaternion(new THREE.Quaternion());
+			if (handle_turned) world_q.premultiply(new THREE.Quaternion().setFromEuler(handle_euler));
+			target.mesh.quaternion.copy(world_q);
 			let q1 = target.mesh.parent.getWorldQuaternion(Reusable.quat1);
 			target.mesh.quaternion.premultiply(q1.invert())
 			target.mesh.updateMatrixWorld();
@@ -1007,11 +1013,25 @@ export class NullObjectAnimator extends BoneAnimator {
 			// displayIK needs to be called separately.
 			// This is so null object positions get updated before IK so they can be used as pole
 		}
+		if (!this.muted.rotation) {
+			this.displayRotation(this.interpolate('rotation'), multiplier);
+		}
+	}
+	displayRotation(arr, multiplier = 1) {
+		// Kept on the sprite (which draws the same at any rotation) and read by displayIK as a world-space turn of the target
+		let mesh = this.element.mesh;
+		if (arr) {
+			mesh.rotation.x += Math.degToRad(arr[0]) * multiplier;
+			mesh.rotation.y += Math.degToRad(arr[1]) * multiplier;
+			mesh.rotation.z += Math.degToRad(arr[2]) * multiplier;
+		}
+		return this;
 	}
 }
 NullObjectAnimator.prototype.type = 'null_object';
 NullObjectAnimator.prototype.channels = {
 	position: { name: tl('timeline.position'), mutable: true, transform: true, max_data_points: 2 },
+	rotation: { name: tl('timeline.rotation'), mutable: true, transform: true, max_data_points: 2 },	// fork: turns the IK target bone
 }
 NullObject.animator = NullObjectAnimator;
 

@@ -75,6 +75,7 @@ export class NullObject extends OutlinerElement {
 	}
 	static behavior = {
 		movable: true,
+		rotatable: true,	// an IK handle's rotation turns the bone it drives (fork)
 		hide_in_screenshot: true,
 	}
 }
@@ -117,6 +118,7 @@ export class NullObject extends OutlinerElement {
 	
 	new Property(NullObject, 'string', 'name', {default: 'null_object'})
 	new Property(NullObject, 'vector', 'position')
+	new Property(NullObject, 'vector', 'rotation')	// fork: world-space turn applied to the IK target bone, keyed in Animate
 	new Property(NullObject, 'string', 'ik_target', {
 		condition: () => Format.animation_mode,
 		inputs: {
@@ -228,6 +230,7 @@ new NodePreviewController(NullObject, {
 		mesh.visible = element.visibility;
 		mesh.rotation.order = Format.euler_order;
 		element.mesh.fix_position = new THREE.Vector3();
+		element.mesh.fix_rotation = new THREE.Euler();	// reset by showDefaultPose like a bone's, so a rotation key does not accumulate
 		this.updateTransform(element);
 
 		this.dispatchEvent('setup', {element});
@@ -237,6 +240,7 @@ new NodePreviewController(NullObject, {
 		NodePreviewController.prototype.updateTransform.call(this, element);
 
 		element.mesh.fix_position.copy(element.mesh.position);
+		if (element.mesh.fix_rotation) element.mesh.fix_rotation.copy(element.mesh.rotation);
 
 		this.updateWindowSize(element);
 
