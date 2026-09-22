@@ -185,6 +185,8 @@ new TransformerModule('animation', {
 				transform_keyframes[0].uniform = false;	
 			}
 			transform_keyframes[0].offset(axis, difference);
+			// Parent space, the default: a plane handle's second axis goes straight onto the key too
+			if (tool_id === 'move_tool' && context.second_axis) transform_keyframes[0].offset(context.second_axis, context.second_value - (this.previous_second_value || 0));
 		}
 		if (Keyframe.selected[0] != transform_keyframes[0] || Keyframe.selected.length > 1) {
 			transform_keyframes[0].select();

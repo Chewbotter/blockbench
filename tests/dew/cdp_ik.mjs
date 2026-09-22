@@ -86,8 +86,11 @@ check('E. a rotation key of 30 about Z on the handle turns the hand by exactly t
 let e2 = await json(`(() => { key(rig.handle, 'rotation', [0, 0, 30]); let one = pose(); let two = pose(); key(rig.handle, 'rotation', null); return JSON.stringify(poseDiff(one, two)); })()`);
 check('   and showing the frame twice gives the same pose (the rotation does not accumulate)', e2.angle < 0.001, e2);
 
-// F. a real drag on the XY plane handle of the move gizmo moves the handle on both axes
-await ev(`(() => { BarItems.move_tool.select(); BarItems.transform_space.set('global'); unselectAllElements(); rig.handle.select(); updateSelection(); Preview.selected.render(); return true; })()`);
+// F. a real drag on the XY plane handle of the move gizmo moves the handle on both axes, in Parent space (the default,
+// which the user had) and in Global
+for (let space of ['parent', 'global']) {
+console.log('   transform space:', space);
+await ev(`(() => { BarItems.move_tool.select(); BarItems.transform_space.set('${space}'); unselectAllElements(); rig.handle.select(); updateSelection(); key(rig.handle, 'position', null); Preview.selected.render(); return true; })()`);
 await sleep(300);
 const centre = await json(`(() => { let p = Preview.selected, r = p.canvas.getBoundingClientRect(), v = Transformer.position.clone().add(scene.position).project(p.camera);
 	return JSON.stringify({x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height, size: Transformer.size}); })()`);
@@ -106,6 +109,7 @@ let f = await json(`(() => { let an = rig.anim.getBoneAnimator(rig.handle); let 
 check('F2. the drag wrote one position key with BOTH x and y changed and z untouched', f.keys == 1 && Math.abs(f.x) > 1 && Math.abs(f.y) > 1 && Math.abs(f.z) < 0.001, f);
 let f2 = await json(`(() => { let kf = rig.anim.getBoneAnimator(rig.handle).position[0]; let p = pose(); return JSON.stringify({wrist: p['hand'].p.map(v => +v.toFixed(3)), target: [rig.wrist[0] + kf.calc('x'), rig.wrist[1] + kf.calc('y'), rig.wrist[2] + kf.calc('z')].map(v => +v.toFixed(3))}); })()`);
 check('   and the chain follows the handle there', Math.hypot(f2.wrist[0] - f2.target[0], f2.wrist[1] - f2.target[1], f2.wrist[2] - f2.target[2]) < 0.01, f2);
+}
 
 await sleep(200);
 check('no exception was thrown on the page', errors.length == 0, errors);
