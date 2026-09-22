@@ -886,9 +886,21 @@ export class NullObjectAnimator extends BoneAnimator {
 		if (!bones.length) return;
 		bones.reverse();
 
-		bones.forEach(bone => {
-			let scene_object = bone.scene_object; 
-			if (scene_object.fix_rotation) scene_object.rotation.copy(scene_object.fix_rotation);
+		// The solved bones start from rest; the target bone at the tip is not solved and keeps its own keyed rotation,
+		// so a keyed hand or foot still reads (Lock IK Target Rotation puts its world rotation back below)
+		// Each solved bone's keyed TWIST about its own axis (+Y) is kept and put back after the swing, so a pose that
+		// already reaches the target comes back exactly, roll included, and a keyed forearm roll survives a drag.
+		let twists = new Map();
+		bones.forEach((bone, i) => {
+			if (i == bones.length - 1) return;
+			let scene_object = bone.scene_object;
+			if (scene_object.fix_rotation) {
+				let q_rest = new THREE.Quaternion().setFromEuler(scene_object.fix_rotation);
+				let q_rel = q_rest.clone().invert().multiply(scene_object.quaternion);
+				let twist = new THREE.Quaternion(0, q_rel.y, 0, q_rel.w);
+				if (twist.lengthSq() > 1e-12) twists.set(bone.uuid, {twist: twist.normalize(), q_rest});
+				scene_object.rotation.copy(scene_object.fix_rotation);
+			}
 		});
 
 		let bone_pos = [];
@@ -900,11 +912,16 @@ export class NullObjectAnimator extends BoneAnimator {
 
 			if (i != bones.length - 1) {
 				let last_diff = bones[i + 1].mesh.getWorldPosition(new THREE.Vector3());
-				scene_object.parent.worldToLocal(last_diff).sub(scene_object.position).normalize();
+				scene_object.parent.worldToLocal(last_diff).sub(scene_object.position);
+				// A zero-length bone (the rest-pose helpers of an imported rig) has no direction to solve: normalising its
+				// zero vector gave numerical noise and an arbitrary rotation. It keeps its rotation; its child takes the bend.
+				let zero_length = last_diff.lengthSq() < 1e-8;
+				last_diff.normalize();
 
 				bone_references.push({
 					bone,
 					last_diff,
+					zero_length,
 				});
 			}
 		});
@@ -919,7 +936,8 @@ export class NullObjectAnimator extends BoneAnimator {
 		let results = {};
 		for (let i = 0; i < bone_references.length; i++) {
 			let bone_ref = bone_references[i];
-			let scene_object = bone_ref.bone.scene_object; 
+			if (bone_ref.zero_length) continue;
+			let scene_object = bone_ref.bone.scene_object;
 
 			let end = bone_pos[i + 1];
 			scene_object.parent
@@ -933,6 +951,11 @@ export class NullObjectAnimator extends BoneAnimator {
 			);
 
 			scene_object.applyQuaternion(Reusable.quat1);
+			let kept = twists.get(bone_ref.bone.uuid);
+			if (kept) {
+				scene_object.quaternion.multiply(kept.twist);	// about the bone's own axis, so the direction just solved is unchanged
+				Reusable.quat1.copy(scene_object.quaternion).multiply(kept.q_rest.clone().invert());	// the sample stays the change from rest
+			}
 			scene_object.updateMatrixWorld();
 
 			if (get_samples) {
@@ -950,7 +973,7 @@ export class NullObjectAnimator extends BoneAnimator {
 
 		if (target_original_quaternion) {
 			let rotation = get_samples ? new THREE.Euler() : Reusable.euler1;
-			rotation.copy(target.mesh.rotation);
+			rotation.copy(target.mesh.fix_rotation || target.mesh.rotation);	// the bake wants the rotation from rest, not from the keyed pose
 
 			target.mesh.quaternion.copy(target_original_quaternion);
 			let q1 = target.mesh.parent.getWorldQuaternion(Reusable.quat1);

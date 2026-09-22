@@ -4,6 +4,7 @@
  */
 
 const quat1 = new THREE.Quaternion();
+const STRAIGHT_TOLERANCE = 1e-4;	// of the chain's length: a target this close to full reach is solved as a straight line
 
 /**
  * Solves the given chain of bones using fabrik solver to reach the target location, with an optional pole vector.
@@ -20,13 +21,16 @@ export function fabrikIter(bones: THREE.Vector3[], target: THREE.Vector3, pole?:
     });
     let total_length = distances.reduce((a, b) => a + b, 0);
     let dist = bones[0].distanceTo(target);
+    // At full extension the iteration below only approaches the straight line (100 passes left a 0.34 sag on a 13.7 arm,
+    // which the pole then swung sideways), so a target at or just inside the reach takes the exact straight solution
+    let straight = dist >= total_length * (1 - STRAIGHT_TOLERANCE);
 
-    if (dist > total_length) {
+    if (straight) {
         // Target unreachable: stretch straight toward target
         for (let i = 0; i < n - 1; i++) {
             let pos = bones[i];
             let r = pos.distanceTo(target);
-            let lambda = distances[i] / r;
+            let lambda = distances[i] / (r || 0.0001);	// a joint already on the target (a zero-length bone at the tip) gave 0 / 0
             bones[i + 1].copy(
                 bones[i].clone().multiplyScalar(1 - lambda).add(target.clone().multiplyScalar(lambda))
             );
@@ -67,7 +71,7 @@ export function fabrikIter(bones: THREE.Vector3[], target: THREE.Vector3, pole?:
 
     // --- Pole Vector Alignment (Applied Post-Solve) ---
     // Only applies to chains with intermediate joints (n > 2) and need to bend to reach the target (dist < total_length)
-    if (pole && n > 2 && dist < total_length) {
+    if (pole && n > 2 && !straight) {
         let root = bones[0];
         let tip = bones[n - 1];
 
