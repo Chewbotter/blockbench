@@ -83,7 +83,6 @@ BARS.defineActions(() => {
 							vertex_normals: [],
 						}
 						args.forEach((triplet, i) => {
-							if (i >= 4) return;
 							let [v, vt, vn] = triplet.split('/').map(v => parseInt(v));
 							if (!vertex_keys[ v-1 ]) {
 								vertex_keys[ v-1 ] = mesh.addVertices(vertices[v-1])[0];
@@ -92,7 +91,7 @@ BARS.defineActions(() => {
 							f.vertex_textures.push(vertex_textures[ vt-1 ]);
 							f.vertex_normals.push(vertex_normals[ vn-1 ]);
 						})
-						
+
 						let uv = {};
 						f.vertex_textures.forEach((vt, i) => {
 							let key = f.vertices[i];
@@ -105,20 +104,37 @@ BARS.defineActions(() => {
 								uv[key] = [0, 0];
 							}
 						})
-						let face = new MeshFace(mesh, {
-							vertices: f.vertices,
-							uv,
-							texture: current_texture
-						})
-						mesh.addFaces(face);
+						// A face with more than four corners (an n-gon, which Blender exports as one line) is fanned from its
+						// first corner into quads and a last triangle. Stock kept the first four corners and dropped the rest,
+						// which left a hole beside every n-gon (fork, 2026-09-22).
+						let pieces: string[][] = [];
+						let n = f.vertices.length;
+						if (n <= 4) {
+							pieces.push(f.vertices);
+						} else {
+							for (let start = 1; start < n - 1; start += 2) {
+								let end = Math.min(start + 3, n);
+								pieces.push([f.vertices[0], ...f.vertices.slice(start, end)]);
+							}
+						}
+						for (let piece of pieces) {
+							let piece_uv = {};
+							for (let key of piece) piece_uv[key] = uv[key];
+							let face = new MeshFace(mesh, {
+								vertices: piece,
+								uv: piece_uv,
+								texture: current_texture
+							})
+							mesh.addFaces(face);
 
-						if (f.vertex_normals.find(v => v)) {
-	
-							vector1.fromArray(face.getNormal());
-							vector2.fromArray(f.vertex_normals[0]);
-							let angle = vector1.angleTo(vector2);
-							if (angle > Math.PI/2) {
-								face.invert();
+							if (f.vertex_normals.find(v => v)) {
+
+								vector1.fromArray(face.getNormal());
+								vector2.fromArray(f.vertex_normals[0]);
+								let angle = vector1.angleTo(vector2);
+								if (angle > Math.PI/2) {
+									face.invert();
+								}
 							}
 						}
 					}
