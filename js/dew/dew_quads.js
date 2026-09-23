@@ -345,6 +345,7 @@ BARS.defineActions(function() {
 // face settings or uvs, and quads Blockbench would re-diagonalise (its corner sort would change the shape).
 export const QUADS_REF = {
 	TOLERANCE: 1e-3,		// of the mesh's bounding box diagonal: a corner matches a vertex within this
+	FIT_SAMPLE: 400,		// polygon corners each candidate fit is scored on; the chosen fit then matches them all
 };
 
 function parseOBJPolygons(text) {
@@ -393,26 +394,35 @@ export function quadsFromOBJ(meshes, obj_text) {
 			}
 			return best;
 		};
-		// Fit the OBJ onto the mesh. The two bounding boxes differ whenever one side has faces the other lacks (a mesh
-		// edited after import, a reference with extra parts), so no single box-to-box fit is trusted: a few candidate
-		// scales (the box ratios per axis and diagonal, plus the usual unit factors) and offsets (boxes aligned by
-		// centre, by minimum corner, or not at all) are scored by how many polygon corners land on a vertex.
-		let used = new Set(polygons.flat());
-		let scales = new Set([1, 16, 1 / 16, 100, 0.01]);
-		if (obj_box.diagonal > 0) scales.add(mesh_box.diagonal / obj_box.diagonal);
-		for (let i = 0; i < 3; i++) if (obj_box.size[i] > 0 && mesh_box.size[i] > 0) scales.add(mesh_box.size[i] / obj_box.size[i]);
+		// Fit the OBJ onto the mesh. Exporters disagree on the up axis (Blender's OBJ writes Z up, glTF is Y up) and on
+		// units, and the two bounding boxes differ whenever one side has faces the other lacks, so no single box-to-box
+		// fit is trusted. Candidates: the 48 axis-aligned orientations (axis swaps with any signs, mirrors included), and
+		// per orientation a few scales (box ratios per axis and diagonal, plus the usual unit factors) and offsets (boxes
+		// aligned by centre, by minimum corner, or not at all). Each is scored on a sample of the polygon corners by how
+		// many DISTINCT vertices they land on (raw hits would let a tiny scale win by piling every corner onto one vertex).
+		let used = [...new Set(polygons.flat())];
+		let stride = Math.max(1, Math.floor(used.length / QUADS_REF.FIT_SAMPLE));
+		let sample = used.filter((_, i) => i % stride == 0);
+		let score = place => { let matched = new Set(); for (let i of sample) { let k = nearest(place(positions[i])); if (k) matched.add(k); } return matched.size; };
 		let fit = null;
-		for (let scale of scales) {
-			for (let offset of [mesh_box.center.map((c, i) => c - obj_box.center[i] * scale), mesh_box.min.map((c, i) => c - obj_box.min[i] * scale), [0, 0, 0]]) {
-				let matched = new Set();	// distinct vertices, or a tiny scale that piles every corner onto one vertex would win
-				for (let i of used) { let k = nearest(positions[i].map((v, j) => v * scale + offset[j])); if (k) matched.add(k); }
-				let hits = matched.size;
-				if (!fit || hits > fit.hits) fit = {scale, offset, hits};
+		for (let perm of [[0, 1, 2], [0, 2, 1], [1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]]) for (let signs = 0; signs < 8; signs++) {
+			let sign = [0, 1, 2].map(i => signs & (1 << i) ? -1 : 1);
+			let orient = p => [p[perm[0]] * sign[0], p[perm[1]] * sign[1], p[perm[2]] * sign[2]];
+			let box = bounds(used.map(i => orient(positions[i])));
+			let scales = new Set([1, 16, 1 / 16, 100, 0.01]);
+			if (box.diagonal > 0) scales.add(mesh_box.diagonal / box.diagonal);
+			for (let i = 0; i < 3; i++) if (box.size[i] > 0 && mesh_box.size[i] > 0) scales.add(mesh_box.size[i] / box.size[i]);
+			for (let scale of scales) {
+				for (let offset of [mesh_box.center.map((c, i) => c - box.center[i] * scale), mesh_box.min.map((c, i) => c - box.min[i] * scale), [0, 0, 0]]) {
+					let place = p => orient(p).map((v, j) => v * scale + offset[j]);
+					let hits = score(place);
+					if (!fit || hits > fit.hits) fit = {place, hits, scale, offset, perm, sign};
+				}
 			}
 		}
-		let {scale, offset} = fit;
-		report.fit = {scale: +scale.toPrecision(6), offset: offset.map(v => +v.toFixed(4)), corners_matched: fit.hits, of: used.size};
-		let corner_key = positions.map(p => nearest(p.map((v, i) => v * scale + offset[i])));
+		let axis = i => (fit.sign[i] < 0 ? '-' : '+') + 'xyz'[fit.perm[i]];
+		report.fit = {axes: [0, 1, 2].map(axis).join(' '), scale: +fit.scale.toPrecision(6), offset: fit.offset.map(v => +v.toFixed(4)), sample_matched: fit.hits, of: sample.length};
+		let corner_key = positions.map(p => nearest(fit.place(p)));
 		let faces_of = new Map();	// vertex key -> triangle face keys using it
 		for (let fkey in mesh.faces) {
 			let face = mesh.faces[fkey];

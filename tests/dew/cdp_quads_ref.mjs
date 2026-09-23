@@ -88,6 +88,13 @@ check('   undo gives the ten triangles back (the weld is part of the entry), red
 const again = await json(`(() => { let before = JSON.stringify(Object.values(rig.mesh.faces).map(f => f.vertices.length).sort()); let report = DEWQuads.quadsFromOBJ([rig.mesh], ${JSON.stringify(obj)}); return JSON.stringify({report, same: before == JSON.stringify(Object.values(rig.mesh.faces).map(f => f.vertices.length).sort())}); })()`);
 check('B. run again, the joined polygons no longer have triangles to gather and nothing changes', again.report.joined == 0 && again.same, again);
 
+// D. the same OBJ written Z up (as Blender's OBJ exporter does by default, where glTF is Y up): the fit finds the axes
+const NL = String.fromCharCode(10);
+const objZup = obj.split(NL).map(l => { if (!l.startsWith("v ")) return l; let [, x, y, z] = l.split(" ").map(Number); return `v ${x} ${z} ${-y}`; }).join(NL);
+const d = await json(`(() => { Undo.undo(); Undo.undo(); let tris = Object.values(rig.mesh.faces).every(f => f.vertices.length == 3);
+	let report = DEWQuads.quadsFromOBJ([rig.mesh], ${JSON.stringify(objZup)}); return JSON.stringify({tris, report, sizes: Object.values(rig.mesh.faces).map(f => f.vertices.length).sort()}); })()`);
+check('D. a Z-up OBJ against the Y-up mesh: the axes are found and the same three polygons come back', d.tris && d.report.joined == 3 && JSON.stringify(d.sizes) == '[3,3,4,4,4,4]' && /^.x .z /.test(d.report.fit.axes), d);	// the fixture is flat, so +z and -z fit it equally
+
 // C. the real round trip through Blender: OBJ (quads, a 7-gon) -> glb -> opened in the fork -> quads back from the OBJ
 const blender = 'D:/Blender 5.2/blender.exe';
 if (fs.existsSync(blender)) {
