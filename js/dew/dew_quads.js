@@ -17,6 +17,20 @@ function worldNormal(mesh, face) {
 }
 // Missing uvs (an untextured import has none) are not a seam; two present uvs must agree within a hundredth of a texel
 const sameUV = (a, b) => (!a && !b) || (a && b && Math.abs(a[0] - b[0]) < 0.01 && Math.abs(a[1] - b[1]) < 0.01);
+// A flat-colour face from the rig importer has its uvs placed by corner INDEX inside one palette cell (RIG.PALETTE_CELL),
+// so two triangles of one quad disagree on their shared corners by construction while every uv in the cell draws the
+// same colour. Uvs that all fit in one such cell are no seam; the joined face gets the cell's corners again.
+const FLAT_UV_SPAN = 8;
+function flatUVBox(faces) {
+	let min = [Infinity, Infinity], max = [-Infinity, -Infinity];
+	for (let face of faces) for (let v of face.vertices) {
+		let uv = face.uv[v];
+		if (!uv) return null;
+		for (let i = 0; i < 2; i++) { if (uv[i] < min[i]) min[i] = uv[i]; if (uv[i] > max[i]) max[i] = uv[i]; }
+	}
+	return max[0] - min[0] <= FLAT_UV_SPAN && max[1] - min[1] <= FLAT_UV_SPAN ? [min[0], min[1], max[0], max[1]] : null;
+}
+const cellUVs = (order, box) => Object.fromEntries(order.map((v, i) => [v, [[box[0], box[1]], [box[2], box[1]], [box[2], box[3]], [box[0], box[3]]][i % 4]]));
 
 // Is the polygon c, a, d, b convex, seen along its normal
 function convex(points, normal) {
@@ -102,11 +116,16 @@ export function mergeTrianglesToQuads(meshes = Mesh.selected) {
 			// An untextured face has nothing to tear: the glTF importer gives such faces placeholder uvs that differ on
 			// every triangle, which is not a seam.
 			let textured = f1.texture !== false && f1.texture != null;
-			if (textured && (!sameUV(f1.uv[a], f2.uv[a]) || !sameUV(f1.uv[b], f2.uv[b]))) { why.uv_seam++; continue; }
 			let order = [c, a, d, b];
+			let uv = {[a]: f1.uv[a], [b]: f1.uv[b], [c]: f1.uv[c], [d]: f2.uv[d]};
+			if (textured && (!sameUV(f1.uv[a], f2.uv[a]) || !sameUV(f1.uv[b], f2.uv[b]))) {
+				let box = flatUVBox([f1, f2]);
+				if (!box) { why.uv_seam++; continue; }
+				uv = cellUVs(order, box);
+			}
 			let points = order.map(point);
 			if (!convex(points, n1)) { why.concave++; continue; }
-			candidates.push({fkeys, order, skew: skew(points), normal: n1, texture: f1.texture, uv: {[a]: f1.uv[a], [b]: f1.uv[b], [c]: f1.uv[c], [d]: f2.uv[d]}});
+			candidates.push({fkeys, order, skew: skew(points), normal: n1, texture: f1.texture, uv});
 		}
 		candidates.sort((p, q) => p.skew - q.skew);
 		let used = new Set();
@@ -315,4 +334,155 @@ BARS.defineActions(function() {
 	});
 });
 
-Object.assign(window, {DEWQuads: {QUADS, mergeTrianglesToQuads, flipSharedEdge, toggleEdgeBoundary}});
+// Quads from OBJ Reference (2026-09-23): a pack that ships the same asset as OBJ (quads and n-gons, no materials worth
+// keeping) and as glb (materials, textures, rig; triangles only) gets the best of both. The glb is imported and kept;
+// the OBJ is read only for its polygons: every polygon with four or more corners is matched to the mesh's vertices by
+// position (after fitting the OBJ's bounding box onto the mesh's, so units and offset do not matter) and the triangles
+// the glb exporter cut it into are put back together as that polygon, exactly, with no angle heuristic and no
+// guesswork about which pairs belong together. n-gons are fanned into quads and a last triangle like the OBJ importer.
+// Kept as triangles and counted in the report: polygons with a corner that matches no vertex, ones whose triangles are
+// not all there (the mesh was edited, or triangulated across other corners), ones whose triangles differ in texture,
+// face settings or uvs, and quads Blockbench would re-diagonalise (its corner sort would change the shape).
+export const QUADS_REF = {
+	TOLERANCE: 1e-3,		// of the mesh's bounding box diagonal: a corner matches a vertex within this
+};
+
+function parseOBJPolygons(text) {
+	let positions = [], polygons = [];
+	for (let line of text.split(/\r?\n/)) {
+		let args = line.trim().split(/\s+/);
+		if (args[0] == 'v') positions.push([parseFloat(args[1]), parseFloat(args[2]), parseFloat(args[3])]);
+		else if (args[0] == 'f') {
+			let corners = args.slice(1).map(t => parseInt(t.split('/')[0])).map(i => i < 0 ? positions.length + i : i - 1);
+			if (corners.length >= 4 && corners.every(i => i >= 0 && i < positions.length)) polygons.push(corners);
+		}
+	}
+	return {positions, polygons};
+}
+
+function bounds(points) {
+	let min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+	for (let p of points) for (let i = 0; i < 3; i++) { if (p[i] < min[i]) min[i] = p[i]; if (p[i] > max[i]) max[i] = p[i]; }
+	let size = max.map((v, i) => v - min[i]);
+	return {min, max, size, center: min.map((v, i) => v + size[i] / 2), diagonal: Math.hypot(...size)};
+}
+
+export function quadsFromOBJ(meshes, obj_text) {
+	let {positions, polygons} = parseOBJPolygons(obj_text);
+	let report = {polygons: polygons.length, joined: 0, faces_made: 0, welded: 0, unmatched_corner: 0, triangles_missing: 0, seam_or_texture: 0, diagonal: 0, meshes: meshes.length};
+	if (!polygons.length) { Blockbench.showQuickMessage('The OBJ has no polygon with four or more corners', QUADS.MESSAGE_TIME); return report; }
+	Undo.initEdit({elements: meshes});
+	let obj_box = bounds(positions);
+	for (let mesh of meshes) {
+		report.welded += weldVertices(mesh);
+		let keys = Object.keys(mesh.vertices);
+		if (keys.length < 4) continue;
+		let mesh_box = bounds(keys.map(k => mesh.vertices[k]));
+		let tolerance = Math.max(mesh_box.diagonal * QUADS_REF.TOLERANCE, 1e-6);
+		let cell = tolerance * 2;
+		let grid = new Map();
+		let cellKey = p => p.map(v => Math.floor(v / cell)).join(',');
+		for (let k of keys) { let c = cellKey(mesh.vertices[k]); if (!grid.has(c)) grid.set(c, []); grid.get(c).push(k); }
+		let nearest = p => {
+			let base = p.map(v => Math.floor(v / cell)), best = null, best_d = tolerance;
+			for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+				for (let k of grid.get([base[0] + dx, base[1] + dy, base[2] + dz].join(',')) || []) {
+					let v = mesh.vertices[k], d = Math.hypot(v[0] - p[0], v[1] - p[1], v[2] - p[2]);
+					if (d < best_d) { best_d = d; best = k; }
+				}
+			}
+			return best;
+		};
+		// Fit the OBJ onto the mesh. The two bounding boxes differ whenever one side has faces the other lacks (a mesh
+		// edited after import, a reference with extra parts), so no single box-to-box fit is trusted: a few candidate
+		// scales (the box ratios per axis and diagonal, plus the usual unit factors) and offsets (boxes aligned by
+		// centre, by minimum corner, or not at all) are scored by how many polygon corners land on a vertex.
+		let used = new Set(polygons.flat());
+		let scales = new Set([1, 16, 1 / 16, 100, 0.01]);
+		if (obj_box.diagonal > 0) scales.add(mesh_box.diagonal / obj_box.diagonal);
+		for (let i = 0; i < 3; i++) if (obj_box.size[i] > 0 && mesh_box.size[i] > 0) scales.add(mesh_box.size[i] / obj_box.size[i]);
+		let fit = null;
+		for (let scale of scales) {
+			for (let offset of [mesh_box.center.map((c, i) => c - obj_box.center[i] * scale), mesh_box.min.map((c, i) => c - obj_box.min[i] * scale), [0, 0, 0]]) {
+				let matched = new Set();	// distinct vertices, or a tiny scale that piles every corner onto one vertex would win
+				for (let i of used) { let k = nearest(positions[i].map((v, j) => v * scale + offset[j])); if (k) matched.add(k); }
+				let hits = matched.size;
+				if (!fit || hits > fit.hits) fit = {scale, offset, hits};
+			}
+		}
+		let {scale, offset} = fit;
+		report.fit = {scale: +scale.toPrecision(6), offset: offset.map(v => +v.toFixed(4)), corners_matched: fit.hits, of: used.size};
+		let corner_key = positions.map(p => nearest(p.map((v, i) => v * scale + offset[i])));
+		let faces_of = new Map();	// vertex key -> triangle face keys using it
+		for (let fkey in mesh.faces) {
+			let face = mesh.faces[fkey];
+			if (face.vertices.length != 3) continue;
+			for (let v of face.vertices) { if (!faces_of.has(v)) faces_of.set(v, new Set()); faces_of.get(v).add(fkey); }
+		}
+		let consumed = new Set();
+		for (let polygon of polygons) {
+			let corners = polygon.map(i => corner_key[i]);
+			if (corners.some(k => !k) || new Set(corners).size != corners.length) { report.unmatched_corner++; continue; }
+			let corner_set = new Set(corners);
+			let tri_keys = new Set();
+			for (let k of corners) for (let fkey of faces_of.get(k) || []) {
+				if (!consumed.has(fkey) && mesh.faces[fkey] && mesh.faces[fkey].vertices.every(v => corner_set.has(v))) tri_keys.add(fkey);
+			}
+			if (tri_keys.size != corners.length - 2) { report.triangles_missing++; continue; }
+			let tris = [...tri_keys].map(k => mesh.faces[k]), first = tris[0];
+			let same = tris.every(t => t.texture === first.texture && Object.keys(MeshFace.properties).every(p => p == 'vertices' || p == 'uv' || JSON.stringify(t[p]) === JSON.stringify(first[p])));
+			let uv = {}, uv_ok = true;
+			let textured = !!first.getTexture();
+			for (let t of tris) for (let v of t.vertices) {
+				if (uv[v] === undefined) uv[v] = t.uv[v];
+				else if (textured && !sameUV(uv[v], t.uv[v])) uv_ok = false;
+			}
+			let flat_box = !uv_ok && same ? flatUVBox(tris) : null;
+			if (!same || (!uv_ok && !flat_box)) { report.seam_or_texture++; continue; }
+			// pieces: the polygon itself for four corners, else a fan from the first corner
+			let pieces = corners.length == 4 ? [corners] : [];
+			for (let start = 1; corners.length > 4 && start < corners.length - 1; start += 2) pieces.push([corners[0], ...corners.slice(start, Math.min(start + 3, corners.length))]);
+			let first_normal = worldNormal(mesh, first);
+			let faces = [], ok = true;
+			for (let order of pieces) {
+				let face = new MeshFace(mesh, {...first, vertices: order, uv: flat_box ? cellUVs(order, flat_box) : Object.fromEntries(order.map(v => [v, uv[v]]))});
+				if (worldNormal(mesh, face).dot(first_normal) < 0) { face.vertices = order.slice().reverse(); order = face.vertices; }
+				if (order.length == 4 && !face.getSortedVertices().every((v, j) => v == order[j])) { ok = false; break; }
+				faces.push(face);
+			}
+			if (!ok) { report.diagonal++; continue; }
+			let removed = [...tri_keys];
+			removed.forEach(k => { delete mesh.faces[k]; consumed.add(k); });
+			mesh.faces[removed[0]] = faces[0];
+			mesh.addFaces(...faces.slice(1));
+			report.joined++;
+			report.faces_made += faces.length;
+		}
+	}
+	Undo.finishEdit('Quads from OBJ reference');
+	Canvas.updateView({elements: meshes, element_aspects: {geometry: true, uv: true, faces: true}, selection: true});
+	let skipped = [];
+	if (report.unmatched_corner) skipped.push(`${report.unmatched_corner} with a corner matching no vertex`);
+	if (report.triangles_missing) skipped.push(`${report.triangles_missing} whose triangles were not all there`);
+	if (report.seam_or_texture) skipped.push(`${report.seam_or_texture} across a texture or uv seam`);
+	if (report.diagonal) skipped.push(`${report.diagonal} that would change diagonal`);
+	Blockbench.showQuickMessage(`${report.joined} of ${report.polygons} reference polygons joined${skipped.length ? '; kept as triangles: ' + skipped.join(', ') : ''}`, QUADS.MESSAGE_TIME * 2);
+	return report;
+}
+
+BARS.defineActions(function() {
+	new Action('dew_quads_from_obj', {
+		name: 'Quads from OBJ Reference',
+		description: 'Rebuild the selected meshes\' quads and n-gons from an OBJ of the same asset: its polygons are matched by position and the triangles a glTF export cut them into are joined back exactly. Materials, textures and rig stay as imported',
+		icon: 'grid_on',
+		category: 'edit',
+		condition: () => Modes.edit && Mesh.selected.length,
+		click() {
+			Blockbench.import({resource_id: 'model', extensions: ['obj'], type: 'OBJ reference', readtype: 'text'}, files => {
+				if (files[0]?.content) quadsFromOBJ(Mesh.selected, files[0].content);
+			});
+		},
+	});
+});
+
+Object.assign(window, {DEWQuads: {QUADS, QUADS_REF, mergeTrianglesToQuads, flipSharedEdge, toggleEdgeBoundary, quadsFromOBJ}});

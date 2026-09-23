@@ -365,6 +365,7 @@ export const MenuBar = {
 			'dew_prop_snap',
 			'dew_save_to_game',
 			'dew_merge_triangles',
+			'dew_quads_from_obj',
 			'dew_group_tiles',
 			'dew_rotate_group_cw',
 			'dew_rotate_group_ccw',
