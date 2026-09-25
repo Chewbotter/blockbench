@@ -291,6 +291,9 @@ export class ModelProject {
 		UVEditor.saveViewportOffset();
 		
 		Preview.all.forEach(preview => {
+			// never store a camera that holds NaN: it would blank the viewport on the next open
+			let finite = (v: {x: number, y: number, z: number}) => isFinite(v.x) && isFinite(v.y) && isFinite(v.z);
+			if (!finite(preview.camera.position) || !finite(preview.controls.target)) { delete this.previews[preview.id]; return; }
 			this.previews[preview.id] = {
 				position: preview.camera.position.toArray(),
 				target: preview.controls.target.toArray(),
@@ -352,6 +355,10 @@ export class ModelProject {
 		if (settings.save_view_per_tab.value) {
 			Preview.all.forEach(preview => {
 				let data = this.previews[preview.id];
+				// A view saved while its camera held NaN (the old fit-on-open broke orthographic cameras, 2026-09-25)
+				// comes back as nulls; putting that back would blank the viewport, so it is ignored
+				let valid = (list: any) => Array.isArray(list) && list.length == 3 && list.every(v => typeof v == 'number' && isFinite(v));
+				if (data && !(valid(data.position) && valid(data.target))) { delete this.previews[preview.id]; data = undefined; }
 				if (data) {
 					preview.camera.position.fromArray(data.position);
 					preview.controls.target.fromArray(data.target);
@@ -720,13 +727,6 @@ export function setupProject(format: ModelFormat | string, uuid?: string): boole
 	let project = new ModelProject({format}, uuid)
 	project.select();
 	Preview.selected.loadAnglePreset(DefaultCameraPresets[0]);
-
-	// Frame the loaded model once the codec has finished parsing it (parsing is synchronous, so next tick is enough)
-	setTimeout(() => {
-		if (Project == project && settings.fit_view_on_open.value) {
-			Preview.all.forEach(preview => preview.fitToModel());
-		}
-	}, 0);
 
 	if (format.edit_mode) {
 		if (Mode.selected != Modes.options.edit) Modes.options.edit.select();

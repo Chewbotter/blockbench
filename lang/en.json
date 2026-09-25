@@ -1117,8 +1117,6 @@
 	"settings.motion_trails.desc": "Show motion trails in the animation editor",
 	"settings.save_view_per_tab": "Save View per Tab",
 	"settings.save_view_per_tab.desc": "Save the current view angle for each tab separately",
-	"settings.fit_view_on_open": "Fit View on Open",
-	"settings.fit_view_on_open.desc": "Zoom the camera out so the whole model is visible when opening a project",
 	"settings.orbit_around_selection": "Orbit Around Selection",
 	"settings.orbit_around_selection.desc": "Rotate the view around whatever is selected. The view does not move when selecting, only the pivot",
 	"settings.ghost_outline_opacity": "Ghost Outline Opacity",
