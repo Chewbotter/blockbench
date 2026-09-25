@@ -215,6 +215,20 @@ export class NullObject extends OutlinerElement {
 	const map = new THREE.TextureLoader().load( 'assets/null_object.png' );
 	map.magFilter = map.minFilter = THREE.NearestFilter;
 	
+let null_object_scene = null;
+function hookNullObjectRender() {
+	if (!Canvas.scene || null_object_scene === Canvas.scene) return;
+	null_object_scene = Canvas.scene;
+	const previous = Canvas.scene.onBeforeRender;
+	Canvas.scene.onBeforeRender = function(renderer, scene, camera, ...rest) {
+		if (previous) previous.call(this, renderer, scene, camera, ...rest);
+		if (!camera.preview) return;
+		for (const null_object of NullObject.all) {
+			if (null_object.mesh?.visible) null_object.preview_controller.updateWindowSize(null_object, camera.preview);
+		}
+	};
+}
+
 new NodePreviewController(NullObject, {
 	setup(element) {
 		let material = new THREE.SpriteMaterial({
@@ -256,8 +270,17 @@ new NodePreviewController(NullObject, {
 
 		this.dispatchEvent('update_selection', {element});
 	},
-	updateWindowSize(element) {
-		let size = 0.38 * Preview.selected.camera.fov / Preview.selected.height;
+	// Fork (2026-09-25): stock sized the icon by camera.fov, which an orthographic camera does not have, so in an
+	// ortho view the scale was NaN and every null object (IK handles, poles) vanished. The size now comes from the
+	// rendering camera's projection: the icon keeps the pixel size stock gives it in perspective (0.38 * fov / height,
+	// unchanged there) and the same number of pixels in ortho, at any zoom. A render hook refreshes it per camera.
+	updateWindowSize(element, preview = Preview.selected) {
+		if (!preview?.height || !element.mesh) return;
+		hookNullObjectRender();
+		let camera = preview.camera;
+		let pixels = 0.19 * preview.camPers.fov * preview.camPers.projectionMatrix.elements[5];
+		let size = 2 * pixels / (preview.height * camera.projectionMatrix.elements[5]);
+		if (!isFinite(size) || size <= 0) return;
 		element.mesh.scale.set(size, size, size);
 	}
 })
