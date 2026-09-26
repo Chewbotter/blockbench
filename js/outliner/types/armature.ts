@@ -181,23 +181,20 @@ export class Armature extends OutlinerElement {
 					return true;
 				}
 			});
-			if (affecting_bones.length > 4) {
-				affecting_bones.sort((a, b) => bone_weights[a.uuid] - bone_weights[b.uuid]).slice(0, 4);
-			}
+			// Fork (2026-09-25): up to MAX_INFLUENCES bones, the BIGGEST first, as the glTF export writes them and Godot 4
+			// keeps them (8, checked with a headless import). Stock sorted ascending and threw the slice away, so with more
+			// than four bones it used the four SMALLEST weights, and the posed mesh disagreed with the export.
+			affecting_bones.sort((a, b) => bone_weights[b.uuid] - bone_weights[a.uuid]);
+			affecting_bones = affecting_bones.slice(0, Armature.MAX_INFLUENCES);
 			// Normalize weights
 			// The sum of all weights shold be 1, otherwise vertices are not influenced by bones equally and start drifting towards the mesh origin
-			let weights = [];
-			for ( let i = 0; i < 4; i ++ ) {
-				const weight = affecting_bones[i] ? bone_weights[affecting_bones[i].uuid] : 0;
-				weights.push(weight);
-			}
-			let weight_vector = new THREE.Vector4().fromArray(weights);
-			const scale = 1.0 / weight_vector.manhattanLength();
-			if ( scale !== Infinity ) {
-				weight_vector.multiplyScalar( scale );
-				weights = weight_vector.toArray();
+			let weights = affecting_bones.map(bone => bone_weights[bone.uuid]);
+			let weight_total = weights.reduce((t, w) => t + w, 0);
+			const scale = 1.0 / weight_total;
+			if ( scale !== Infinity && weight_total > 0 ) {
+				weights = weights.map(w => w * scale);
 
-				for ( let i = 0; i < 4; i ++ ) {
+				for ( let i = 0; i < affecting_bones.length; i ++ ) {
 					const weight = weights[i];
 					if ( weight !== 0 && affecting_bones[i] ) {
 						_matrix4.multiplyMatrices( armature_matrix_inverse, affecting_bones[i].scene_object.matrixWorld );
@@ -217,6 +214,8 @@ export class Armature extends OutlinerElement {
 		}
 		return vertex_offsets;
 	}
+	// Fork: bones per vertex in skinning, the glTF export (JOINTS_0 and JOINTS_1) and the weight brush's cap; Godot 4 keeps 8
+	static MAX_INFLUENCES = 8;
 	static behavior = {
 		unique_name: false,
 		movable: false,

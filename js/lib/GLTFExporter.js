@@ -1247,7 +1247,9 @@ GLTFExporter.prototype = {
 				uv2: 'TEXCOORD_1',
 				color: 'COLOR_0',
 				skinWeight: 'WEIGHTS_0',
-				skinIndex: 'JOINTS_0'
+				skinIndex: 'JOINTS_0',
+				skinWeight1: 'WEIGHTS_1',	// fork: bones five to eight of a vertex
+				skinIndex1: 'JOINTS_1'
 
 			};
 

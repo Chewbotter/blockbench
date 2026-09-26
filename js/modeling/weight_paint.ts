@@ -307,6 +307,20 @@ new Tool('weight_brush', {
 					});
 				}
 			}
+			// Fork (2026-09-25): at most Armature.MAX_INFLUENCES (8) bones on a vertex, the most the export writes and Godot
+			// keeps; the smallest go, and in Set or Smooth (shares) what is kept is scaled back to total 1. The bone being
+			// painted on is never the one dropped, or a ninth bone could not be painted onto a vertex at all
+			let keep_painted = !smooth && !subtract;
+			for (let vkey of affected_vkeys) {
+				let on = all_bones.filter(bone => bone.getVertexWeight(mesh, vkey));
+				if (on.length <= Armature.MAX_INFLUENCES) continue;
+				on.sort((a, b) => keep_painted && (a == armature_bone) != (b == armature_bone) ? (a == armature_bone ? -1 : 1) : b.getVertexWeight(mesh, vkey) - a.getVertexWeight(mesh, vkey));
+				for (let bone of on.slice(Armature.MAX_INFLUENCES)) bone.setVertexWeight(mesh, vkey);
+				if (smooth || blend_mode_select.value == 'set') {
+					let kept = on.slice(0, Armature.MAX_INFLUENCES), total = kept.reduce((t, bone) => t + bone.getVertexWeight(mesh, vkey), 0);
+					if (total > 0) for (let bone of kept) bone.setVertexWeight(mesh, vkey, bone.getVertexWeight(mesh, vkey) / total);
+				}
+			}
 			if (mirror_map) {
 				let painted = [...affected_vkeys];
 				for (let vkey of painted) {

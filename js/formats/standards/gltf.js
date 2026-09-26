@@ -274,9 +274,25 @@ export function buildSkinnedMeshFromGroup(root_group) {
 
 	return skinned_mesh;
 }
+// Fork (2026-09-25): a vertex's bones for the glTF skin, up to Armature.MAX_INFLUENCES (8) biggest first, normalised;
+// the first four go to JOINTS_0 / WEIGHTS_0, the next four to JOINTS_1 / WEIGHTS_1 (written only when some vertex has a
+// fifth bone). Godot 4 imports all eight (checked headless). Stock wrote four.
+function skinSlots(armature_bones, mesh_obj, vkey) {
+	let bones = armature_bones.filter(ab => ab.getVertexWeight(mesh_obj, vkey));
+	bones.sort((a, b) => b.getVertexWeight(mesh_obj, vkey) - a.getVertexWeight(mesh_obj, vkey));
+	bones = bones.slice(0, Armature.MAX_INFLUENCES);
+	let sum = bones.reduce((t, b) => t + b.getVertexWeight(mesh_obj, vkey), 0);
+	let slots = [], weights = [];
+	for (let i = 0; i < 8; i++) {
+		if (bones[i] && sum > 0) { slots.push(armature_bones.indexOf(bones[i])); weights.push(bones[i].getVertexWeight(mesh_obj, vkey) / sum); }
+		else { slots.push(0); weights.push(0); }
+	}
+	return [slots, weights];
+}
 export function buildSkinnedMeshMerged(armature, scale) {
 	let skinIndices = [];
 	let skinWeights = [];
+	let skinIndices1 = [], skinWeights1 = [], needs_second_set = false;
 	let position_array = [];
 	let normal_array = [];
 	let uv_array = [];
@@ -353,23 +369,10 @@ export function buildSkinnedMeshMerged(armature, scale) {
 			let face = mesh_obj.faces[key];
 			if (face.vertices.length >= 3) {
 				face.vertices.forEach((vkey) => {
-					let influencing_bones = armature_bones.filter(ab => ab.getVertexWeight(mesh_obj, vkey));
-					influencing_bones.sort((a, b) => b.getVertexWeight(mesh_obj, vkey) - a.getVertexWeight(mesh_obj, vkey)).slice(0, 4);
-					let weight_sum = 0;
-					for (let i = 0; i < 4; i++) {
-						if (influencing_bones[i]) {
-							weight_sum += influencing_bones[i].getVertexWeight(mesh_obj, vkey);
-						}
-					}
-					for (let i = 0; i < 4; i++) {
-						if (influencing_bones[i]) {
-							skinIndices.push(armature_bones.indexOf(influencing_bones[i]));
-							skinWeights.push(influencing_bones[i].getVertexWeight(mesh_obj, vkey) / weight_sum);
-						} else {
-							skinIndices.push(0);
-							skinWeights.push(0);
-						}
-					}
+					let [slots, weights] = skinSlots(armature_bones, mesh_obj, vkey);
+					skinIndices.push(...slots.slice(0, 4)); skinWeights.push(...weights.slice(0, 4));
+					skinIndices1.push(...slots.slice(4, 8)); skinWeights1.push(...weights.slice(4, 8));
+					if (weights[4] > 0) needs_second_set = true;
 				})
 			}
 		}
@@ -383,6 +386,10 @@ export function buildSkinnedMeshMerged(armature, scale) {
 		
 		merged_geometry.setAttribute( 'skinIndex', new THREE.Uint16BufferAttribute( skinIndices, 4 ) );
 		merged_geometry.setAttribute( 'skinWeight', new THREE.Float32BufferAttribute( skinWeights, 4 ) );
+		if (needs_second_set) {
+			merged_geometry.setAttribute( 'skinIndex1', new THREE.Uint16BufferAttribute( skinIndices1, 4 ) );
+			merged_geometry.setAttribute( 'skinWeight1', new THREE.Float32BufferAttribute( skinWeights1, 4 ) );
+		}
 		
 		materials = optimizeMaterialGroups(materials, merged_geometry, face_vertex_counts);
 	} else {
@@ -430,6 +437,7 @@ export function buildSkinnedMesh(armature, scale) {
 
 		let skinIndices = [];
 		let skinWeights = [];
+		let skinIndices1 = [], skinWeights1 = [], needs_second_set = false;
 
 		let geometry = mesh_obj.mesh.geometry.clone();
 
@@ -440,23 +448,10 @@ export function buildSkinnedMesh(armature, scale) {
 			let face = mesh_obj.faces[key];
 			if (face.vertices.length >= 3) {
 				face.vertices.forEach((vkey) => {
-					let influencing_bones = armature_bones.filter(ab => ab.getVertexWeight(mesh_obj, vkey));
-					influencing_bones.sort((a, b) => b.getVertexWeight(mesh_obj, vkey) - a.getVertexWeight(mesh_obj, vkey)).slice(0, 4);
-					let weight_sum = 0;
-					for (let i = 0; i < 4; i++) {
-						if (influencing_bones[i]) {
-							weight_sum += influencing_bones[i].getVertexWeight(mesh_obj, vkey);
-						}
-					}
-					for (let i = 0; i < 4; i++) {
-						if (influencing_bones[i]) {
-							skinIndices.push(armature_bones.indexOf(influencing_bones[i]));
-							skinWeights.push(influencing_bones[i].getVertexWeight(mesh_obj, vkey) / weight_sum);
-						} else {
-							skinIndices.push(0);
-							skinWeights.push(0);
-						}
-					}
+					let [slots, weights] = skinSlots(armature_bones, mesh_obj, vkey);
+					skinIndices.push(...slots.slice(0, 4)); skinWeights.push(...weights.slice(0, 4));
+					skinIndices1.push(...slots.slice(4, 8)); skinWeights1.push(...weights.slice(4, 8));
+					if (weights[4] > 0) needs_second_set = true;
 				})
 			}
 		}
@@ -464,6 +459,10 @@ export function buildSkinnedMesh(armature, scale) {
 		if (geometry) {
 			geometry.setAttribute( 'skinIndex', new THREE.Uint16BufferAttribute( skinIndices, 4 ) );
 			geometry.setAttribute( 'skinWeight', new THREE.Float32BufferAttribute( skinWeights, 4 ) );
+			if (needs_second_set) {
+				geometry.setAttribute( 'skinIndex1', new THREE.Uint16BufferAttribute( skinIndices1, 4 ) );
+				geometry.setAttribute( 'skinWeight1', new THREE.Float32BufferAttribute( skinWeights1, 4 ) );
+			}
 		}
 
 		let skinned_mesh = new THREE.SkinnedMesh(geometry, mesh_obj.mesh.material);

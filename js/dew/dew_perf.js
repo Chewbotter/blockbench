@@ -256,10 +256,10 @@ controller.updateSelection = function(element) {
 // the soldier (4272 skinned vertices, 65 bones) 106 ms a frame, so scrubbing a pose ran at under 10 frames a
 // second. Here each mesh's influences are gathered once from the bones' weight tables (one pass over the weights
 // that exist, not over every pair) and kept until an edit ends, and the per-bone matrix is built once per call.
-// The result is the stock one to the last digit (cdp_rig_import.mjs compares them): the first four influencing
-// bones in armature order, normalised by their sum, a vertex without influence left where it is. (With more than
-// four influences the stock code sorts its list in place and drops the slice, so it ends up with the four
-// smallest; a glTF gives at most four, and this keeps the first four.) The weight brush edits weights
+// The result is the stock one to the last digit (cdp_rig_import.mjs compares them): the biggest Armature.MAX_INFLUENCES
+// (8) influencing bones, normalised by their sum, a vertex without influence left where it is. (Until 2026-09-25 both
+// paths were limited to four and chose them differently: stock the four SMALLEST, this the first four in armature
+// order; the export the four biggest. A smoothed vertex then posed three ways.) The weight brush edits weights
 // mid-stroke, so it takes the stock path.
 const stockCalculateVertexDeformation = Armature.prototype.calculateVertexDeformation;
 const influence_cache = new Map();	// mesh uuid -> {armature, bones, influences: Map vkey -> [[bone, weight], ...]}
@@ -275,9 +275,11 @@ function gatherInfluences(armature, mesh) {
 			if (!weight) continue;
 			if (!influences.has(vkey)) influences.set(vkey, []);
 			let list = influences.get(vkey);
-			if (list.length < 4) list.push([bone, weight]);	// the stock loop only ever reads the first four
+			list.push([bone, weight]);
 		}
 	}
+	// the biggest MAX_INFLUENCES per vertex, as the stock loop and the glTF export now take them
+	for (let [vkey, list] of influences) if (list.length > Armature.MAX_INFLUENCES) influences.set(vkey, list.sort((a, b) => b[1] - a[1]).slice(0, Armature.MAX_INFLUENCES));
 	return {armature, bones, influences};
 }
 Armature.prototype.calculateVertexDeformation = function(mesh) {

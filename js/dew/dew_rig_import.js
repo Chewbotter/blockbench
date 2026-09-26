@@ -201,13 +201,24 @@ export async function importRig(path, options = {}) {
 				vkey = element.addVertices([round(v.x), round(v.y), round(v.z)])[0];
 				key_by_position.set(position_key, vkey);
 				if (obj.isSkinnedMesh) {
-					let list = [];
-					for (let k = 0; k < 4; k++) {
-						let w = skin_weight.array[i * skin_weight.itemSize + k] / weight_scale;
-						let bone = w > 0 && bone_of.get(obj.skeleton.bones[skin_index.array[i * skin_index.itemSize + k]]);
-						if (bone) list.push([bone, w]);
-					}
-					weights.set(vkey, list);
+					// bones one to four, then five to eight from the glTF's second set (JOINTS_1 / WEIGHTS_1, which three's
+					// loader passes through as joints_1 / weights_1)
+					let sets = [[skin_index, skin_weight], [geometry.attributes.joints_1, geometry.attributes.weights_1]].map(([indices, weights_attr]) => {
+						let list = [];
+						if (!indices || !weights_attr) return list;
+						let scale = weights_attr.normalized ? (weights_attr.array instanceof Uint8Array ? 255 : 65535) : 1;
+						for (let k = 0; k < 4; k++) {
+							let w = weights_attr.array[i * weights_attr.itemSize + k] / scale;
+							let bone = w > 0 && bone_of.get(obj.skeleton.bones[indices.array[i * indices.itemSize + k]]);
+							if (bone) list.push([bone, w]);
+						}
+						return list;
+					});
+					// three's loader renormalises the FIRST set alone to 1 (normalizeSkinWeights, for malformed files), not
+					// knowing the second; in a valid file the first set held 1 minus the second, so that is put back
+					let second = sets[1].reduce((t, [, w]) => t + w, 0);
+					if (second > 0 && second < 1) sets[0] = sets[0].map(([bone, w]) => [bone, w * (1 - second)]);
+					weights.set(vkey, sets[0].concat(sets[1]));
 				}
 			}
 			keys.push(vkey);
