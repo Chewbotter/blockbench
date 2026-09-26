@@ -35,34 +35,37 @@ document.addEventListener('touchend', () => {
 
 
 let screen_space_vertex_positions: null | Record<string, {x:number, y:number}> = null;
+// Fork: whether a vertex is hidden behind the mesh is asked only when the brush reaches it, then remembered until the
+// camera moves. Stock ray-tested every vertex against every face at the start of each stroke after an orbit (330 ms on
+// the cat's 1766 vertices), where a stroke only ever needs the few under the brush.
+let vertex_visibility: Record<string, boolean> = {};
 const raycaster = new THREE.Raycaster();
 function updateScreenSpaceVertexPositions(mesh: Mesh) {
 	if (screen_space_vertex_positions) return screen_space_vertex_positions;
 
-	const depth_check = BarItems.weight_brush_xray.value == false;
 	let vec = new THREE.Vector3();
-	raycaster.ray.origin.setFromMatrixPosition(Preview.selected.camera.matrixWorld);
-	let raycasts = 0;
-
 	screen_space_vertex_positions = {};
+	vertex_visibility = {};
 	
 	for (let vkey in mesh.vertices) {
 		let pos = mesh.mesh.localToWorld(vec.fromArray(mesh.vertices[vkey]));
-
-		if (depth_check) {
-			raycaster.ray.direction.copy(pos).sub(raycaster.ray.origin)
-			const z_distance = raycaster.ray.direction.length();
-			raycaster.ray.direction.normalize();
-			let intersection = raycaster.intersectObject(mesh.mesh, false)[0];
-			raycasts++;
-			if (intersection && intersection.distance < z_distance-0.001) {
-				continue;
-			}
-		}
 		let screen_pos = Preview.selected.vectorToScreenPosition(pos.clone());
 		screen_space_vertex_positions[vkey] = screen_pos;
 	}
 	return screen_space_vertex_positions;
+}
+function isVertexVisible(mesh: Mesh, vkey: string): boolean {
+	if (BarItems.weight_brush_xray.value) return true;
+	if (vkey in vertex_visibility) return vertex_visibility[vkey];
+	let pos = mesh.mesh.localToWorld(new THREE.Vector3().fromArray(mesh.vertices[vkey]));
+	raycaster.ray.origin.setFromMatrixPosition(Preview.selected.camera.matrixWorld);
+	raycaster.ray.direction.copy(pos).sub(raycaster.ray.origin);
+	const z_distance = raycaster.ray.direction.length();
+	raycaster.ray.direction.normalize();
+	let intersection = raycaster.intersectObject(mesh.mesh, false)[0];
+	let visible = !(intersection && intersection.distance < z_distance-0.001);
+	vertex_visibility[vkey] = visible;
+	return visible;
 }
 Blockbench.on('update_camera_position', () => {
 	screen_space_vertex_positions = null;
@@ -120,6 +123,7 @@ new Tool('weight_brush', {
 		}
 		
 		let last_click_pos = [0, 0];
+		let stroke_dirty = false;
 		const draw = (event: MouseEvent, data?: CanvasClickData|false) => {
 			let radius = size_slider.get();
 			let click_pos = [
@@ -132,7 +136,6 @@ new Tool('weight_brush', {
 			}
 			last_click_pos = click_pos;
 
-			data = data ?? preview.raycast(event) as any;
 			let mesh = element;
 			if (mesh instanceof Mesh == false) return;
 			let vec = new THREE.Vector2();
@@ -149,8 +152,9 @@ new Tool('weight_brush', {
 				let distance = vec.set(screen_pos.x - click_pos[0], screen_pos.y - click_pos[1]).length();
 				let falloff = (1-(distance / radius)) * (1 + base_radius);
 				let influence = Math.hermiteBlend(Math.clamp(falloff, 0, 1));
-				let value = armature_bone.getVertexWeight(mesh, vkey) ?? 0;
 				if (influence <= 0) continue;
+				if (!isVertexVisible(mesh, vkey)) continue;
+				let value = armature_bone.getVertexWeight(mesh, vkey) ?? 0;
 				
 				if (event.shiftKey || Pressing.overrides.shift) {
 					influence /= 8;
@@ -184,12 +188,21 @@ new Tool('weight_brush', {
 				let mesh2 = symmetrizeArmature(armature, mesh, affected_vkeys);
 				if (mesh2) Mesh.preview_controller.updateGeometry(mesh2);
 			}
-			Mesh.preview_controller.updateGeometry(mesh);
-			updateSelection();
+			// Fork (js/dew/dew_weight_perf.js): during a stroke only the touched vertices' colours change, so they are
+			// rewritten in place; the full rebuild and the selection update run once, when the stroke ends
+			// @ts-expect-error
+			if (typeof DEWWeightPerf != 'undefined' && DEWWeightPerf.WEIGHT_PERF.FAST_STROKE && DEWWeightPerf.recolorWeights(mesh, affected_vkeys)) {
+				stroke_dirty = true;
+			} else {
+				Mesh.preview_controller.updateGeometry(mesh);
+				updateSelection();
+			}
 		}
 		const stop = (event: MouseEvent) => {
 			document.removeEventListener('pointermove', draw);
 			document.removeEventListener('pointerup', stop);
+			// one selection update at the end: it rebuilds the meshes' geometry itself, weight colours included
+			if (stroke_dirty) updateSelection();
 
 			Undo.finishEdit('Paint vertex weights');
 		}

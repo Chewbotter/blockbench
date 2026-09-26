@@ -2045,6 +2045,10 @@ Blockbench.dispatchEvent('change_view_mode', ({view_mode}) => {
 	}
 });
 
+// Fork: the weight brush recolours only the vertices it touched (js/dew/dew_weight_perf.js), with the same colours
+Mesh.VertexWeightColorGenerator = VertexWeightColorGenerator;
+Mesh.PLAIN_VERTEX_COLOR = PLAIN_VERTEX_COLOR;
+
 Object.assign(window, {
 	MeshFace,
 	Mesh
