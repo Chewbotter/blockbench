@@ -210,6 +210,18 @@ new Tool('weight_brush', {
 				if (influence <= 0) continue;
 				if (!isVertexVisible(mesh, vkey)) continue;
 				let value = armature_bone.getVertexWeight(mesh, vkey) ?? 0;
+				let set_mode = blend_mode_select.value == 'set';
+				// Set works in SHARES, which is what the colour shows: the vertex's weights are taken as fractions of their
+				// total. A vertex whose bones summed far under 1 (34 of the cat's, round the neck: v7b 0.19) turned red at
+				// once when painted and hardly moved when erased, since 0.2 on a bone was already most of its total.
+				// Deformation normalizes weights anyway, so the pose is unchanged; the painted vertex is left normalized.
+				let others: [ArmatureBone, number][] = [];
+				let total = value;
+				if (set_mode) {
+					for (let bone of other_bones) { let w = bone.getVertexWeight(mesh, vkey); if (w) { others.push([bone, w]); total += w; } }
+					// alone on the vertex there is nothing to share with: it stays raw, or an erase would store MORE weight
+					if (total > 0 && others.length) { value /= total; others = others.map(([bone, w]) => [bone, w / total]); }
+				}
 				
 				if (event.shiftKey || Pressing.overrides.shift) {
 					influence /= 8;
@@ -223,15 +235,21 @@ new Tool('weight_brush', {
 					value = value + (limit-value) * amount;
 				}
 
-				// Set: the weight is handed over. The other bones give up the same share of theirs as this bone gained
-				// of what it lacked, so the vertex's total stays put and its colour follows the painting smoothly (stock
-				// took the raw influence off every other bone on every dab)
-				if (blend_mode_select.value == 'set' && !subtract) {
-					for (let bone of other_bones) {
-						let other = bone.getVertexWeight(mesh, vkey);
-						if (!other) continue;
-						let lower_limit = Math.min(Math.max(0, 1-limit), other);
-						bone.setVertexWeight(mesh, vkey, Math.max(other * (1 - amount), lower_limit));
+				// Set: the weight is handed over. Painting, the other bones give up the same share of theirs as this bone
+				// gained of what it lacked; erasing, they take back what this bone gave up, in proportion; so the vertex
+				// totals 1 and its colour follows the brush both ways (stock took the raw influence off every other bone
+				// on every dab, and erasing gave nothing back)
+				if (set_mode && others.length) {
+					let others_total = others.reduce((t, [, w]) => t + w, 0);
+					for (let [bone, other] of others) {
+						let next;
+						if (subtract) {
+							next = others_total > 0 ? other * (1 - value) / others_total : other;
+						} else {
+							let lower_limit = Math.min(Math.max(0, 1-limit), other);
+							next = Math.max(other * (1 - amount), lower_limit);
+						}
+						bone.setVertexWeight(mesh, vkey, next);
 					}
 				}
 
@@ -404,7 +422,7 @@ let strength_slider = new NumSlider('slider_weight_brush_strength', {
 	tool_setting: 'slider_weight_brush_strength',
 	category: 'edit',
 	settings: {
-		min: 1, max: 100, interval: 1, default: 100, show_bar: true,
+		min: 1, max: 100, interval: 1, default: 20, show_bar: true,	// user: 20, so a pass builds up gently
 	}
 })
 new Toggle('weight_brush_xray', {

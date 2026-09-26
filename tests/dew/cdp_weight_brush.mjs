@@ -68,13 +68,17 @@ if (!fs.existsSync(FILE)) {
 	// the control first (the order proven clean in fresh apps): the stock per-move rebuild paints the stroke, undo, then
 	// the fast path paints the same stroke, paced alike so every move arrives
 	await ev(`(() => { DEWWeightPerf.WEIGHT_PERF.FAST_STROKE = false; return true; })()`);
-	let stock = await stroke(null, 350);
+	let stock = await stroke(null, 700);	// ~250 ms a move on this path: a thin margin let a cold app merge a move and skip an edge dab
 	let stock_weights = await ev(`weights()`);
 	await ev(`(() => { Undo.undo(); DEWWeightPerf.WEIGHT_PERF.FAST_STROKE = true; return true; })()`);
-	let fast = await stroke(look, 60);
+	let fast = await stroke(null, 60);
 	let fast_weights = await ev(`weights()`);
 	let after_release = await json(`(() => { let now = Array.from(body.mesh.geometry.attributes.color.array); Mesh.preview_controller.updateGeometry(body); let rebuilt = Array.from(body.mesh.geometry.attributes.color.array); let d = 0; for (let i = 0; i < now.length; i++) d = Math.max(d, Math.abs(now[i] - rebuilt[i])); return JSON.stringify({max_diff: d}); })()`);
 	let undo = await json(`(() => { Undo.undo(); let back = weights() == start_weights; Undo.redo(); let again = weights() == ${JSON.stringify(fast_weights)}; Undo.undo(); return JSON.stringify({back, again, restored: weights() == start_weights}); })()`);
+	// the mid-stroke colour check on a stroke of its own: it rebuilds the mesh mid-stroke, which is not what A compares
+	let looked = await stroke(look, 60);
+	await ev(`(() => { Undo.undo(); return true; })()`);
+	fast.seen = looked.seen;
 	console.log('   fast ', JSON.stringify({press: fast.press, median: fast.median, worst: fast.worst, release: fast.release}));
 	console.log('   stock', JSON.stringify({press: stock.press, median: stock.median, worst: stock.worst, release: stock.release}));
 
@@ -199,6 +203,35 @@ if (!fs.existsSync(FILE)) {
 	check('J. with the mirror on X the twin of every painted vertex holds exactly its weights, left and right bones swapped', mx.painted > 0 && mx.exact == mx.painted, mx);
 	check('   the copy replaces what the twin had (a marker weight there is gone), and one undo takes both sides back', mx.replaced_old_weights == mx.painted && mx.restored, mx);
 	check('   with the mirror off the twins are left alone', moff.painted > 0 && moff.twin_changed == 0 && moff.restored, moff);
+	// K. a neck vertex whose weights total far under 1 (v7b, 0.19): one dab at strength 20 gives the painted bone a fifth
+	// of the vertex, which then totals 1, and one erase dab takes that share down by a fifth, handing it back
+	const k = await (async () => {
+		let aim = await json(`(() => { BarItems.weight_brush_mirror.set('off'); BarItems.slider_weight_brush_size.setValue(50); BarItems.slider_weight_brush_strength.setValue(20); BarItems.slider_weight_brush_falloff.setValue(0);
+			unselectAllElements(); ArmatureBone.all.find(b => b.name == 'tail_8').select(); updateSelection(); BarItems.weight_brush.select();
+			let v = body.vertices.v7b; if (!v) return 'null';
+			let w = body.mesh.localToWorld(new THREE.Vector3().fromArray(v)); let n = new THREE.Vector3(); for (let f of Object.values(body.faces)) if (f.vertices.includes('v7b')) n.add(new THREE.Vector3().fromArray(f.getNormal(true)));
+			let p = Preview.selected; p.setProjectionMode(false); p.camera.position.copy(w.clone().add(n.normalize().multiplyScalar(40))); p.controls.target.copy(w); p.controls.update(); p.render(); DEWWeightVisibility.reset();	// looking straight at it, along its normal
+			let r = p.canvas.getBoundingClientRect(), q = w.clone().project(p.camera);
+			// press where the brush lands on the body, not on a bone drawn over the head (a press on a bone selects it);
+			// within 6 px of the vertex, inside the brush's full-strength middle
+			let cx = r.left + (q.x + 1) / 2 * r.width, cy = r.top + (1 - q.y) / 2 * r.height, spot = null;
+			for (let d = 0; d <= 6 && !spot; d++) for (let [dx, dy] of [[0, 0], [d, 0], [-d, 0], [0, d], [0, -d], [d, d], [-d, -d], [d, -d], [-d, d]]) {
+				let hit = p.raycast({clientX: cx + dx, clientY: cy + dy, offsetX: cx + dx - r.left, offsetY: cy + dy - r.top, target: p.canvas}); if (hit && hit.element === body) { spot = [cx + dx, cy + dy]; break; } }
+			if (!spot) return 'null';
+			window.shareOf = () => { let own = ArmatureBone.selected[0].getVertexWeight(body, 'v7b'), total = ArmatureBone.all.reduce((t, b) => t + b.getVertexWeight(body, 'v7b'), 0); return {own: +own.toFixed(4), total: +total.toFixed(4), share: +(own / total).toFixed(4)}; };
+			window.__k0 = shareOf();
+			return JSON.stringify({x: spot[0], y: spot[1], visible: DEWWeightVisibility.isVertexVisible(body, 'v7b'), before: __k0}); })()`);
+		if (!aim) return null;
+		const dab = async (ctrl) => { await mouse('mouseMoved', aim.x, aim.y, { button: 'none' }); await sleep(50); await mouse('mousePressed', aim.x, aim.y, { buttons: 1, modifiers: ctrl ? 2 : 0 }); await sleep(40); await mouse('mouseReleased', aim.x, aim.y, { modifiers: ctrl ? 2 : 0 }); await sleep(200); return json(`JSON.stringify(shareOf())`); };
+		let painted = await dab(false), erased = await dab(true);
+		await ev(`(() => { Undo.undo(); Undo.undo(); return true; })()`);
+		let restored = await json(`JSON.stringify(shareOf())`);
+		return {aim, painted, erased, restored};
+	})();
+	console.log('   neck vertex v7b:', JSON.stringify(k && {visible: k.aim.visible, before: k.aim.before, after_one_dab: k.painted, after_one_erase: k.erased}));
+	check('K. a neck vertex whose weights totalled 0.19 takes one dab at strength 20 as a fifth of its weight, not most of it', k && k.aim.visible && Math.abs(k.painted.share - 0.2) < 0.02 && Math.abs(k.painted.total - 1) < 1e-6, k);
+	check('   and one erase dab takes that share down by a fifth, handing it back to the other bones', k && Math.abs(k.erased.share - k.painted.share * 0.8) < 0.02 && Math.abs(k.erased.total - 1) < 1e-6, k);
+	check('   undo puts the vertex back as it was', k && JSON.stringify(k.restored) == JSON.stringify(k.aim.before), k);
 	console.log('   strength 20, the centre vertex over five dabs:', e.got.join(' '), ' expected', e.expected.join(' '));
 	check('E. at strength 20 one dab moves a vertex at most a fifth of the way to the limit, the centre ones exactly', e.touched > 0 && Math.abs(e.first_step - 0.2) < 0.005, e);
 	check('   and five dabs build it up by the same rule, through the blue and green of the ramp', e.got.every((v, i) => Math.abs(v - e.expected[i]) < 0.01), e);
