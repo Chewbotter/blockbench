@@ -353,10 +353,17 @@ BARS.defineActions(function() {
 	setTimeout(() => {
 		let brush = BarItems.weight_brush;
 		if (!brush) return;
-		let on_select = brush.onSelect;
+		let on_select = brush.onSelect, on_unselect = brush.onUnselect;
+		// another tool picked: the panel goes (user); it comes back with the brush while the toggle is on. Deferred,
+		// since onUnselect runs before the next tool is selected
+		brush.onUnselect = function(...args) {
+			let r = on_unselect && on_unselect.apply(this, args);
+			setTimeout(() => updateInterfacePanels(), 0);
+			return r;
+		};
 		brush.onSelect = function(...args) {
 			let r = on_select && on_select.apply(this, args);
-			if (BarItems.dew_pose_preview && BarItems.dew_pose_preview.value) { ensurePanel(); markAll(); refreshChoices(); setTimeout(startLoop, 0); }
+			if (BarItems.dew_pose_preview && BarItems.dew_pose_preview.value) { ensurePanel(); markAll(); refreshChoices(); setTimeout(() => { updateInterfacePanels(); startLoop(); }, 0); }
 			return r;
 		};
 	}, 0);

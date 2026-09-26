@@ -440,6 +440,109 @@ function buildMirrorMap(mesh: Mesh, axis: number): Map<string, string> {
 	}
 	return map;
 }
+// Fork (2026-09-26, user): Mirror Weights, a one-shot copy of one whole side's weights onto the other, for weights that
+// were never symmetrical (the cat's right hind leg had its own, forgotten because it looked like the left). Axis: the
+// brush Mirror dropdown's, X while that is off. Each vertex off the plane on the source side gives its weights, exactly
+// and replacing what was there, to its twin (buildMirrorMap), left and right bones swapped by name (otherSide). A vertex
+// ON the plane takes, for every left / right pair of bones, the source side bone's weight on the other one as well, then
+// is scaled back to the total it had, so the centre line bends evenly both ways. Centre bones stay as they are. A
+// source vertex with no twin is left alone and counted. One undo entry.
+function isLeftName(name: string) { return /\.L$|_L$|\.l$|_l$|Left|left/.test(name); }
+// The bone of each left / right pair whose head lies on the source side, measured on the axis in world space
+function sourceBones(bones: ArmatureBone[], axis: number, sign: number): Set<ArmatureBone> {
+	let set = new Set<ArmatureBone>(), head = new THREE.Vector3(), other = new THREE.Vector3();
+	for (let bone of bones) {
+		let twin = otherSide(bone, bones);
+		if (twin === bone || !bone.scene_object || !twin.scene_object) continue;
+		bone.scene_object.getWorldPosition(head); twin.scene_object.getWorldPosition(other);
+		let a = head.getComponent(axis) * sign, b = other.getComponent(axis) * sign;
+		if (a > b || (a == b && isLeftName(bone.name))) set.add(bone);
+	}
+	return set;
+}
+/** Which named side (left or right) lies on the positive half of the axis, from the rig's paired bones; null if none. */
+export function positiveSideName(bones: ArmatureBone[], axis: number): string | null {
+	let source = [...sourceBones(bones, axis, 1)];
+	if (!source.length) return null;
+	return isLeftName(source[0].name) ? 'left' : 'right';
+}
+export function mirrorWeights(meshes: Mesh[], axis: number, sign: number) {
+	let report = {copied: 0, centre: 0, unmatched: 0, meshes: 0};
+	meshes = meshes.filter(mesh => mesh.getArmature());
+	if (!meshes.length) return report;
+	let armatures = [...new Set(meshes.map(mesh => mesh.getArmature()))];
+	let tracked = armatures.flatMap(armature => armature.getAllBones() as ArmatureBone[]);
+	Undo.initEdit({elements: tracked, mirror_modeling: false});
+	for (let mesh of meshes) {
+		let bones = mesh.getArmature().getAllBones() as ArmatureBone[];
+		let twin_bone = new Map(bones.map(bone => [bone, otherSide(bone, bones)]));
+		let source = sourceBones(bones, axis, sign);
+		let map = buildMirrorMap(mesh, axis);
+		for (let vkey in mesh.vertices) {
+			let position = mesh.vertices[vkey][axis];
+			if (Math.abs(position) <= WEIGHT_MIRROR.TOLERANCE) {
+				let total_before = bones.reduce((t, bone) => t + bone.getVertexWeight(mesh, vkey), 0);
+				let changed = false;
+				for (let bone of source) {
+					let twin = twin_bone.get(bone), w = bone.getVertexWeight(mesh, vkey);
+					if (twin.getVertexWeight(mesh, vkey) != w) { twin.setVertexWeight(mesh, vkey, w); changed = true; }
+				}
+				if (!changed) continue;
+				let total = bones.reduce((t, bone) => t + bone.getVertexWeight(mesh, vkey), 0);
+				if (total > 0 && total_before > 0) for (let bone of bones) { let w = bone.getVertexWeight(mesh, vkey); if (w) bone.setVertexWeight(mesh, vkey, w * total_before / total); }
+				report.centre++;
+				continue;
+			}
+			if (Math.sign(position) != sign) continue;
+			let twin = map.get(vkey);
+			if (!twin) { report.unmatched++; continue; }
+			for (let bone of bones) bone.setVertexWeight(mesh, twin);	// replace, not add
+			for (let bone of bones) {
+				let weight = bone.getVertexWeight(mesh, vkey);
+				if (weight) twin_bone.get(bone).setVertexWeight(mesh, twin, weight);
+			}
+			report.copied++;
+		}
+		report.meshes++;
+	}
+	Undo.finishEdit('Mirror weights');
+	Canvas.updateView({elements: meshes, element_aspects: {geometry: true}});
+	return report;
+}
+// @ts-ignore
+window.DEWMirrorWeights = {mirrorWeights, positiveSideName};
+function mirrorWeightsTargets(): Mesh[] {
+	let bone = ArmatureBone.selected[0] as ArmatureBone | undefined;
+	let armature = bone && bone.getArmature();
+	return Mesh.all.filter(mesh => mesh.getArmature() && (!armature || mesh.getArmature() === armature));
+}
+new Action('weight_brush_mirror_weights', {
+	name: 'Mirror Weights',
+	description: 'Copy one whole side\'s weights onto the other side, left and right bones swapped (axis: the brush Mirror setting, X while it is off)',
+	icon: 'flip',
+	category: 'edit',
+	condition: () => Toolbox?.selected?.id == 'weight_brush',
+	click(event) {
+		let axis = ({x: 0, y: 1, z: 2})[mirror_select.value as string] ?? 0, letter = 'XYZ'[axis];
+		let meshes = mirrorWeightsTargets();
+		if (!meshes.length) return Blockbench.showQuickMessage('No mesh attached to an armature');
+		let bones = meshes[0].getArmature().getAllBones() as ArmatureBone[];
+		let positive = positiveSideName(bones, axis), negative = positive == 'left' ? 'right' : positive == 'right' ? 'left' : null;
+		let run = (sign: number, from: string, to: string) => {
+			let r = mirrorWeights(meshes, axis, sign);
+			Blockbench.showQuickMessage(`Weights mirrored ${from} to ${to}: ${r.copied} vertices copied, ${r.centre} on the centre line evened` + (r.unmatched ? `, ${r.unmatched} without a mirror partner left alone` : ''), 3000);
+		};
+		let label = (sign: number) => {
+			let from = sign > 0 ? positive : negative, to = sign > 0 ? negative : positive;
+			let axes = sign > 0 ? `+${letter} onto -${letter}` : `-${letter} onto +${letter}`;
+			return from ? `${from[0].toUpperCase() + from.slice(1)} onto ${to} (${axes})` : axes;
+		};
+		new Menu([
+			{name: label(1), icon: 'arrow_forward', click: () => run(1, positive || `+${letter}`, negative || `-${letter}`)},
+			{name: label(-1), icon: 'arrow_back', click: () => run(-1, negative || `-${letter}`, positive || `+${letter}`)},
+		]).open(event as MouseEvent);
+	}
+});
 // Fork (2026-09-25): Smooth, a toggle: the brush averages the weights under it instead of painting the selected bone
 new Toggle('weight_brush_smooth', {
 	name: 'Smooth Weights',

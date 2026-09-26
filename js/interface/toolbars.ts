@@ -662,6 +662,7 @@ export const BARS = {
 				'slider_weight_brush_strength',
 				'slider_weight_brush_falloff',
 				'weight_brush_mirror',
+				'weight_brush_mirror_weights',
 				'_',
 				'dew_pose_preview',
 				'weight_brush_blend_mode',
