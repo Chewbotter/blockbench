@@ -263,7 +263,7 @@ controller.updateSelection = function(element) {
 // mid-stroke, so it takes the stock path.
 const stockCalculateVertexDeformation = Armature.prototype.calculateVertexDeformation;
 const influence_cache = new Map();	// mesh uuid -> {armature, bones, influences: Map vkey -> [[bone, weight], ...]}
-function gatherInfluences(armature, mesh) {
+export function gatherInfluences(armature, mesh) {
 	let bones = armature.getAllBones();
 	let prefix = mesh.uuid.substring(0, 6) + ':';
 	let influences = new Map();
