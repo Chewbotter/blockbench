@@ -211,6 +211,19 @@
 		pointer-events: none;
 		z-index: 12;
 	}
+	/* fork: the Falloff halo, a fainter ring as far as the brush reaches */
+	#weight_brush_outline.has_halo::after {
+		content: '';
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		width: calc(var(--radius) * (1 + var(--halo, 0)) * 2px);
+		height: calc(var(--radius) * (1 + var(--halo, 0)) * 2px);
+		transform: translate(-50%, -50%);
+		border-radius: 50%;
+		border: 1px dotted var(--color-light);
+		opacity: 0.45;
+	}
 	.text_padding {
 		margin-left: 5px;
 		margin-right: 5px;

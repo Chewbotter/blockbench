@@ -12,6 +12,7 @@ function updateBrushOutline(event: PointerEvent | KeyboardEvent) {
 	if (!brush_outline || Toolbox.selected.id != 'weight_brush') return;
 	let preview = Preview.selected as Preview;
 	preview.node.append(brush_outline);
+	syncBrushOutline();
 	brush_outline.style.display = (event.altKey || Pressing.overrides.alt) ? 'none' : 'block'
 
 	if ('clientX' in event) {
@@ -152,6 +153,13 @@ new Tool('weight_brush', {
 				let distance = vec.set(screen_pos.x - click_pos[0], screen_pos.y - click_pos[1]).length();
 				let falloff = (1-(distance / radius)) * (1 + base_radius);
 				let influence = Math.hermiteBlend(Math.clamp(falloff, 0, 1));
+				// Fork: the Falloff halo reaches past the ring with a light touch, so a low-poly mesh gets a gradient
+				// without the brush landing on each vertex; inside the ring the stronger of the two wins, so no seam
+				let halo = halo_slider.get() / 100;
+				if (halo > 0) {
+					let reach = radius * (1 + halo);
+					influence = Math.max(influence, WEIGHT_BRUSH.HALO_PEAK * Math.hermiteBlend(Math.clamp(1 - distance / reach, 0, 1)));
+				}
 				if (influence <= 0) continue;
 				if (!isVertexVisible(mesh, vkey)) continue;
 				let value = armature_bone.getVertexWeight(mesh, vkey) ?? 0;
@@ -159,6 +167,7 @@ new Tool('weight_brush', {
 				if (event.shiftKey || Pressing.overrides.shift) {
 					influence /= 8;
 				}
+				influence *= strength_slider.get() / 100;
 				if (subtract) {
 					value = value * (1-influence);
 				} else {
@@ -221,6 +230,7 @@ new Tool('weight_brush', {
 		Interface.addSuggestedModifierKey('alt', 'modifier_actions.select_bone');
 
 		brush_outline = brush_outline ?? Interface.createElement('div', {id: 'weight_brush_outline'});
+		syncBrushOutline();
 		document.addEventListener('pointermove', updateBrushOutline);
 	},
 	onUnselect() {
@@ -254,6 +264,37 @@ let limit_slider = new NumSlider('slider_weight_brush_limit', {
 	tool_setting: 'slider_weight_brush_limit',
 	category: 'edit',
 	
+	settings: {
+		min: 1, max: 100, interval: 1, default: 100, show_bar: true,
+	}
+})
+// Fork (2026-09-25): how far each dab goes toward the limit. Stock is 100: a dab at the brush centre sets the full
+// limit in one step (black straight to red), where a lower strength builds the weight up over several passes and the
+// colours step through blue and green on the way. Scales the other bones' reduction too, since that uses the influence.
+export const WEIGHT_BRUSH = {
+	HALO_PEAK: 0.3,	// influence of the Falloff halo at the brush centre, easing to 0 at the halo's edge
+};
+// Fork (2026-09-25): how far past the ring the brush reaches with a light touch, in percent of its radius. 0 is stock.
+let halo_slider = new NumSlider('slider_weight_brush_falloff', {
+	condition: () => Toolbox?.selected?.id == 'weight_brush',
+	tool_setting: 'slider_weight_brush_falloff',
+	category: 'edit',
+	settings: {
+		min: 0, max: 300, interval: 5, default: 0,
+	}
+})
+function syncBrushOutline() {
+	if (!brush_outline) return;
+	brush_outline.style.setProperty('--radius', size_slider.get().toString());
+	let halo = halo_slider.get() / 100;
+	brush_outline.style.setProperty('--halo', halo.toString());
+	brush_outline.classList.toggle('has_halo', halo > 0);
+}
+halo_slider.on('change', () => syncBrushOutline());
+let strength_slider = new NumSlider('slider_weight_brush_strength', {
+	condition: () => Toolbox?.selected?.id == 'weight_brush',
+	tool_setting: 'slider_weight_brush_strength',
+	category: 'edit',
 	settings: {
 		min: 1, max: 100, interval: 1, default: 100, show_bar: true,
 	}

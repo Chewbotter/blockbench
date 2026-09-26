@@ -659,6 +659,8 @@ export const BARS = {
 			children: [
 				'slider_weight_brush_size',
 				'slider_weight_brush_limit',
+				'slider_weight_brush_strength',
+				'slider_weight_brush_falloff',
 				'weight_brush_blend_mode',
 				'weight_brush_xray',
 				'_',
