@@ -666,6 +666,7 @@ export const BARS = {
 				'dew_pose_test_animation',
 				'dew_pose_test',
 				'weight_brush_blend_mode',
+				'weight_brush_smooth',
 				'weight_brush_xray',
 				'_',
 				'mirror_modeling',

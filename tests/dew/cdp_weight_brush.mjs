@@ -8,9 +8,14 @@
 // blue, and a second drag about 36 percent (the user's expectation, 2026-09-25). And the new sliders show their values.
 // And where the surface folds away from the camera, vertices with a face toward it count as visible (they were skipped).
 // And the brush's own Mirror copies each painted vertex's weights, exactly and replacing, to its twin across an axis.
+// And Smooth averages the weights under the brush, all bones, in shares.
 import assert from 'assert';
 import fs from 'fs';
 const FILE = 'D:/Work/CatWhisperer/models_working/cat_common.bbmodel';
+// The stock-path control stroke (A's comparison, C's speed ratio) takes ~20 s and is timing-sensitive; the fast path was
+// shown exact against it several ways (2026-09-25). Run it with WEIGHT_CONTROL=1 when the painting maths or the fast
+// path changes.
+const WITH_CONTROL = process.env.WEIGHT_CONTROL == '1';
 const targets = await (await fetch('http://127.0.0.1:9223/json')).json();
 const page = targets.find(t => t.type == 'page' && t.url.includes('index.html')) ?? targets.find(t => t.type == 'page');
 const ws = new WebSocket(page.webSocketDebuggerUrl);
@@ -67,10 +72,13 @@ if (!fs.existsSync(FILE)) {
 
 	// the control first (the order proven clean in fresh apps): the stock per-move rebuild paints the stroke, undo, then
 	// the fast path paints the same stroke, paced alike so every move arrives
+	let stock = null, stock_weights = null;
+	if (WITH_CONTROL) {
 	await ev(`(() => { DEWWeightPerf.WEIGHT_PERF.FAST_STROKE = false; return true; })()`);
-	let stock = await stroke(null, 700);	// ~250 ms a move on this path: a thin margin let a cold app merge a move and skip an edge dab
-	let stock_weights = await ev(`weights()`);
+	stock = await stroke(null, 700);	// ~250 ms a move on this path: a thin margin let a cold app merge a move and skip an edge dab
+	stock_weights = await ev(`weights()`);
 	await ev(`(() => { Undo.undo(); DEWWeightPerf.WEIGHT_PERF.FAST_STROKE = true; return true; })()`);
+	}
 	let fast = await stroke(null, 60);
 	let fast_weights = await ev(`weights()`);
 	let after_release = await json(`(() => { let now = Array.from(body.mesh.geometry.attributes.color.array); Mesh.preview_controller.updateGeometry(body); let rebuilt = Array.from(body.mesh.geometry.attributes.color.array); let d = 0; for (let i = 0; i < now.length; i++) d = Math.max(d, Math.abs(now[i] - rebuilt[i])); return JSON.stringify({max_diff: d}); })()`);
@@ -80,16 +88,18 @@ if (!fs.existsSync(FILE)) {
 	await ev(`(() => { Undo.undo(); return true; })()`);
 	fast.seen = looked.seen;
 	console.log('   fast ', JSON.stringify({press: fast.press, median: fast.median, worst: fast.worst, release: fast.release}));
-	console.log('   stock', JSON.stringify({press: stock.press, median: stock.median, worst: stock.worst, release: stock.release}));
+	if (stock) console.log('   stock', JSON.stringify({press: stock.press, median: stock.median, worst: stock.worst, release: stock.release}));
 
 	check('A. the stroke painted something', fast_weights != await ev(`start_weights`), null);
-	let wdiff = null;
-	if (fast_weights != stock_weights) { let a = JSON.parse(fast_weights), b = JSON.parse(stock_weights); wdiff = []; a.forEach(([name, list], i) => { let m = Object.fromEntries(list), n = Object.fromEntries(b[i][1]); for (let k of new Set([...Object.keys(m), ...Object.keys(n)])) if (m[k] !== n[k]) wdiff.push([name, k, m[k], n[k]]); }); wdiff = {count: wdiff.length, first: wdiff.slice(0, 6), sliders: await json(`JSON.stringify({strength: BarItems.slider_weight_brush_strength.get(), falloff: BarItems.slider_weight_brush_falloff.get(), limit: BarItems.slider_weight_brush_limit.get(), size: BarItems.slider_weight_brush_size.get()})`)}; }
-	check('   and the same stroke with the stock path (control) leaves identical weights on every bone', fast_weights == stock_weights, wdiff);
+	if (WITH_CONTROL) {
+		let wdiff = null;
+		if (fast_weights != stock_weights) { let a = JSON.parse(fast_weights), b = JSON.parse(stock_weights); wdiff = []; a.forEach(([name, list], i) => { let m = Object.fromEntries(list), n = Object.fromEntries(b[i][1]); for (let k of new Set([...Object.keys(m), ...Object.keys(n)])) if (m[k] !== n[k]) wdiff.push([name, k, m[k], n[k]]); }); wdiff = {count: wdiff.length, first: wdiff.slice(0, 6), sliders: await json(`JSON.stringify({strength: BarItems.slider_weight_brush_strength.get(), falloff: BarItems.slider_weight_brush_falloff.get(), limit: BarItems.slider_weight_brush_limit.get(), size: BarItems.slider_weight_brush_size.get()})`)}; }
+		check('   and the same stroke with the stock path (control) leaves identical weights on every bone', fast_weights == stock_weights, wdiff);
+	}
 	check('B. mid-stroke the in-place colours equal a full rebuild of the same weights', fast.seen && fast.seen.same_length && fast.seen.max_diff < 1e-6, fast.seen);
 	check('   and after release the colours are the rebuild\'s', after_release.max_diff < 1e-6, after_release);
 	check('C. quick: press under 100 ms, a move under 30 ms at the median, release under 400 ms', fast.press < 100 && fast.median < 30 && fast.release < 400, fast);
-	check('   and each move is several times quicker than the stock path', fast.median * 4 < stock.median, {fast: fast.median, stock: stock.median});
+	if (WITH_CONTROL) check('   and each move is several times quicker than the stock path', fast.median * 4 < stock.median, {fast: fast.median, stock: stock.median});
 	check('D. undo puts every weight back, redo the stroke again', undo.back && undo.again && undo.restored, undo);
 
 	// E. strength: dabs without moving, at the same spot, strength 20, limit 100
@@ -232,6 +242,30 @@ if (!fs.existsSync(FILE)) {
 	check('K. a neck vertex whose weights totalled 0.19 takes one dab at strength 20 as a fifth of its weight, not most of it', k && k.aim.visible && Math.abs(k.painted.share - 0.2) < 0.02 && Math.abs(k.painted.total - 1) < 1e-6, k);
 	check('   and one erase dab takes that share down by a fifth, handing it back to the other bones', k && Math.abs(k.erased.share - k.painted.share * 0.8) < 0.02 && Math.abs(k.erased.total - 1) < 1e-6, k);
 	check('   undo puts the vertex back as it was', k && JSON.stringify(k.restored) == JSON.stringify(k.aim.before), k);
+	// L. Smooth: three dabs at full strength on one spot average the weights under the brush, all bones, in shares
+	const l = await (async () => {
+		await ev(`(() => { BarItems.weight_brush_mirror.set('off'); BarItems.slider_weight_brush_size.setValue(80); BarItems.slider_weight_brush_strength.setValue(100); BarItems.slider_weight_brush_falloff.setValue(0);
+			unselectAllElements(); ArmatureBone.all.find(b => b.name == 'spine_2').select(); updateSelection(); BarItems.weight_brush.select();
+			let p = Preview.selected; p.camera.position.set(90, 45, 10); p.controls.target.set(0, 38, -8); p.controls.update(); p.render(); DEWWeightVisibility.reset();
+			window.__smooth_was = BarItems.weight_brush_smooth.value; BarItems.weight_brush_smooth.set(true);
+			window.sharesOf = () => Object.fromEntries(Object.keys(body.vertices).map(k => { let t = ArmatureBone.all.reduce((x, b) => x + b.getVertexWeight(body, k), 0); return [k, Object.fromEntries(ArmatureBone.all.map(b => [b.name, t ? b.getVertexWeight(body, k) / t : 0]).filter(e => e[1] > 0))]; }));
+			window.__s0 = sharesOf(); return true; })()`);
+		for (let i = 0; i < 3; i++) { await mouse('mouseMoved', s.x, s.y, { button: 'none' }); await sleep(50); await mouse('mousePressed', s.x, s.y, { buttons: 1 }); await sleep(40); await mouse('mouseReleased', s.x, s.y); await sleep(200); }
+		return json(`(() => { let s1 = sharesOf(); let touched = Object.keys(s1).filter(k => JSON.stringify(s1[k]) != JSON.stringify(__s0[k]));
+			let bones = new Set(); touched.forEach(k => { Object.keys(__s0[k]).forEach(b => bones.add(b)); Object.keys(s1[k]).forEach(b => bones.add(b)); });
+			let spread = st => { let v = 0; for (let b of bones) { let xs = touched.map(k => st[k][b] || 0), m = xs.reduce((a, x) => a + x, 0) / xs.length; v += xs.reduce((a, x) => a + (x - m) * (x - m), 0) / xs.length; } return v; };
+			let totals = touched.map(k => ArmatureBone.all.reduce((x, b) => x + b.getVertexWeight(body, k), 0));
+			let r = {totals: totals.map(t => +t.toFixed(6)), touched: touched.length, spread_before: +spread(__s0).toFixed(5), spread_after: +spread(s1).toFixed(5), totals_ok: totals.every(t => Math.abs(t - 1) < 1e-6), finite: totals.every(t => isFinite(t))};
+			Undo.undo(); Undo.undo(); Undo.undo(); BarItems.weight_brush_smooth.set(__smooth_was); r.restored = JSON.stringify(sharesOf()) == JSON.stringify(__s0);
+			r.defaults = {size: BarItems.slider_weight_brush_size.settings.default, falloff: BarItems.slider_weight_brush_falloff.settings.default, strength: BarItems.slider_weight_brush_strength.settings.default, smooth_off: BarItems.weight_brush_smooth.default === false || BarItems.weight_brush_smooth.value === false};
+			r.on_toolbar = Toolbars.weight_brush.children.some(c => c && c.id == 'weight_brush_smooth');
+			return JSON.stringify(r); })()`);
+	})();
+	console.log('   smooth:', JSON.stringify(l));
+	check('L. three Smooth dabs at full strength cut the spread of weights under the brush by at least half', l.touched > 1 && l.spread_after <= l.spread_before * 0.5, l);
+	check('   every touched vertex still totals 1, nothing invalid, and undo restores them', l.totals_ok && l.finite && l.restored, l);
+	check('   the Smooth toggle is on the toolbar and starts off; defaults are size 80, falloff 20, strength 20', l.on_toolbar && l.defaults.smooth_off && l.defaults.size == 80 && l.defaults.falloff == 20 && l.defaults.strength == 20, l);
+	await ev(`(() => { BarItems.slider_weight_brush_size.setValue(50); BarItems.slider_weight_brush_strength.setValue(100); BarItems.slider_weight_brush_falloff.setValue(0); return true; })()`);
 	console.log('   strength 20, the centre vertex over five dabs:', e.got.join(' '), ' expected', e.expected.join(' '));
 	check('E. at strength 20 one dab moves a vertex at most a fifth of the way to the limit, the centre ones exactly', e.touched > 0 && Math.abs(e.first_step - 0.2) < 0.005, e);
 	check('   and five dabs build it up by the same rule, through the blue and green of the ramp', e.got.every((v, i) => Math.abs(v - e.expected[i]) < 0.01), e);

@@ -191,6 +191,8 @@ new Tool('weight_brush', {
 			let base_radius = 0.2;
 			let target_average_x = 0;
 			let affected_vkeys = new Set<string>();
+			let smooth = !!BarItems.weight_brush_smooth?.value;
+			let smooth_dab: {vkey: string, amount: number, influence: number}[] = [];
 
 			updateScreenSpaceVertexPositions(mesh);
 
@@ -229,6 +231,10 @@ new Tool('weight_brush', {
 				// the fraction of the way to go that this dab covers: a whole pass covers Strength times the influence
 				let per_pass = Math.clamp(influence * strength_slider.get() / 100, 0, 1);
 				let amount = 1 - Math.pow(1 - per_pass, pass_share);
+				if (smooth) {	// Smooth: gathered here, averaged and applied after the loop
+					smooth_dab.push({vkey, amount, influence});
+					continue;
+				}
 				if (subtract) {
 					value = value * (1-amount);
 				} else {
@@ -262,6 +268,44 @@ new Tool('weight_brush', {
 				}
 				target_average_x += mesh.vertices[vkey][0];
 				affected_vkeys.add(vkey);
+			}
+			// Fork (2026-09-25): Smooth. The vertices under the brush are averaged, every bone at once and in shares (each
+			// vertex's weights as fractions of its total), each vertex counting once (weighting by the brush let the centre
+			// vertex dominate, so it hardly moved); each then moves toward that average by the dab's amount (Strength per
+			// pass, the falloff) and ends normalized. An unweighted vertex does not pull the average toward nothing, but
+			// takes the blend. The selected bone and Ctrl play no part.
+			if (smooth_dab.length) {
+				let shares = (vkey: string) => {
+					let out = new Map<ArmatureBone, number>(), total = 0;
+					for (let bone of all_bones) { let w = bone.getVertexWeight(mesh, vkey); if (w) { out.set(bone, w); total += w; } }
+					if (total > 0) for (let [bone, w] of out) out.set(bone, w / total);
+					return out;
+				};
+				let average = new Map<ArmatureBone, number>(), weight_sum = 0;
+				let before = smooth_dab.map(entry => shares(entry.vkey));
+				smooth_dab.forEach((entry, i) => {
+					if (!before[i].size) return;
+					weight_sum += 1;
+					for (let [bone, w] of before[i]) average.set(bone, (average.get(bone) ?? 0) + w);
+				});
+				if (weight_sum > 0) {
+					for (let [bone, w] of average) average.set(bone, w / weight_sum);
+					smooth_dab.forEach((entry, i) => {
+						let now = before[i], next = new Map<ArmatureBone, number>(), total = 0;
+						for (let bone of all_bones) {
+							let from = now.get(bone) ?? 0, to = average.get(bone) ?? 0;
+							if (from == 0 && to == 0) continue;
+							let w = from + (to - from) * entry.amount;
+							next.set(bone, w); total += w;
+						}
+						// drop the specks first, then scale what is left to total exactly 1
+						let kept = [...next].filter(([, w]) => total > 0 && w / total >= WEIGHT_BRUSH.MIN_WEIGHT);
+						let kept_total = kept.reduce((t, [, w]) => t + w, 0);
+						for (let [bone] of next) bone.setVertexWeight(mesh, entry.vkey);
+						for (let [bone, w] of kept) bone.setVertexWeight(mesh, entry.vkey, w / kept_total);
+						affected_vkeys.add(entry.vkey);
+					});
+				}
 			}
 			if (mirror_map) {
 				let painted = [...affected_vkeys];
@@ -336,8 +380,8 @@ let size_slider = new NumSlider('slider_weight_brush_size', {
 	tool_setting: 'weight_brush_size',
 	category: 'edit',
 	settings: {
-		// fork: 150, not stock 50; on a low-poly mesh like the user's cat a 50 px brush lands on almost no vertex
-		min: 1, max: 1024, interval: 1, default: 150,
+		// fork: 80, not stock 50 (user; 150 was the first try); on a low-poly mesh like the cat 50 px lands on almost no vertex
+		min: 1, max: 1024, interval: 1, default: 80,
 	}
 })
 size_slider.on('change', (data: {number: number}) => {
@@ -382,6 +426,15 @@ function buildMirrorMap(mesh: Mesh, axis: number): Map<string, string> {
 	}
 	return map;
 }
+// Fork (2026-09-25): Smooth, a toggle: the brush averages the weights under it instead of painting the selected bone
+new Toggle('weight_brush_smooth', {
+	name: 'Smooth Weights',
+	description: 'The brush averages the weights of the vertices under it, all bones at once, instead of painting the selected bone',
+	icon: 'blur_on',
+	category: 'edit',
+	condition: () => Toolbox?.selected?.id == 'weight_brush',
+	default: false,
+});
 let mirror_select = new BarSelect('weight_brush_mirror', {
 	category: 'edit',
 	condition: () => Toolbox?.selected?.id == 'weight_brush',
@@ -406,7 +459,7 @@ let halo_slider = new NumSlider('slider_weight_brush_falloff', {
 	tool_setting: 'slider_weight_brush_falloff',
 	category: 'edit',
 	settings: {
-		min: 0, max: 300, interval: 5, default: 0,
+		min: 0, max: 300, interval: 5, default: 20,	// user: 20
 	}
 })
 function syncBrushOutline() {
