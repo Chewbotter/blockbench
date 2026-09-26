@@ -125,6 +125,7 @@ new Tool('weight_brush', {
 		
 		let last_click_pos = [0, 0];
 		let stroke_dirty = false;
+		let first_dab = true;
 		const draw = (event: MouseEvent, data?: CanvasClickData|false) => {
 			let radius = size_slider.get();
 			let click_pos = [
@@ -132,10 +133,18 @@ new Tool('weight_brush', {
 				event.clientY - preview_offset.top,
 			];
 			let subtract = event.ctrlOrCmd || Pressing.overrides.ctrl;
-			if (Math.pow(last_click_pos[0]-click_pos[0], 2) + Math.pow(last_click_pos[1]-click_pos[1], 2) < 30) {
+			let moved = Math.sqrt(Math.pow(last_click_pos[0]-click_pos[0], 2) + Math.pow(last_click_pos[1]-click_pos[1], 2));
+			if (moved * moved < 30) {
 				return;
 			}
 			last_click_pos = click_pos;
+			// Fork (2026-09-25): Strength is per PASS, not per dab. A drag lays a dab every ~5.5 px of travel, so a
+			// vertex under the brush got about 2 * radius / 5.5 dabs (18 at radius 50) and any strength saturated in one
+			// drag. Each dab now applies the share of a pass that the travel since the last dab makes, so one steady pass
+			// through the brush centre puts exactly Strength on a vertex, whatever the speed; the first dab of a stroke
+			// (a click) counts as one whole pass.
+			let pass_share = first_dab ? 1 : Math.min(1, moved / (radius * WEIGHT_BRUSH.PASS_RADII));
+			first_dab = false;
 
 			let mesh = element;
 			if (mesh instanceof Mesh == false) return;
@@ -167,25 +176,30 @@ new Tool('weight_brush', {
 				if (event.shiftKey || Pressing.overrides.shift) {
 					influence /= 8;
 				}
-				influence *= strength_slider.get() / 100;
+				// the fraction of the way to go that this dab covers: a whole pass covers Strength times the influence
+				let per_pass = Math.clamp(influence * strength_slider.get() / 100, 0, 1);
+				let amount = 1 - Math.pow(1 - per_pass, pass_share);
 				if (subtract) {
-					value = value * (1-influence);
+					value = value * (1-amount);
 				} else {
-					value = value + (limit-value) * influence;
+					value = value + (limit-value) * amount;
 				}
 
-				// Reduce weight on other bones
-				if (blend_mode_select.value == 'set') {
+				// Set: the weight is handed over. The other bones give up the same share of theirs as this bone gained
+				// of what it lacked, so the vertex's total stays put and its colour follows the painting smoothly (stock
+				// took the raw influence off every other bone on every dab)
+				if (blend_mode_select.value == 'set' && !subtract) {
 					for (let bone of other_bones) {
-						if (bone.getVertexWeight(mesh, vkey) && !subtract) {
-							let lower_limit = Math.min(Math.max(0, 1-limit), bone.getVertexWeight(mesh, vkey));
-							let value = Math.clamp(bone.getVertexWeight(mesh, vkey) - influence, lower_limit, 1);
-							bone.setVertexWeight(mesh, vkey, value);
-						}
+						let other = bone.getVertexWeight(mesh, vkey);
+						if (!other) continue;
+						let lower_limit = Math.min(Math.max(0, 1-limit), other);
+						bone.setVertexWeight(mesh, vkey, Math.max(other * (1 - amount), lower_limit));
 					}
 				}
 
-				if (value < 0.04) {
+				// stock dropped anything under 0.04 on every dab, which wiped a light brush or the Falloff halo before it
+				// could build up; the cleanup stays for subtracting, where it is meant
+				if (subtract ? value < 0.04 : value < WEIGHT_BRUSH.MIN_WEIGHT) {
 					armature_bone.setVertexWeight(mesh, vkey);
 				} else {
 					armature_bone.setVertexWeight(mesh, vkey, value);
@@ -225,6 +239,8 @@ new Tool('weight_brush', {
 		Canvas.meshVertexMaterial.size = 5;
 		size_slider.update();
 		limit_slider.update();
+		strength_slider.update();	// fork: a NumSlider writes its text only on change, so these showed blank
+		halo_slider.update();
 		Interface.addSuggestedModifierKey('ctrl', 'modifier_actions.subtract');
 		Interface.addSuggestedModifierKey('shift', 'modifier_actions.reduced_intensity');
 		Interface.addSuggestedModifierKey('alt', 'modifier_actions.select_bone');
@@ -251,7 +267,8 @@ let size_slider = new NumSlider('slider_weight_brush_size', {
 	tool_setting: 'weight_brush_size',
 	category: 'edit',
 	settings: {
-		min: 1, max: 1024, interval: 1, default: 50,
+		// fork: 150, not stock 50; on a low-poly mesh like the user's cat a 50 px brush lands on almost no vertex
+		min: 1, max: 1024, interval: 1, default: 150,
 	}
 })
 size_slider.on('change', (data: {number: number}) => {
@@ -272,7 +289,12 @@ let limit_slider = new NumSlider('slider_weight_brush_limit', {
 // limit in one step (black straight to red), where a lower strength builds the weight up over several passes and the
 // colours step through blue and green on the way. Scales the other bones' reduction too, since that uses the influence.
 export const WEIGHT_BRUSH = {
-	HALO_PEAK: 0.3,	// influence of the Falloff halo at the brush centre, easing to 0 at the halo's edge
+	HALO_PEAK: 0.3,		// influence of the Falloff halo at the brush centre, easing to 0 at the halo's edge
+	// Mouse travel, in brush radii, that makes one pass. Not 2 (the diameter): the influence is 1 only over the middle
+	// sixth and eases to 0 at the ring, and averaged along a line through the centre it is worth 7/6 of a radius, so a
+	// steady pass through the centre adds Strength (at low strengths; higher ones compound a little less)
+	PASS_RADII: 7 / 6,
+	MIN_WEIGHT: 0.0005,	// a painted weight below this is dropped (subtracting keeps stock's 0.04)
 };
 // Fork (2026-09-25): how far past the ring the brush reaches with a light touch, in percent of its radius. 0 is stock.
 let halo_slider = new NumSlider('slider_weight_brush_falloff', {

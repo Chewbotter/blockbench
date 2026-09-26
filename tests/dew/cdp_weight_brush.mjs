@@ -4,7 +4,8 @@
 // the colours are the rebuild's; the press, each move and the release stay quick; undo puts every weight back. And the
 // Strength slider: at 20 a dab moves a vertex a fifth of the way to the limit, and dabs build up by that rule. And the
 // Falloff halo: at 100 a dab reaches past the ring to twice the radius with at most HALO_PEAK of the way; at 0 nothing
-// past the ring changes.
+// past the ring changes. Strength is per pass: one steady drag at 20 leaves the vertices along it at about a fifth, all
+// blue, and a second drag about 36 percent (the user's expectation, 2026-09-25). And the new sliders show their values.
 import assert from 'assert';
 import fs from 'fs';
 const FILE = 'D:/Work/CatWhisperer/models_working/cat_common.bbmodel';
@@ -35,6 +36,8 @@ if (!fs.existsSync(FILE)) {
 		let bone = ArmatureBone.all.find(b => b.name == 'spine_2');
 		unselectAllElements(); bone.select(); updateSelection();
 		BarItems.weight_brush.select();
+		// tool settings persist in the profile, so an aborted run leaves them changed: set every one
+		BarItems.slider_weight_brush_size.setValue(50); BarItems.slider_weight_brush_limit.setValue(100); BarItems.slider_weight_brush_strength.setValue(100); BarItems.slider_weight_brush_falloff.setValue(0); BarItems.weight_brush_blend_mode.set('set');
 		let p = Preview.selected; p.setProjectionMode(false); p.camera.position.set(90, 45, 10); p.controls.target.set(0, 38, -8); p.controls.update(); p.render();
 		window.weights = () => JSON.stringify(ArmatureBone.all.map(b => [b.name, Object.entries(b.vertex_weights || {}).sort()]));	// flat, keyed 'meshuuid6:vkey'
 		window.start_weights = weights();
@@ -55,16 +58,21 @@ if (!fs.existsSync(FILE)) {
 	};
 	// mid-stroke: the colours now in the buffer, against a full stock rebuild of the same state
 	const look = `(() => { let before = Array.from(body.mesh.geometry.attributes.color.array); Mesh.preview_controller.updateGeometry(body); let after = Array.from(body.mesh.geometry.attributes.color.array);
-		let diff = 0; for (let i = 0; i < before.length; i++) diff = Math.max(diff, Math.abs(before[i] - after[i])); return JSON.stringify({slots: before.length / 3, same_length: before.length == after.length, max_diff: diff}); })()`;
+		let diff = 0, worst = -1; for (let i = 0; i < before.length; i++) { let d = Math.abs(before[i] - after[i]); if (d > diff) { diff = d; worst = i; } }
+		let info = null; if (diff > 1e-6) { let slot = Math.floor(worst / 3), n = 0, vkey = null; for (let f of Object.values(body.faces)) { if (f.vertices.length != 3 && f.vertices.length != 4) continue; for (let v of f.vertices) { if (n == slot) vkey = v; n++; } }
+			info = {slot, vkey, before: before.slice(slot * 3, slot * 3 + 3), after: after.slice(slot * 3, slot * 3 + 3), weights: ArmatureBone.all.map(b => [b.name, b.getVertexWeight(body, vkey)]).filter(x => x[1])}; }
+		return JSON.stringify({slots: before.length / 3, same_length: before.length == after.length, max_diff: diff, info}); })()`;
 
-	let fast = await stroke(look);
-	let fast_weights = await ev(`weights()`);
-	let after_release = await json(`(() => { let now = Array.from(body.mesh.geometry.attributes.color.array); Mesh.preview_controller.updateGeometry(body); let rebuilt = Array.from(body.mesh.geometry.attributes.color.array); let d = 0; for (let i = 0; i < now.length; i++) d = Math.max(d, Math.abs(now[i] - rebuilt[i])); return JSON.stringify({max_diff: d}); })()`);
-	let undo = await json(`(() => { Undo.undo(); let back = weights() == start_weights; Undo.redo(); let again = weights() == ${JSON.stringify(fast_weights)}; Undo.undo(); return JSON.stringify({back, again, restored: weights() == start_weights}); })()`);
+	// the control first (the order proven clean in fresh apps): the stock per-move rebuild paints the stroke, undo, then
+	// the fast path paints the same stroke, paced alike so every move arrives
 	await ev(`(() => { DEWWeightPerf.WEIGHT_PERF.FAST_STROKE = false; return true; })()`);
 	let stock = await stroke(null, 350);
 	let stock_weights = await ev(`weights()`);
-	await ev(`(() => { DEWWeightPerf.WEIGHT_PERF.FAST_STROKE = true; Undo.undo(); return true; })()`);
+	await ev(`(() => { Undo.undo(); DEWWeightPerf.WEIGHT_PERF.FAST_STROKE = true; return true; })()`);
+	let fast = await stroke(look, 60);
+	let fast_weights = await ev(`weights()`);
+	let after_release = await json(`(() => { let now = Array.from(body.mesh.geometry.attributes.color.array); Mesh.preview_controller.updateGeometry(body); let rebuilt = Array.from(body.mesh.geometry.attributes.color.array); let d = 0; for (let i = 0; i < now.length; i++) d = Math.max(d, Math.abs(now[i] - rebuilt[i])); return JSON.stringify({max_diff: d}); })()`);
+	let undo = await json(`(() => { Undo.undo(); let back = weights() == start_weights; Undo.redo(); let again = weights() == ${JSON.stringify(fast_weights)}; Undo.undo(); return JSON.stringify({back, again, restored: weights() == start_weights}); })()`);
 	console.log('   fast ', JSON.stringify({press: fast.press, median: fast.median, worst: fast.worst, release: fast.release}));
 	console.log('   stock', JSON.stringify({press: stock.press, median: stock.median, worst: stock.worst, release: stock.release}));
 
@@ -119,6 +127,23 @@ if (!fs.existsSync(FILE)) {
 	check('F. with Falloff 0 nothing past the ring changes (stock)', f0.rows.every(r => r.d <= 1.0001) && !f0.halo_on, f0);
 	check('   with Falloff 100 the dab reaches vertices past the ring, none past twice the radius', beyond.length > 0 && f100.rows.every(r => r.d < 2.0001), f100);
 	check('   and past the ring each moves at most HALO_PEAK (0.3) of the way, less the further out', beyond.every(r => r.step <= 0.3 + 1e-4 && r.step > 0) && f100.halo_on, beyond);
+	// G. one steady drag at strength 20 with a bone that has no weight there, then a second drag the same way
+	await ev(`(() => { BarItems.slider_weight_brush_size.setValue(120); BarItems.slider_weight_brush_strength.setValue(20); BarItems.slider_weight_brush_falloff.setValue(0); unselectAllElements(); ArmatureBone.all.find(b => b.name == 'tail_8').select(); updateSelection(); BarItems.weight_brush.select(); window.__g = [bone_w()]; return true; })()`);
+	const pass = async () => { await mouse('mouseMoved', s.x - 150, s.y, { button: 'none' }); await sleep(60); await mouse('mousePressed', s.x - 150, s.y, { buttons: 1 }); for (let i = 1; i <= 50; i++) { await mouse('mouseMoved', s.x - 150 + i * 6, s.y, { buttons: 1 }); await sleep(8); } await mouse('mouseReleased', s.x + 150, s.y); await sleep(250); await ev(`(() => { __g.push(bone_w()); return true; })()`); };
+	await pass(); await pass();
+	const g = await json(`(() => { let p = Preview.selected, rect = p.canvas.getBoundingClientRect(), radius = BarItems.slider_weight_brush_size.get(); let rows = [];
+		for (let k in body.vertices) { let sc = p.vectorToScreenPosition(body.mesh.localToWorld(new THREE.Vector3().fromArray(body.vertices[k]))); let x = sc.x - (${s.x} - rect.left), y = sc.y - (${s.y} - rect.top);
+			if (Math.abs(y) > radius * 0.4 || x < -120 || x > 120) continue;	// near the path, away from its ends (the first dab is a whole pass)
+			{ let cam = p.camera.getWorldPosition(new THREE.Vector3()), w = body.mesh.localToWorld(new THREE.Vector3().fromArray(body.vertices[k])), dir = w.clone().sub(cam), len = dir.length(); let hit = new THREE.Raycaster(cam, dir.normalize()).intersectObject(body.mesh, false)[0]; if (hit && hit.distance < len - 0.001) continue; }	// the far side is not painted, as the brush means if (__g[1][k] == 0 && __g[0][k] == 0) continue;
+			let sum = ArmatureBone.all.reduce((t, b) => t + b.getVertexWeight(body, k), 0);
+			rows.push({y: +(y / radius).toFixed(2), w1: +__g[1][k].toFixed(3), w2: +__g[2][k].toFixed(3), share: +(__g[2][k] / (sum || 1)).toFixed(3), sum: +sum.toFixed(3)}); }
+		Undo.undo(); Undo.undo(); return JSON.stringify(rows); })()`);
+	console.log('   one drag at strength 20 on the path centre:', g.map(r => r.w1).join(' '), '| after a second drag:', g.map(r => r.w2).join(' '));
+	check('G. one steady drag at strength 20 leaves every vertex on the path at about a fifth (all blue), none saturated', g.length > 0 && g.every(r => r.w1 > 0.12 && r.w1 < 0.25), g);
+	check('   a second drag builds each further (about 36 percent on the centre line), and Set kept each vertex total weight', g.every(r => r.w2 > 0.23 && r.w2 < 0.44 && r.w2 > r.w1 + 0.08 && Math.abs(r.sum - 1) < 0.02), g);
+	const shown = await json(`(() => { BarItems.move_tool.select(); BarItems.weight_brush.select(); let text = id => (BarItems[id].node.querySelector('.nslide') || {}).textContent; return JSON.stringify({strength: text('slider_weight_brush_strength'), falloff: text('slider_weight_brush_falloff')}); })()`);
+	check('I. picking the brush shows the Strength and Falloff values without touching them', shown.strength && shown.strength.trim() != '' && shown.falloff && shown.falloff.trim() != '', shown);
+	await ev(`(() => { BarItems.slider_weight_brush_strength.setValue(100); BarItems.slider_weight_brush_size.setValue(50); return true; })()`);
 	console.log('   strength 20, the centre vertex over five dabs:', e.got.join(' '), ' expected', e.expected.join(' '));
 	check('E. at strength 20 one dab moves a vertex at most a fifth of the way to the limit, the centre ones exactly', e.touched > 0 && Math.abs(e.first_step - 0.2) < 0.005, e);
 	check('   and five dabs build it up by the same rule, through the blue and green of the ramp', e.got.every((v, i) => Math.abs(v - e.expected[i]) < 0.01), e);
