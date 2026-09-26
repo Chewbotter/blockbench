@@ -6,6 +6,7 @@
 // Falloff halo: at 100 a dab reaches past the ring to twice the radius with at most HALO_PEAK of the way; at 0 nothing
 // past the ring changes. Strength is per pass: one steady drag at 20 leaves the vertices along it at about a fifth, all
 // blue, and a second drag about 36 percent (the user's expectation, 2026-09-25). And the new sliders show their values.
+// And where the surface folds away from the camera, vertices with a face toward it count as visible (they were skipped).
 import assert from 'assert';
 import fs from 'fs';
 const FILE = 'D:/Work/CatWhisperer/models_working/cat_common.bbmodel';
@@ -144,6 +145,22 @@ if (!fs.existsSync(FILE)) {
 	const shown = await json(`(() => { BarItems.move_tool.select(); BarItems.weight_brush.select(); let text = id => (BarItems[id].node.querySelector('.nslide') || {}).textContent; return JSON.stringify({strength: text('slider_weight_brush_strength'), falloff: text('slider_weight_brush_falloff')}); })()`);
 	check('I. picking the brush shows the Strength and Falloff values without touching them', shown.strength && shown.strength.trim() != '' && shown.falloff && shown.falloff.trim() != '', shown);
 	await ev(`(() => { BarItems.slider_weight_brush_strength.setValue(100); BarItems.slider_weight_brush_size.setValue(50); return true; })()`);
+	// H. visibility where the surface folds away: from three views, the vertices the fold rule adds over the stock ray test
+	const h = await json(`(() => { let p = Preview.selected, out = []; let faces_of = {}; for (let [k, f] of Object.entries(body.faces)) for (let v of f.vertices) (faces_of[v] = faces_of[v] || []).push(k);
+		for (let [pos, tgt] of [[[90, 45, 10], [0, 38, -8]], [[-40, 65, -40], [0, 50, 20]], [[55, 85, -5], [0, 52, 18]]]) {
+			p.camera.position.set(...pos); p.controls.target.set(...tgt); p.controls.update(); p.render();
+			let vis = {}; for (let fold of [false, true]) { DEWWeightVisibility.WEIGHT_VISIBILITY.FOLD_VISIBLE = fold; DEWWeightVisibility.reset(); vis[fold] = new Set(Object.keys(body.vertices).filter(k => DEWWeightVisibility.isVertexVisible(body, k))); }
+			let cam = body.mesh.worldToLocal(p.camera.getWorldPosition(new THREE.Vector3()));
+			let added = [...vis[true]].filter(k => !vis[false].has(k)), lost = [...vis[false]].filter(k => !vis[true].has(k));
+			let added_facing = added.filter(k => faces_of[k].some(fk => new THREE.Vector3().fromArray(body.faces[fk].getNormal(true)).dot(cam.clone().sub(new THREE.Vector3().fromArray(body.vertices[k]))) > 0));
+			out.push({stock: vis[false].size, fold: vis[true].size, added: added.length, added_with_a_face_to_camera: added_facing.length, lost: lost.length});
+		}
+		DEWWeightVisibility.WEIGHT_VISIBILITY.FOLD_VISIBLE = true; DEWWeightVisibility.reset();
+		p.camera.position.set(90, 45, 10); p.controls.target.set(0, 38, -8); p.controls.update(); p.render();
+		return JSON.stringify(out); })()`);
+	console.log('   visible vertices per view, stock ray test / with the fold rule:', h.map(v => v.stock + ' / ' + v.fold).join(', '));
+	check('H. where the surface folds away, vertices with a face toward the camera now count as visible, from every view', h.every(v => v.added > 0 && v.added == v.added_with_a_face_to_camera), h);
+	check('   and none that the stock test saw is lost', h.every(v => v.lost == 0), h);
 	console.log('   strength 20, the centre vertex over five dabs:', e.got.join(' '), ' expected', e.expected.join(' '));
 	check('E. at strength 20 one dab moves a vertex at most a fifth of the way to the limit, the centre ones exactly', e.touched > 0 && Math.abs(e.first_step - 0.2) < 0.005, e);
 	check('   and five dabs build it up by the same rule, through the blue and green of the ramp', e.got.every((v, i) => Math.abs(v - e.expected[i]) < 0.01), e);

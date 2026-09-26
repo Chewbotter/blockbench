@@ -55,6 +55,24 @@ function updateScreenSpaceVertexPositions(mesh: Mesh) {
 	}
 	return screen_space_vertex_positions;
 }
+// Fork (2026-09-25): where the surface folds away from the camera (the back of the neck near the outline), the ray to a
+// vertex skims its own neighbourhood and touches a face one ring out a hair before the vertex, so stock called the
+// vertex hidden though it is on screen (about 100 of the cat's vertices per view). Such a vertex counts as visible when
+// the face that blocked the ray touches its own ring AND at least one of its own faces is turned toward the camera. The
+// back of a thin ear has every face turned away, so it stays hidden behind the front; anything further away still hides.
+let neighbourhood: null | {geometry: any, slot_vkeys: string[], faces_of: Record<string, string[]>} = null;
+function meshNeighbourhood(mesh: Mesh) {
+	let geometry = mesh.mesh.geometry;
+	if (neighbourhood && neighbourhood.geometry === geometry) return neighbourhood;
+	let slot_vkeys: string[] = [], faces_of: Record<string, string[]> = {};
+	for (let fkey in mesh.faces) {
+		let face = mesh.faces[fkey];
+		for (let vkey of face.vertices) (faces_of[vkey] = faces_of[vkey] || []).push(fkey);
+		if (face.vertices.length == 3 || face.vertices.length == 4) slot_vkeys.push(...face.vertices);	// the stock build order
+	}
+	neighbourhood = {geometry, slot_vkeys, faces_of};
+	return neighbourhood;
+}
 function isVertexVisible(mesh: Mesh, vkey: string): boolean {
 	if (BarItems.weight_brush_xray.value) return true;
 	if (vkey in vertex_visibility) return vertex_visibility[vkey];
@@ -65,9 +83,25 @@ function isVertexVisible(mesh: Mesh, vkey: string): boolean {
 	raycaster.ray.direction.normalize();
 	let intersection = raycaster.intersectObject(mesh.mesh, false)[0];
 	let visible = !(intersection && intersection.distance < z_distance-0.001);
+	if (!visible && intersection.face && WEIGHT_VISIBILITY.FOLD_VISIBLE) {
+		let {slot_vkeys, faces_of} = meshNeighbourhood(mesh);
+		let ring = new Set<string>();
+		for (let fkey of faces_of[vkey] || []) for (let v of mesh.faces[fkey].vertices) ring.add(v);
+		let hit_vkeys = [intersection.face.a, intersection.face.b, intersection.face.c].map(i => slot_vkeys[i]);
+		if (hit_vkeys.some(v => ring.has(v))) {
+			let camera_local = mesh.mesh.worldToLocal(raycaster.ray.origin.clone());
+			let vertex = new THREE.Vector3().fromArray(mesh.vertices[vkey]);
+			let to_camera = camera_local.sub(vertex);
+			visible = (faces_of[vkey] || []).some(fkey => new THREE.Vector3().fromArray(mesh.faces[fkey].getNormal(true)).dot(to_camera) > 0);
+		}
+	}
 	vertex_visibility[vkey] = visible;
 	return visible;
 }
+// for tests: the visibility rule, and its stock form (FOLD_VISIBLE false) as a control
+export const WEIGHT_VISIBILITY = {FOLD_VISIBLE: true};
+// @ts-expect-error
+window.DEWWeightVisibility = {WEIGHT_VISIBILITY, isVertexVisible: (mesh: Mesh, vkey: string) => isVertexVisible(mesh, vkey), reset: () => { vertex_visibility = {}; screen_space_vertex_positions = null; }};
 Blockbench.on('update_camera_position', () => {
 	screen_space_vertex_positions = null;
 })
