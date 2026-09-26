@@ -67,23 +67,38 @@ export function startPoseTest() {
 	if (!animation) { Blockbench.showQuickMessage('No animation to pose: make one in the Animate tab', 2000); return false; }
 	active = true;
 	saved_time = Timeline.time;
-	Animator.showDefaultPose(true);
-	Timeline.time = firstKeyTime(animation);
-	Animator.stackAnimations([animation], false);
-	applyPose();
+	posed_animation = animation;
+	posed_time = firstKeyTime(animation);
+	posePass();
 	hookRender();
 	Preview.all.forEach(preview => preview.render());
 	return true;
 }
-function applyPose() {
+let posed_animation = null, posed_time = 0;
+let posed_bones = new Map();	// bone scene object -> [quaternion, position] as the pose left it
+// The whole pose, from the rest: bones to rest, the animation applied at its first key, the meshes deformed. Measured
+// equal to the Animate tab at that frame (0.000 on all three of the cat's animations).
+function posePass() {
+	Animator.showDefaultPose(true);
+	Timeline.time = posed_time;
+	Animator.stackAnimations([posed_animation], false);
 	Animator.displayMeshDeformation();
 	posed_buffers.clear();
 	for (let mesh of Mesh.all) if (mesh.mesh) { posed_buffers.set(mesh, mesh.mesh.geometry.attributes.position); wearTextured(mesh); }
+	posed_bones.clear();
+	for (let bone of ArmatureBone.all) if (bone.scene_object) posed_bones.set(bone.scene_object, [bone.scene_object.quaternion.clone(), bone.scene_object.position.clone()]);
 	setOverlays(false);
 }
+function poseDisturbed() {
+	if (Mesh.all.some(mesh => mesh.mesh && posed_buffers.get(mesh) !== mesh.mesh.geometry.attributes.position)) return true;
+	for (let [object, [q, p]] of posed_bones) if (!object.quaternion.equals(q) || !object.position.equals(p)) return true;
+	return false;
+}
 // Anything that refreshes the view while the key is held (a deferred selection update, the rebuild at the end of a
-// stroke) rebuilds the meshes at rest and turns the dots back on; so before each frame a rebuilt mesh is posed again.
-// The bones keep their pose through a rebuild, only the mesh buffers are replaced.
+// stroke) puts the bones back to rest and rebuilds the meshes at rest. The first version only re-deformed the meshes,
+// against rest bones, which skinned them into garbage (99 units off on the cat's sitting_idle, user: "distorts the mesh
+// incorrectly"). So before each frame, if a mesh was rebuilt or any bone moved off its posed transform, the whole pose is
+// redone from the rest.
 let hooked_scene = null;
 function hookRender() {
 	if (!Canvas.scene || hooked_scene === Canvas.scene) return;
@@ -91,8 +106,7 @@ function hookRender() {
 	let inner = Canvas.scene.onBeforeRender;
 	Canvas.scene.onBeforeRender = function(...args) {
 		if (active) {
-			let rebuilt = Mesh.all.some(mesh => mesh.mesh && posed_buffers.get(mesh) !== mesh.mesh.geometry.attributes.position);
-			if (rebuilt) applyPose();
+			if (poseDisturbed()) posePass();
 			else for (let mesh of Mesh.all) {
 				if (mesh.mesh?.vertex_points?.visible) mesh.mesh.vertex_points.visible = false;
 				if (mesh.mesh && textured.has(mesh) && mesh.mesh.material !== textured.get(mesh)) wearTextured(mesh);
@@ -105,6 +119,7 @@ export function stopPoseTest() {
 	if (!active) return false;
 	active = false;
 	posed_buffers.clear();
+	posed_bones.clear();
 	textured.clear();
 	Timeline.time = saved_time;
 	Animator.showDefaultPose(true);

@@ -69,6 +69,28 @@ if (!fs.existsSync(FILE)) {
 	await key('keyUp'); await sleep(150);
 	check('E. O does nothing with another tool selected', !other.active && other.moved < 1e-6, other);
 	check('F. no weight changed at any point', await ev(`weights() == __w0`), null);
+
+	// G. the preview is the Animate tab's pose: every animation, the Animate tab at its first key against the preview held,
+	// before and after a refresh mid-hold (the first version skinned against rest bones after a refresh: 99 units off)
+	const g = await json(`(async () => {
+		let drawn = () => { let pos = body.mesh.geometry.attributes.position.array, out = {}, slot = 0; body.mesh.updateMatrixWorld(true);
+			for (let f of Object.values(body.faces)) { if (f.vertices.length != 3 && f.vertices.length != 4) continue; for (let v of f.vertices) { if (!out[v]) out[v] = body.mesh.localToWorld(new THREE.Vector3(pos[slot*3], pos[slot*3+1], pos[slot*3+2])).toArray(); slot++; } } return out; };
+		let worst = (a, b) => { let w = 0; for (let k in a) w = Math.max(w, Math.hypot(a[k][0]-b[k][0], a[k][1]-b[k][1], a[k][2]-b[k][2])); return +w.toFixed(4); };
+		let out = [];
+		for (let anim of Animation.all) {
+			let times = []; for (let id in anim.animators) for (let ch of ['rotation','position','scale']) anim.animators[id][ch]?.forEach(k => times.push(k.time)); let first = times.length ? Math.min(...times) : 0;
+			Modes.options.animate.select(); anim.select(); Animation.all.forEach(a => a.playing = (a == anim)); Timeline.setTime(first); Animator.preview(); await new Promise(r => setTimeout(r, 100));
+			let animate = drawn();
+			Modes.options.edit.select(); unselectAllElements(); ArmatureBone.all.find(b => b.name == 'spine_2').select(); updateSelection(); BarItems.weight_brush.select(); await new Promise(r => setTimeout(r, 100));
+			BarItems.dew_pose_test_animation.set(anim.uuid);
+			DEWPoseTest.startPoseTest(); Preview.selected.render(); let held = worst(drawn(), animate);
+			Canvas.updateAll(); updateSelection(); Preview.selected.render(); let refreshed = worst(drawn(), animate);
+			DEWPoseTest.stopPoseTest();
+			out.push({name: anim.name, held, refreshed});
+		}
+		return JSON.stringify(out); })()`);
+	console.log('   preview against the Animate tab, worst vertex (units):', g.map(r => r.name + ' ' + r.held + ' / after refresh ' + r.refreshed).join(', '));
+	check('G. for every animation the preview matches the Animate tab at its first key, and still does after a refresh mid-hold', g.length > 0 && g.every(r => r.held < 1e-3 && r.refreshed < 1e-3), g);
 }
 
 await sleep(200);
