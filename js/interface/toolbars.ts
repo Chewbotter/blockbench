@@ -661,6 +661,7 @@ export const BARS = {
 				'slider_weight_brush_limit',
 				'slider_weight_brush_strength',
 				'slider_weight_brush_falloff',
+				'weight_brush_mirror',
 				'weight_brush_blend_mode',
 				'weight_brush_xray',
 				'_',

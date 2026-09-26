@@ -7,6 +7,7 @@
 // past the ring changes. Strength is per pass: one steady drag at 20 leaves the vertices along it at about a fifth, all
 // blue, and a second drag about 36 percent (the user's expectation, 2026-09-25). And the new sliders show their values.
 // And where the surface folds away from the camera, vertices with a face toward it count as visible (they were skipped).
+// And the brush's own Mirror copies each painted vertex's weights, exactly and replacing, to its twin across an axis.
 import assert from 'assert';
 import fs from 'fs';
 const FILE = 'D:/Work/CatWhisperer/models_working/cat_common.bbmodel';
@@ -161,6 +162,43 @@ if (!fs.existsSync(FILE)) {
 	console.log('   visible vertices per view, stock ray test / with the fold rule:', h.map(v => v.stock + ' / ' + v.fold).join(', '));
 	check('H. where the surface folds away, vertices with a face toward the camera now count as visible, from every view', h.every(v => v.added > 0 && v.added == v.added_with_a_face_to_camera), h);
 	check('   and none that the stock test saw is lost', h.every(v => v.lost == 0), h);
+	// J. the brush's mirror on X: a stroke on one side copies each painted vertex's weights, exactly and replacing, to its
+	// twin across the mesh's X, left and right bones swapped; off, the twins are left alone; one undo takes both back
+	const mirrorStroke = async (axis) => {
+		await ev(`(() => { BarItems.weight_brush_mirror.set('${axis}'); BarItems.slider_weight_brush_size.setValue(80); BarItems.slider_weight_brush_strength.setValue(50); unselectAllElements(); ArmatureBone.all.find(b => b.name == 'upper_arm_l').select(); updateSelection(); BarItems.weight_brush.select();
+			// a marker the painted side does not have: every far-side vertex gets 0.5 on tail_8 (put back after the check)
+			window.__marker = ArmatureBone.all.find(b => b.name == 'tail_8'); window.__marker_saved = {...__marker.vertex_weights};
+			for (let k in body.vertices) if (body.vertices[k][0] < -1e-4) __marker.setVertexWeight(body, k, 0.5);
+			window.__m0 = JSON.parse(weights()); return true; })()`);
+		await mouse('mouseMoved', s.x - 60, s.y, { button: 'none' }); await sleep(60); await mouse('mousePressed', s.x - 60, s.y, { buttons: 1 });
+		for (let i = 1; i <= 20; i++) { await mouse('mouseMoved', s.x - 60 + i * 6, s.y - i * 2, { buttons: 1 }); await sleep(40); }
+		await mouse('mouseReleased', s.x + 60, s.y - 40); await sleep(300);
+		return json(`(() => {
+			let all = ArmatureBone.all, twin = b => { for (let [f, t] of [[/_l$/, '_r'], [/_r$/, '_l']]) if (f.test(b.name)) { let o = all.find(x => x.name == b.name.replace(f, t)); if (o) return o; } return b; };
+			// twins by position across X
+			let key = v => v.map(x => x.toFixed(3)).join(','); let at = {}; for (let k in body.vertices) at[key(body.vertices[k])] = k;
+			let pre = Object.fromEntries(__m0.map(([n, list]) => [n, Object.fromEntries(list)]));
+			let wkey = k => body.uuid.substring(0, 6) + ':' + k;
+			let painted = [], exact = 0, twin_changed = 0, had_other_before = 0;
+			for (let k in body.vertices) {
+				let changed = all.some(b => (b.getVertexWeight(body, k) || 0) != (pre[b.name][wkey(k)] || pre[b.name][k] || 0)); if (!changed) continue;
+				let v = body.vertices[k]; if (Math.abs(v[0]) < 1e-4) continue; let t = at[key([-v[0], v[1], v[2]])]; if (!t) continue;
+				// a vertex whose twin was painted directly is not a copy source; keep only one side: the side the stroke is on
+				if (v[0] < 0) continue;
+				painted.push(k);
+				if (all.every(b => Math.abs((twin(b).getVertexWeight(body, t) || 0) - (b.getVertexWeight(body, k) || 0)) < 1e-12)) exact++;
+				if (all.some(b => (b.getVertexWeight(body, t) || 0) != (pre[b.name][wkey(t)] || pre[b.name][t] || 0))) twin_changed++;
+				if (__marker.getVertexWeight(body, t) == __marker.getVertexWeight(body, k)) had_other_before++;	// the marker went: replaced
+			}
+			let r = {painted: painted.length, exact, twin_changed, replaced_old_weights: had_other_before};
+			Undo.undo(); r.restored = weights() == JSON.stringify(__m0); __marker.vertex_weights = __marker_saved; return JSON.stringify(r); })()`);
+	};
+	const mx = await mirrorStroke('x'), moff = await mirrorStroke('off');
+	await ev(`(() => { BarItems.weight_brush_mirror.set('off'); BarItems.slider_weight_brush_size.setValue(50); BarItems.slider_weight_brush_strength.setValue(100); unselectAllElements(); ArmatureBone.all.find(b => b.name == 'spine_2').select(); updateSelection(); BarItems.weight_brush.select(); return true; })()`);
+	console.log('   mirror X:', JSON.stringify(mx), ' mirror off:', JSON.stringify(moff));
+	check('J. with the mirror on X the twin of every painted vertex holds exactly its weights, left and right bones swapped', mx.painted > 0 && mx.exact == mx.painted, mx);
+	check('   the copy replaces what the twin had (a marker weight there is gone), and one undo takes both sides back', mx.replaced_old_weights == mx.painted && mx.restored, mx);
+	check('   with the mirror off the twins are left alone', moff.painted > 0 && moff.twin_changed == 0 && moff.restored, moff);
 	console.log('   strength 20, the centre vertex over five dabs:', e.got.join(' '), ' expected', e.expected.join(' '));
 	check('E. at strength 20 one dab moves a vertex at most a fifth of the way to the limit, the centre ones exactly', e.touched > 0 && Math.abs(e.first_step - 0.2) < 0.005, e);
 	check('   and five dabs build it up by the same rule, through the blue and green of the ramp', e.got.every((v, i) => Math.abs(v - e.expected[i]) < 0.01), e);

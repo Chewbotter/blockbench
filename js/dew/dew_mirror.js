@@ -118,7 +118,7 @@ function refresh() {
 }
 
 // .L <-> .R, _l <-> _r and so on for bone names: the mirrored half of a rigged mesh belongs to the other side's bones
-function otherSide(bone, bones) {
+export function otherSide(bone, bones) {
 	let swaps = [[/\.L$/, '.R'], [/\.R$/, '.L'], [/_L$/, '_R'], [/_R$/, '_L'], [/\.l$/, '.r'], [/\.r$/, '.l'], [/_l$/, '_r'], [/_r$/, '_l'], [/Left/, 'Right'], [/Right/, 'Left'], [/left/, 'right'], [/right/, 'left']];
 	for (let [from, to] of swaps) if (from.test(bone.name)) { let twin = bones.find(other => other.name == bone.name.replace(from, to)); if (twin) return twin; }
 	return bone;

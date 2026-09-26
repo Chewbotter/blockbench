@@ -4,6 +4,7 @@ import { Armature } from '../outliner/types/armature';
 import { ArmatureBone } from '../outliner/types/armature_bone';
 import { Preview, RaycastResult } from '../preview/preview';
 import { symmetrizeArmature } from './mirror_modeling';
+import { otherSide } from "../dew/dew_mirror";
 
 type CanvasClickData = RaycastResult
 
@@ -159,6 +160,9 @@ new Tool('weight_brush', {
 		
 		let last_click_pos = [0, 0];
 		let stroke_dirty = false;
+		let mirror_axis = ({x: 0, y: 1, z: 2})[mirror_select.value as string];
+		let mirror_map = mirror_axis === undefined ? null : buildMirrorMap(element as Mesh, mirror_axis);
+		let bone_twin = new Map(all_bones.map(bone => [bone, otherSide(bone, all_bones)]));
 		let first_dab = true;
 		const draw = (event: MouseEvent, data?: CanvasClickData|false) => {
 			let radius = size_slider.get();
@@ -241,6 +245,19 @@ new Tool('weight_brush', {
 				target_average_x += mesh.vertices[vkey][0];
 				affected_vkeys.add(vkey);
 			}
+			if (mirror_map) {
+				let painted = [...affected_vkeys];
+				for (let vkey of painted) {
+					let twin = mirror_map.get(vkey);
+					if (!twin || affected_vkeys.has(twin)) continue;
+					for (let bone of all_bones) bone.setVertexWeight(mesh, twin);	// replace, not add
+					for (let bone of all_bones) {
+						let weight = bone.getVertexWeight(mesh, vkey);
+						if (weight) bone_twin.get(bone).setVertexWeight(mesh, twin, weight);
+					}
+					affected_vkeys.add(twin);
+				}
+			}
 			if (BarItems.mirror_modeling.value) {
 				let mesh2 = symmetrizeArmature(armature, mesh, affected_vkeys);
 				if (mesh2) Mesh.preview_controller.updateGeometry(mesh2);
@@ -322,6 +339,41 @@ let limit_slider = new NumSlider('slider_weight_brush_limit', {
 // Fork (2026-09-25): how far each dab goes toward the limit. Stock is 100: a dab at the brush centre sets the full
 // limit in one step (black straight to red), where a lower strength builds the weight up over several passes and the
 // colours step through blue and green on the way. Scales the other bones' reduction too, since that uses the influence.
+// Fork (2026-09-25): the brush's own mirror. After each dab every painted vertex's weights are copied, exactly and
+// replacing whatever was there, to the vertex at its mirrored position across the chosen axis of the mesh (through its
+// pivot, as Live Mirror), with left and right bones swapped by name; a vertex with no twin within the tolerance, or on
+// the plane, is left alone, and a vertex painted by this dab is never overwritten by its twin's copy.
+export const WEIGHT_MIRROR = {
+	TOLERANCE: 0.01,	// units: how far a vertex may sit from the exact mirrored position and still be the twin
+};
+function buildMirrorMap(mesh: Mesh, axis: number): Map<string, string> {
+	let cell = WEIGHT_MIRROR.TOLERANCE * 2, grid = new Map<string, string[]>();
+	let key = (p: number[]) => p.map(v => Math.floor(v / cell)).join(',');
+	for (let vkey in mesh.vertices) { let k = key(mesh.vertices[vkey]); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(vkey); }
+	let map = new Map<string, string>();
+	for (let vkey in mesh.vertices) {
+		let p = mesh.vertices[vkey].slice(); p[axis] = -p[axis];
+		let base = p.map(v => Math.floor(v / cell)), best = null, best_d = WEIGHT_MIRROR.TOLERANCE;
+		for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+			for (let other of grid.get([base[0] + dx, base[1] + dy, base[2] + dz].join(',')) || []) {
+				let q = mesh.vertices[other], d = Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]);
+				if (d <= best_d) { best_d = d; best = other; }
+			}
+		}
+		if (best && best != vkey) map.set(vkey, best);
+	}
+	return map;
+}
+let mirror_select = new BarSelect('weight_brush_mirror', {
+	category: 'edit',
+	condition: () => Toolbox?.selected?.id == 'weight_brush',
+	options: {
+		off: 'Mirror Off',
+		x: 'Mirror X',
+		y: 'Mirror Y',
+		z: 'Mirror Z',
+	}
+})
 export const WEIGHT_BRUSH = {
 	HALO_PEAK: 0.3,		// influence of the Falloff halo at the brush centre, easing to 0 at the halo's edge
 	// Mouse travel, in brush radii, that makes one pass. Not 2 (the diameter): the influence is 1 only over the middle

@@ -1951,6 +1951,8 @@
 	"action.slider_weight_brush_limit.desc": "Set an upper limit for how much weight the weight brush can assign to a vertex",
 	"action.slider_weight_brush_strength": "Weight Brush Strength",
 	"action.slider_weight_brush_strength.desc": "How far each dab moves a vertex toward the limit. Lower builds the weight up over several passes",
+	"action.weight_brush_mirror": "Weight Brush Mirror",
+	"action.weight_brush_mirror.desc": "Copy the painted weights, exactly, to the vertex opposite on this axis of the mesh, with left and right bones swapped",
 	"action.slider_weight_brush_falloff": "Weight Brush Falloff",
 	"action.slider_weight_brush_falloff.desc": "How far past its ring the brush reaches with a light touch, in percent of its radius. Gives low-poly meshes a gradient",
 	"action.weight_brush_blend_mode": "Weight Brush Blend Mode",
