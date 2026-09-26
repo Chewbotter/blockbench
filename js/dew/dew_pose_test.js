@@ -10,6 +10,23 @@ export const POSE_TEST = {
 let active = false;
 let saved_time = 0;
 let posed_buffers = new Map();	// mesh -> the position buffer the pose was written into
+let textured = new Map();		// mesh -> the textured material it wears while posed
+
+// The weight brush gives every mesh the weight material whatever the view mode, and an unpainted mesh is black, so the
+// posed shape could not be read (user). While posed each mesh wears what Textured view gives it: the stock material code
+// (updateFaces) is asked with a tool other than the brush and Textured view, both put back within the same call.
+function wearTextured(mesh) {
+	let tool = Toolbox.selected, tool_id = tool.id, view_mode = Project.view_mode;
+	try {
+		tool.id = 'dew_pose_test_view';
+		Project.view_mode = 'textured';
+		Mesh.preview_controller.updateFaces(mesh);
+	} finally {
+		tool.id = tool_id;
+		Project.view_mode = view_mode;
+	}
+	textured.set(mesh, mesh.mesh.material);
+}
 
 function animationChoices() {
 	let options = {};
@@ -61,7 +78,7 @@ export function startPoseTest() {
 function applyPose() {
 	Animator.displayMeshDeformation();
 	posed_buffers.clear();
-	for (let mesh of Mesh.all) if (mesh.mesh) posed_buffers.set(mesh, mesh.mesh.geometry.attributes.position);
+	for (let mesh of Mesh.all) if (mesh.mesh) { posed_buffers.set(mesh, mesh.mesh.geometry.attributes.position); wearTextured(mesh); }
 	setOverlays(false);
 }
 // Anything that refreshes the view while the key is held (a deferred selection update, the rebuild at the end of a
@@ -76,7 +93,10 @@ function hookRender() {
 		if (active) {
 			let rebuilt = Mesh.all.some(mesh => mesh.mesh && posed_buffers.get(mesh) !== mesh.mesh.geometry.attributes.position);
 			if (rebuilt) applyPose();
-			else for (let mesh of Mesh.all) if (mesh.mesh?.vertex_points?.visible) mesh.mesh.vertex_points.visible = false;
+			else for (let mesh of Mesh.all) {
+				if (mesh.mesh?.vertex_points?.visible) mesh.mesh.vertex_points.visible = false;
+				if (mesh.mesh && textured.has(mesh) && mesh.mesh.material !== textured.get(mesh)) wearTextured(mesh);
+			}
 		}
 		if (inner) return inner.apply(this, args);
 	};
@@ -85,9 +105,10 @@ export function stopPoseTest() {
 	if (!active) return false;
 	active = false;
 	posed_buffers.clear();
+	textured.clear();
 	Timeline.time = saved_time;
 	Animator.showDefaultPose(true);
-	Canvas.updateView({elements: Mesh.all, element_aspects: {geometry: true}});
+	Canvas.updateView({elements: Mesh.all, element_aspects: {geometry: true, faces: true}});	// faces: the weight material back
 	setOverlays(true);
 	Preview.all.forEach(preview => preview.render());
 	return true;

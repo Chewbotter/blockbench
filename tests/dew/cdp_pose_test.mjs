@@ -1,6 +1,6 @@
 // Pose Test on the user's cat (skipped without the file): the weight brush toolbar lists the project's animations and
-// shows one at once; holding the real O key poses the rig at the chosen animation's first keyframe with the weight
-// colours kept and the vertex dots hidden; releasing it puts back the exact rest geometry; a press in the viewport ends
+// shows one at once; holding the real O key poses the rig at the chosen animation's first keyframe, textured (the weight
+// material is black where unpainted, the user could not read the shape), the vertex dots hidden; releasing it puts back the exact rest geometry; a press in the viewport ends
 // a preview; O does nothing with another tool; no weight changes at any point.
 import assert from 'assert';
 import fs from 'fs';
@@ -30,7 +30,7 @@ if (!fs.existsSync(FILE)) {
 		Modes.options.edit.select(); window.body = Mesh.all.find(m => m.name == 'body');
 		unselectAllElements(); ArmatureBone.all.find(b => b.name == 'spine_2').select(); updateSelection(); BarItems.weight_brush.select();
 		let p = Preview.selected; p.setProjectionMode(false); p.camera.position.set(90, 45, 10); p.controls.target.set(0, 38, -8); p.controls.update(); p.render();
-		window.snap = () => ({pos: Array.from(body.mesh.geometry.attributes.position.array), col: Array.from(body.mesh.geometry.attributes.color.array), dots: body.mesh.vertex_points.visible});
+		window.snap = () => ({pos: Array.from(body.mesh.geometry.attributes.position.array), col: Array.from(body.mesh.geometry.attributes.color.array), dots: body.mesh.vertex_points.visible, weight_material: [].concat(body.mesh.material).some(m => m === Canvas.vertexWeightHelperMaterial)});
 		window.weights = () => JSON.stringify(ArmatureBone.all.map(b => [b.name, Object.entries(b.vertex_weights || {}).sort()]));
 		window.maxDiff = (x, y) => { let d = 0; for (let i = 0; i < x.length; i++) d = Math.max(d, Math.abs(x[i] - y[i])); return x.length == y.length ? d : Infinity; };
 		Canvas.updateView({elements: Mesh.all, element_aspects: {geometry: true}});	// picking the brush swaps the material but not the colour buffer
@@ -45,16 +45,16 @@ if (!fs.existsSync(FILE)) {
 	check('   an animation that moves the body exists to test with', !!chosen, chosen);
 
 	await key('keyDown'); await sleep(200);
-	const held = await json(`(() => { let s = snap(); return JSON.stringify({active: DEWPoseTest.isPoseTestActive(), moved: +maxDiff(__rest.pos, s.pos).toFixed(3), colours_same: maxDiff(__rest.col, s.col) < 1e-6, dots: s.dots}); })()`);
-	check('B. holding O poses the body (vertices moved) with the weight colours kept', held.active && held.moved > 0.5 && held.colours_same, held);
+	const held = await json(`(() => { let s = snap(); return JSON.stringify({active: DEWPoseTest.isPoseTestActive(), moved: +maxDiff(__rest.pos, s.pos).toFixed(3), weight_material: s.weight_material, weight_material_at_rest: __rest.weight_material, dots: s.dots}); })()`);
+	check('B. holding O poses the body (vertices moved), textured instead of the weight material', held.active && held.moved > 0.5 && held.weight_material_at_rest && !held.weight_material, held);
 	check('   and the vertex dots are hidden while posed', held.dots === false, held);
 	// the case that fooled the first version: something refreshes the view while the key is held
-	const refreshed = await json(`(() => { let posed = snap().pos; Canvas.updateView({elements: Mesh.all, element_aspects: {geometry: true}}); updateSelection(); Preview.selected.render(); let s = snap(); return JSON.stringify({still_posed: maxDiff(posed, s.pos), dots: s.dots}); })()`);
-	check('   a rebuild and a selection update while held are posed again before the next frame, dots still hidden', refreshed.still_posed < 1e-4 && refreshed.dots === false, refreshed);
+	const refreshed = await json(`(() => { let posed = snap().pos; Canvas.updateView({elements: Mesh.all, element_aspects: {geometry: true}}); updateSelection(); Preview.selected.render(); let s = snap(); return JSON.stringify({still_posed: maxDiff(posed, s.pos), dots: s.dots, weight_material: s.weight_material}); })()`);
+	check('   a rebuild and a selection update while held are posed and textured again before the next frame, dots still hidden', refreshed.still_posed < 1e-4 && refreshed.dots === false && !refreshed.weight_material, refreshed);
 	await key('keyDown'); await sleep(100);	// key repeat while held
 	await key('keyUp'); await sleep(250);
-	const released = await json(`(() => { let s = snap(); return JSON.stringify({active: DEWPoseTest.isPoseTestActive(), back: maxDiff(__rest.pos, s.pos), colours: maxDiff(__rest.col, s.col), dots: s.dots}); })()`);
-	check('C. releasing O puts back the exact rest geometry and the dots', !released.active && released.back < 1e-6 && released.colours < 1e-6 && released.dots === true, released);
+	const released = await json(`(() => { let s = snap(); return JSON.stringify({active: DEWPoseTest.isPoseTestActive(), back: maxDiff(__rest.pos, s.pos), colours: maxDiff(__rest.col, s.col), dots: s.dots, weight_material: s.weight_material}); })()`);
+	check('C. releasing O puts back the exact rest geometry, the weight material and colours, and the dots', !released.active && released.back < 1e-6 && released.colours < 1e-6 && released.dots === true && released.weight_material, released);
 
 	await key('keyDown'); await sleep(150);
 	await send('Input.dispatchMouseEvent', {type: 'mousePressed', x: 900, y: 600, button: 'left', buttons: 1, clickCount: 1}); await sleep(100);
