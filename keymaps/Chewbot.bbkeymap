@@ -1,0 +1,15 @@
+{
+	"keys": {
+		"preview_rotate": {"key": 2},
+		"preview_drag": {"key": 2, "shift": true},
+		"preview_zoom": {"key": 2, "ctrl": true},
+		"uv_editor_scroll_zoom": {"key": 1001},
+		"preview_area_select": {"key": 1, "variations": {"deselect": "alt"}},
+		"selection_mode.object": {"key": 49},
+		"selection_mode.face": {"key": 50},
+		"selection_mode.edge": {"key": 51},
+		"selection_mode.vertex": {"key": 52},
+		"paint_secondary_color": {"key": 3},
+		"dew_cage": {"key": 88}
+	}
+}

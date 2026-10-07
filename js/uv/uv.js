@@ -2784,6 +2784,8 @@ Interface.definePanels(function() {
 		toolbars: [
 			new Toolbar('uv_editor', {
 				children: [
+					// Display All Elements leads the toolbar (user, 2026-10-07); stock hung it alone in the slider row above
+					'edit_mode_uv_overlay',
 					'move_texture_with_uv',
 					'uv_apply_all',
 					'uv_maximize',
@@ -5377,7 +5379,6 @@ Interface.definePanels(function() {
 	Toolbars.uv_editor.toPlace()
 
 	BarItems.paint_mode_uv_overlay.toElement('#toggle_uv_overlay_anchor');
-	BarItems.edit_mode_uv_overlay.toElement('#toggle_edit_uv_overlay_anchor');
 
 	let {slider_bar} = UVEditor.vue.$refs;
 
@@ -5454,7 +5455,6 @@ Interface.definePanels(function() {
 		onAfter
 
 	}).toElement(slider_bar);
-	BarItems.edit_mode_uv_overlay.toElement(slider_bar);
 })
 
 
