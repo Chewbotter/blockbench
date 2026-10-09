@@ -1,5 +1,6 @@
 import { Dialog } from "../../interface/dialog";
 import { THREE } from "../../lib/libs";
+import { polygonPieces } from "./polygon_pieces";
 
 BARS.defineActions(() => {
 
@@ -104,19 +105,12 @@ BARS.defineActions(() => {
 								uv[key] = [0, 0];
 							}
 						})
-						// A face with more than four corners (an n-gon, which Blender exports as one line) is fanned from its
-						// first corner into quads and a last triangle. Stock kept the first four corners and dropped the rest,
-						// which left a hole beside every n-gon (fork, 2026-09-22).
-						let pieces: string[][] = [];
-						let n = f.vertices.length;
-						if (n <= 4) {
-							pieces.push(f.vertices);
-						} else {
-							for (let start = 1; start < n - 1; start += 2) {
-								let end = Math.min(start + 3, n);
-								pieces.push([f.vertices[0], ...f.vertices.slice(start, end)]);
-							}
-						}
+						// A face with more than four corners (an n-gon, which Blender exports as one line) or a concave quad
+						// is split into triangles and convex quads covering exactly the polygon (polygon_pieces.ts). Stock
+						// kept the first four corners and dropped the rest, which left a hole beside every n-gon (fork,
+						// 2026-09-22); a fan from the first corner then overlapped itself on concave ones (2026-10-09).
+						let positions = f.vertices.map(key => mesh.vertices[key]);
+						let pieces: string[][] = polygonPieces(positions).map(piece => piece.map(i => f.vertices[i]));
 						for (let piece of pieces) {
 							let piece_uv = {};
 							for (let key of piece) piece_uv[key] = uv[key];

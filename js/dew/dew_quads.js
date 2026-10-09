@@ -3,6 +3,7 @@
 // carry the same texture with continuous uvs and make a convex four-sided face become one quad, which is what a
 // native model would hold. Folded pairs, uv seams and unpaired triangles stay as they are.
 import { THREE } from "../lib/libs";
+import { polygonPieces, polygonPlane, joinTrianglesToQuads } from "../modeling/mesh/polygon_pieces";
 
 export const QUADS = {
 	MAX_ANGLE: 10,			// degrees between the two triangles' normals for them to count as one plane
@@ -449,9 +450,19 @@ export function quadsFromOBJ(meshes, obj_text) {
 			}
 			let flat_box = !uv_ok && same ? flatUVBox(tris) : null;
 			if (!same || (!uv_ok && !flat_box)) { report.seam_or_texture++; continue; }
-			// pieces: the polygon itself for four corners, else a fan from the first corner
-			let pieces = corners.length == 4 ? [corners] : [];
-			for (let start = 1; corners.length > 4 && start < corners.length - 1; start += 2) pieces.push([corners[0], ...corners.slice(start, Math.min(start + 3, corners.length))]);
+			// pieces: a planar polygon is split as the OBJ importer splits it (polygon_pieces.ts: itself, a fan, or
+			// triangles and convex quads for a concave outline); a bent one keeps the glTF's own triangles, joined into
+			// convex quads only where a pair forms one, so the surface it was exported with is not redrawn
+			let polygon_positions = polygon.map(i => positions[i]);
+			let plane = polygonPlane(polygon_positions);
+			let index_pieces;
+			if (plane.planar) {
+				index_pieces = polygonPieces(polygon_positions);
+			} else {
+				let index_of = new Map(corners.map((k, i) => [k, i]));
+				index_pieces = joinTrianglesToQuads(plane.points, tris.map(t => t.vertices.map(v => index_of.get(v))), plane.extent);
+			}
+			let pieces = index_pieces.map(piece => piece.map(i => corners[i]));
 			let first_normal = worldNormal(mesh, first);
 			let faces = [], ok = true;
 			for (let order of pieces) {
@@ -495,4 +506,4 @@ BARS.defineActions(function() {
 	});
 });
 
-Object.assign(window, {DEWQuads: {QUADS, QUADS_REF, mergeTrianglesToQuads, flipSharedEdge, toggleEdgeBoundary, quadsFromOBJ}});
+Object.assign(window, {DEWQuads: {QUADS, QUADS_REF, mergeTrianglesToQuads, flipSharedEdge, toggleEdgeBoundary, quadsFromOBJ, polygonPieces, polygonPlane, joinTrianglesToQuads}});
